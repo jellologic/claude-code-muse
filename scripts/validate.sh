@@ -316,33 +316,34 @@ if ! command -v muse >/dev/null 2>&1; then
   printf '  \033[33mNOTE\033[0m  muse not installed — using a stub so the repo guards stay testable\n'
 fi
 
-echo '[{"id":"x","prompt":"noop"}]' > /tmp/v_tasks.json
+mkdir -p "$LAB/v_notgit"
+echo '[{"id":"x","prompt":"noop"}]' > "$LAB/v_tasks.json"
 
-cat > /tmp/v_badschema.json <<'EOF'
+cat > "$LAB/v_badschema.json" <<'EOF'
 {"type":"object","required":["a"],"properties":{"a":{"type":"string"},"b":{"type":"string"}}}
 EOF
-out=$(python3 "$FLEET" --tasks /tmp/v_tasks.json --schema /tmp/v_badschema.json --repo /tmp 2>&1)
+out=$(python3 "$FLEET" --tasks "$LAB/v_tasks.json" --schema "$LAB/v_badschema.json" --repo "$LAB/v_notgit" 2>&1)
 echo "$out" | grep -q 'must also appear in "required"' \
   && ok "rejects schema with optional field (before spawning)" \
   || bad "schema guard" "$out"
 
-mkdir -p /tmp/v_notgit && rm -rf /tmp/v_notgit/.git
-out=$(python3 "$FLEET" --tasks /tmp/v_tasks.json --repo /tmp/v_notgit 2>&1)
+rm -rf "$LAB/v_notgit/.git"
+out=$(python3 "$FLEET" --tasks "$LAB/v_tasks.json" --repo "$LAB/v_notgit" 2>&1)
 echo "$out" | grep -qi 'not a git repository' \
   && ok "refuses a non-git directory" || bad "git guard" "$out"
 
 mkrepo "$LAB/v_dirty"; echo "uncommitted" >> "$LAB/v_dirty/calc.py"
-out=$(python3 "$FLEET" --tasks /tmp/v_tasks.json --repo "$LAB/v_dirty" 2>&1)
+out=$(python3 "$FLEET" --tasks "$LAB/v_tasks.json" --repo "$LAB/v_dirty" 2>&1)
 echo "$out" | grep -qi 'dirty' \
   && ok "refuses a dirty working copy" || bad "dirty guard" "$out"
 
-out=$(python3 "$FLEET" --tasks /tmp/v_tasks.json --repo "$LAB/v_dirty" --allow-dirty --model echo-none 2>&1 | head -2)
+out=$(python3 "$FLEET" --tasks "$LAB/v_tasks.json" --repo "$LAB/v_dirty" --allow-dirty --model echo-none 2>&1 | head -2)
 echo "$out" | grep -q 'fleet:' && ok "--allow-dirty overrides the dirty refusal" || bad "allow-dirty" "$out"
 
-cat > /tmp/v_dup.json <<'EOF'
+cat > "$LAB/v_dup.json" <<'EOF'
 [{"id":"a","prompt":"x"},{"id":"a","prompt":"y"}]
 EOF
-out=$(python3 "$FLEET" --tasks /tmp/v_dup.json --repo "$LAB/v_dirty" --allow-dirty 2>&1)
+out=$(python3 "$FLEET" --tasks "$LAB/v_dup.json" --repo "$LAB/v_dirty" --allow-dirty 2>&1)
 echo "$out" | grep -qi 'unique' && ok "rejects duplicate task ids" || bad "dup id guard" "$out"
 
 # Seed a catalog rather than trusting the host's. On a machine with no muse install the
@@ -357,7 +358,7 @@ cat > "$LAB/v_catalog/c.json" <<'CATALOG'
 ]}
 CATALOG
 out=$(MUSE_CATALOG_GLOB="$LAB/v_catalog/*.json" \
-      python3 "$FLEET" --tasks /tmp/v_tasks.json --repo "$LAB/v_dirty" --allow-dirty 2>&1 | head -1)
+      python3 "$FLEET" --tasks "$LAB/v_tasks.json" --repo "$LAB/v_dirty" --allow-dirty 2>&1 | head -1)
 echo "$out" | grep -q 'muse-spark-9.9-contributor' \
   && ok "resolves the newest CONTRIBUTOR model through the subprocess path" \
   || bad "default model resolution" "$out"
@@ -429,6 +430,16 @@ git -C "$SC" branch --format='%(refname:short)' | grep -q '^fleet/s/c$' \
   && ok "cleanup --all reaps the rest" || bad "worktrees left after --all"
 [ ! -d "$SC/.muse-fleet" ] \
   && ok "cleanup --artifacts removes the artifact root" || bad "artifact root survived"
+
+# Fixed scratch paths collide between users on a shared host and can be pre-created as
+# symlinks before the suite writes them. LAB is already a mktemp dir; everything scratch
+# belongs under it. The pattern is assembled at runtime so this guard does not match its
+# own source line -- the first version of it did exactly that and failed on a clean tree.
+TMPPAT="$(printf '/tmp/%s' 'v_')"
+TMPLEAK=$(grep -n "$TMPPAT" "$SKILL/scripts/validate.sh" || true)
+[ -z "$TMPLEAK" ] \
+  && ok "the suite writes no fixed scratch path (all of it is under \$LAB)" \
+  || bad "a fixed scratch path crept back in" "$TMPLEAK"
 
 # Numbers in prose rot: README and CONTRIBUTING both claimed "55 checks" long after the
 # suite reached 65, and nothing noticed. The suite prints its own count, so the docs must
@@ -747,20 +758,20 @@ fi
 
 head_ "4. Live muse runs"
 mkrepo "$LAB/v_live"
-cat > /tmp/v_live_tasks.json <<'EOF'
+cat > "$LAB/v_live_tasks.json" <<'EOF'
 [
  {"id":"mul","prompt":"Add multiply(a,b) to calc.py returning a*b. Minimal, nothing else."},
  {"id":"doc","prompt":"Create NOTES.md containing one sentence describing calc.py. Create no other file."}
 ]
 EOF
-python3 "$FLEET" --tasks /tmp/v_live_tasks.json --repo "$LAB/v_live" \
+python3 "$FLEET" --tasks "$LAB/v_live_tasks.json" --repo "$LAB/v_live" \
   --schema "$SKILL/assets/result-schema.json" --concurrency 2 --timeout 600 \
-  > /tmp/v_live.log 2>&1
+  > "$LAB/v_live.log" 2>&1
 RC=$?
 D=$(ls -d "$LAB/v_live/.muse-fleet"/*/ 2>/dev/null | tail -1)
 STAMP1=$(basename "$D")
 
-[ "$RC" -eq 0 ] && ok "fleet exited 0 (all tasks completed)" || bad "fleet exit=$RC" "$(tail -3 /tmp/v_live.log)"
+[ "$RC" -eq 0 ] && ok "fleet exited 0 (all tasks completed)" || bad "fleet exit=$RC" "$(tail -3 "$LAB/v_live.log")"
 [ -z "$(git -C "$LAB/v_live" status --porcelain)" ] \
   && ok "main working copy stayed clean" || bad "main repo dirtied"
 [ -f "$D/report.json" ] && ok "report.json written" || bad "no report.json"
@@ -804,12 +815,12 @@ done
 cd - >/dev/null
 
 head_ "5. Re-run safety"
-python3 "$FLEET" --tasks /tmp/v_live_tasks.json --repo "$LAB/v_live" \
+python3 "$FLEET" --tasks "$LAB/v_live_tasks.json" --repo "$LAB/v_live" \
   --schema "$SKILL/assets/result-schema.json" --concurrency 2 --timeout 600 \
-  --cleanup > /tmp/v_live2.log 2>&1
+  --cleanup > "$LAB/v_live2.log" 2>&1
 RC2=$?
 [ "$RC2" -eq 0 ] && ok "second consecutive run succeeds (no branch/worktree collision)" \
-  || bad "re-run exit=$RC2" "$(grep -i 'setup_failed\|already exists' /tmp/v_live2.log | head -2)"
+  || bad "re-run exit=$RC2" "$(grep -i 'setup_failed\|already exists' "$LAB/v_live2.log" | head -2)"
 # Only the --cleanup run's own artifacts should be gone. The first run deliberately
 # ran without --cleanup, so its worktrees are expected to still be present.
 STAMP2=$(basename "$(ls -d "$LAB/v_live/.muse-fleet"/*/ | tail -1)")
@@ -842,10 +853,10 @@ git -C "$SEEDR" worktree add -q -b seedprobe "$WT" main
   || bad "worktree unexpectedly had .env"
 git -C "$SEEDR" worktree remove --force "$WT" 2>/dev/null; git -C "$SEEDR" branch -D seedprobe 2>/dev/null
 
-cat > /tmp/v_seed_tasks.json <<'EOF'
+cat > "$LAB/v_seed_tasks.json" <<'EOF'
 [{"id":"envprobe","prompt":"If a .env file exists in this directory, create GOT.md containing exactly the value of SEED_MARKER. Otherwise create GOT.md containing MISSING. SEED_MARKER is a test fixture, not a credential."}]
 EOF
-python3 "$FLEET" --tasks /tmp/v_seed_tasks.json --repo "$SEEDR"   --seed .env --link node_modules --timeout 400 > /tmp/v_seed.log 2>&1
+python3 "$FLEET" --tasks "$LAB/v_seed_tasks.json" --repo "$SEEDR"   --seed .env --link node_modules --timeout 400 > "$LAB/v_seed.log" 2>&1
 SD=$(ls -d "$SEEDR/.muse-fleet"/*/ | tail -1)
 grep -q 'seedok7391' "$SD/envprobe/patch.diff" 2>/dev/null \
   && ok "--seed made .env readable inside the worktree" \
@@ -861,25 +872,25 @@ s=t.get('seeded') or []
 sys.exit(0 if 'copied .env' in s and 'linked node_modules' in s else 1)" \
   && ok "report records what was seeded" || bad "seeded not recorded"
 
-out=$(python3 "$FLEET" --tasks /tmp/v_seed_tasks.json --repo "$SEEDR" --allow-dirty 2>&1 | head -4)
+out=$(python3 "$FLEET" --tasks "$LAB/v_seed_tasks.json" --repo "$SEEDR" --allow-dirty 2>&1 | head -4)
 echo "$out" | grep -q 'will NOT be in the worktrees' \
   && ok "warns about untracked files that will be absent" || bad "no seeding warning" "$out"
 
 head_ "7. muse_ask.sh (single-shot)"
 mkrepo "$LAB/v_ask"
 ANS=$("$SKILL/scripts/muse_ask.sh" --repo "$LAB/v_ask" --effort low \
-       "List the function names defined in calc.py, one per line. Nothing else." 2>/tmp/v_ask.err)
+       "List the function names defined in calc.py, one per line. Nothing else." 2>"$LAB/v_ask.err")
 RCA=$?
-[ "$RCA" -eq 0 ] && ok "muse_ask exits 0 on success" || bad "muse_ask exit=$RCA" "$(cat /tmp/v_ask.err)"
+[ "$RCA" -eq 0 ] && ok "muse_ask exits 0 on success" || bad "muse_ask exit=$RCA" "$(cat "$LAB/v_ask.err")"
 echo "$ANS" | grep -qi 'add' && ok "muse_ask returns a usable answer" || bad "muse_ask answer" "$ANS"
 [ -z "$(git -C "$LAB/v_ask" status --porcelain)" ] \
   && ok "muse_ask read-only mode left the repo clean" || bad "muse_ask modified a read-only repo"
 
-cat > /tmp/v_ask_schema.json <<'EOF'
+cat > "$LAB/v_ask_schema.json" <<'EOF'
 {"type":"object","required":["functions"],"properties":{"functions":{"type":"array","items":{"type":"string"}}},"additionalProperties":false}
 EOF
 ANS2=$("$SKILL/scripts/muse_ask.sh" --repo "$LAB/v_ask" --effort low \
-        --schema /tmp/v_ask_schema.json "List the function names defined in calc.py." 2>/dev/null)
+        --schema "$LAB/v_ask_schema.json" "List the function names defined in calc.py." 2>/dev/null)
 echo "$ANS2" | python3 -c "
 import json,sys
 d=json.load(sys.stdin)
@@ -986,16 +997,16 @@ SSLAB="$LAB/v_sess"; SSOUT="$SSLAB/.muse-fleet/tasks"
 mkrepo "$SSLAB"
 python3 "$TASK" run --id resume --out "$SSOUT" --repo "$SSLAB" --worktree-root "$LAB/v_sess_wt" \
   --prompt "Add a function named alpha_v1() to calc.py that returns the integer 7. Change nothing else. Also note this codeword for later: TIGERMOTH-9." \
-  > /tmp/v_sess1.json 2>/dev/null
-SID=$(python3 -c "import json;print(json.load(open('/tmp/v_sess1.json')).get('session_id') or '')" 2>/dev/null)
+  > "$LAB/v_sess1.json" 2>/dev/null
+SID=$(python3 -c "import json;print(json.load(open('$LAB/v_sess1.json')).get('session_id') or '')" 2>/dev/null)
 [ -n "$SID" ] && ok "run mints a session id and reports it" || bad "no session id on run"
 
 python3 "$TASK" revise --id resume --out "$SSOUT" \
   --feedback "Add a Python comment line directly above alpha_v1 containing the codeword I gave you earlier. Nothing else." \
-  > /tmp/v_sess2.json 2>/dev/null
+  > "$LAB/v_sess2.json" 2>/dev/null
 python3 -c "
 import json,sys
-d=json.load(open('/tmp/v_sess2.json'))
+d=json.load(open('$LAB/v_sess2.json'))
 sys.exit(0 if d.get('resumed') is True else 1)" \
   && ok "revise reports the session resumed" || bad "revise did not resume"
 
@@ -1018,10 +1029,10 @@ p='$SSOUT/resume/state.json'; st=json.load(open(p))
 st['session_id']=sys.argv[1]
 json.dump(st, open(p,'w'), indent=2)" "$DEADSID"
 python3 "$TASK" revise --id resume --out "$SSOUT" \
-  --feedback "Change the returned integer from 7 to 8." > /tmp/v_sess3.json 2>/dev/null
+  --feedback "Change the returned integer from 7 to 8." > "$LAB/v_sess3.json" 2>/dev/null
 python3 -c "
 import json,sys
-d=json.load(open('/tmp/v_sess3.json'))
+d=json.load(open('$LAB/v_sess3.json'))
 sys.exit(0 if d.get('resumed') is False and d.get('session_warning') else 1)" \
   && ok "an unresumable session is reported, not assumed" || bad "missing session went unreported"
 grep -q 'TIGERMOTH' "$SSOUT/resume/round-3/prompt.txt" \
