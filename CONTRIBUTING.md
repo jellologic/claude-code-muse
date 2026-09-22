@@ -105,6 +105,20 @@ git checkout scripts/<the file>           # restore
 bash scripts/validate.sh --offline        # green again
 ```
 
+### Testing model resolution
+
+`MUSE_CATALOG_GLOB` overrides where `muse_core` looks for muse's model catalog. Point it at
+a fixture and resolution becomes deterministic on any machine, including one with no muse
+install:
+
+```bash
+MUSE_CATALOG_GLOB="/path/to/fixture/*.json" python3 scripts/muse_fleet.py --tasks t.json --repo .
+```
+
+This exists because the alternative is asserting against whatever catalog happens to be on
+the host, which is environment-dependent by construction — and which is exactly how a check
+in this suite went red on CI's first run for an entirely correct reason.
+
 ## The live suite
 
 ```bash

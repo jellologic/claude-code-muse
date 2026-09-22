@@ -213,9 +213,22 @@ EOF
 out=$(python3 "$FLEET" --tasks /tmp/v_dup.json --repo "$LAB/v_dirty" --allow-dirty 2>&1)
 echo "$out" | grep -qi 'unique' && ok "rejects duplicate task ids" || bad "dup id guard" "$out"
 
-out=$(python3 "$FLEET" --tasks /tmp/v_tasks.json --repo "$LAB/v_dirty" --allow-dirty 2>&1 | head -1)
-echo "$out" | grep -q 'latest contributor' \
-  && ok "resolves latest contributor by default" || bad "default model resolution" "$out"
+# Seed a catalog rather than trusting the host's. On a machine with no muse install the
+# old form of this check asserted "latest contributor" against a fallback path and failed
+# for a correct reason, which is how it went red on CI's first run.
+mkdir -p "$LAB/v_catalog"
+cat > "$LAB/v_catalog/c.json" <<'CATALOG'
+{"rows": [
+  {"model_id": "muse-spark-9.9-contributor", "visibility": "visible", "release_date": "2030-01-01"},
+  {"model_id": "muse-spark-0.1-contributor", "visibility": "visible", "release_date": "2020-01-01"},
+  {"model_id": "muse-spark-9.9",             "visibility": "visible", "release_date": "2031-01-01"}
+]}
+CATALOG
+out=$(MUSE_CATALOG_GLOB="$LAB/v_catalog/*.json" \
+      python3 "$FLEET" --tasks /tmp/v_tasks.json --repo "$LAB/v_dirty" --allow-dirty 2>&1 | head -1)
+echo "$out" | grep -q 'muse-spark-9.9-contributor' \
+  && ok "resolves the newest CONTRIBUTOR model through the subprocess path" \
+  || bad "default model resolution" "$out"
 
 # ------------------------------------------- 3b. status + cleanup (no muse spawned)
 head_ "3b. Status and cleanup"

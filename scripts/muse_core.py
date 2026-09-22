@@ -29,7 +29,11 @@ from pathlib import Path
 # what a stale `model` pin in ~/.config/muse/settings.json does.
 LATEST = "latest-contributor"
 FALLBACK_MODEL = "muse-spark-1.3-contributor"
-CATALOG_GLOB = "~/.local/share/muse/model-catalog/*.json"
+# Overridable so model resolution can be tested anywhere, including a machine with no
+# muse install. Without a seam the only way to test it is to trust whatever catalog
+# happens to be on the host, which makes the result environment-dependent.
+CATALOG_GLOB = os.environ.get(
+    "MUSE_CATALOG_GLOB", "~/.local/share/muse/model-catalog/*.json")
 DEFAULT_EFFORT = "low"
 DEFAULT_TIMEOUT = 900
 EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
