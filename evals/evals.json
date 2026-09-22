@@ -1,0 +1,40 @@
+{
+  "skill_name": "muse-fleet",
+  "evals": [
+    {
+      "id": 1,
+      "name": "bulk-tests-fanout",
+      "prompt": "This repo has four modules with no test coverage at all: parser.py, validator.py, cache.py and retry.py. I need a pytest file for each one covering the public functions. It's a lot of grunt work and I don't want to burn my Claude limits on it — can you farm it out?",
+      "expected_output": "Uses muse-fleet's supervised path: plans 4 disjoint tasks (one per module, each creating its own tests/test_<mod>.py, each with a runnable pytest acceptance check), then runs the workflow from references/workflow.md so one Opus supervisor per task spawns muse, reads the patch, runs the check itself and revises if needed. Reports per-task verdicts rather than raw statuses, and does not apply patches without the user's say-so.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "overlap-trap",
+      "prompt": "Can you parallelise this across a bunch of muse instances: (a) add type hints to utils.py, (b) add docstrings to utils.py, and (c) rename the helper function in utils.py to _helper everywhere it's used.",
+      "expected_output": "Recognises all three tasks target utils.py and that (c) spans multiple files, so fan-out would produce conflicting patches. Either merges them into one task or runs sequential waves, and explains why rather than silently fanning out 3 colliding tasks. Worktree isolation must not be offered as a fix — it isolates processes, not intentions.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "name": "single-coherent-change",
+      "prompt": "Our auth flow is broken — login() returns None for users whose session expired mid-request, and it's cascading into the refresh path. Can you get a few muse agents on this in parallel to speed it up?",
+      "expected_output": "Pushes back: debugging one causally-linked bug is not fan-out work, since it needs whole-picture context and the tasks aren't independent. Offers to investigate directly, or to use muse only for a mechanical follow-up once the fix is understood.",
+      "files": []
+    },
+    {
+      "id": 4,
+      "name": "no-acceptance-check",
+      "prompt": "Fan these out to muse for me: rewrite the README intro so it's friendlier, rename the `mgr` variable to `manager` in scheduler.py, and reword the error strings in errors.py to be less shouty.",
+      "expected_output": "Notices that the README rewrite and the error-string rewording have no executable acceptance check — only the rename does (it can be checked by the test suite or an import). Says so explicitly and plans to review those two patches by hand rather than inventing a check that always passes. Does not claim a task is verified when nothing was run.",
+      "files": []
+    },
+    {
+      "id": 5,
+      "name": "trust-the-self-report",
+      "prompt": "The muse run came back with status completed and its result.json says confidence: high and tests passing. Can we merge all four patches now?",
+      "expected_output": "Refuses to treat the worker's self-report as evidence: `completed` means the agent stopped, and result.json is written by the same cheap model that did the work. Checks whether a supervisor actually ran the acceptance check (verified_by_supervisor in task.json), inspects the patches, and flags anything accepted without an executed check as unproven before merging one at a time.",
+      "files": []
+    }
+  ]
+}

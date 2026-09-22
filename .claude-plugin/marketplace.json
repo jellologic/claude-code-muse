@@ -1,0 +1,18 @@
+{
+  "name": "muse-code",
+  "description": "Delegate coding work to Muse Code under Claude supervision.",
+  "owner": {
+    "name": "jellologic",
+    "url": "https://github.com/jellologic"
+  },
+  "plugins": [
+    {
+      "name": "muse",
+      "source": "./",
+      "description": "Offload bulk coding work to Muse Code in isolated git worktrees, each supervised by an Opus agent that verifies and re-prompts until the patch is right.",
+      "version": "1.0.0",
+      "category": "development",
+      "keywords": ["muse", "delegation", "parallel-agents", "git-worktree"]
+    }
+  ]
+}

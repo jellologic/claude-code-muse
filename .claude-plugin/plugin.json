@@ -1,0 +1,22 @@
+{
+  "name": "muse",
+  "version": "1.0.0",
+  "description": "Offload bulk coding work to Muse Code instances in isolated git worktrees, each supervised by an Opus agent that reads the patch, runs the acceptance check and re-prompts until the work is right.",
+  "author": {
+    "name": "jellologic",
+    "email": "31935831+jellologic@users.noreply.github.com",
+    "url": "https://github.com/jellologic"
+  },
+  "homepage": "https://github.com/jellologic/muse-code",
+  "repository": "https://github.com/jellologic/muse-code",
+  "license": "MIT",
+  "keywords": [
+    "muse",
+    "delegation",
+    "parallel-agents",
+    "git-worktree",
+    "code-generation",
+    "cost-optimization",
+    "supervision"
+  ]
+}

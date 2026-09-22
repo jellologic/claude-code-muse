@@ -1,0 +1,30 @@
+{
+  "type": "object",
+  "required": ["summary", "files_changed", "verification", "confidence", "concerns"],
+  "properties": {
+    "summary": {
+      "type": "string",
+      "description": "What was changed and why, in two sentences or less."
+    },
+    "files_changed": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Repo-relative paths actually created or modified."
+    },
+    "verification": {
+      "type": "string",
+      "description": "The exact command run to verify the work and its result, or 'none' if nothing was run."
+    },
+    "confidence": {
+      "type": "string",
+      "enum": ["high", "medium", "low"],
+      "description": "low if the prompt was ambiguous or the work is unverified."
+    },
+    "concerns": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Anything the reviewer should look at closely. Empty array if none."
+    }
+  },
+  "additionalProperties": false
+}
