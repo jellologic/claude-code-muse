@@ -1,229 +1,211 @@
-# muse — a Claude Code plugin for delegating bulk coding work
+# muse — delegate bulk coding work from Claude Code, with a supervisor that actually checks
 
-Offload repetitive coding work to **Muse Code** (`muse exec`) workers running in isolated
-**git worktrees**, each supervised by a **Claude agent** that reads the patch, runs your
-acceptance check itself, and sends the worker back for revisions until the work is right.
+A **Claude Code plugin** that offloads repetitive coding work to **Muse Code** workers
+running in isolated **git worktrees** — each one supervised by a Claude agent that reads
+the patch, **runs your acceptance check itself**, and sends the worker back with specific
+defects until the work is right.
 
 [![validate](https://github.com/jellologic/claude-code-muse/actions/workflows/validate.yml/badge.svg)](https://github.com/jellologic/claude-code-muse/actions/workflows/validate.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-8A2BE2)](https://docs.claude.com/en/docs/claude-code/plugins)
+[![good first issues](https://img.shields.io/github/issues/jellologic/claude-code-muse/good%20first%20issue?label=good%20first%20issue)](https://github.com/jellologic/claude-code-muse/labels/good%20first%20issue)
 
-**muse types, Claude judges.** Mechanical edits do not need a frontier model deliberating
-over them; push that work down to a cheap model and spend your own budget on the parts that
-need judgment. Built for the jobs that are too big to do by hand and too boring to be worth
-your context window: a test file per module, one migration pattern applied repo-wide, type
-hints across a package, bulk lint or dependency fixes.
+**muse types, Claude judges.** A test file per module, one migration pattern applied
+repo-wide, type hints across a package, bulk lint fixes — work that is too big to do by
+hand and too boring to spend your context window on. Push it to a cheap model, and spend
+your own budget on the part that needs judgment.
+
+---
+
+## The 30 seconds that explain it
 
 ```
-/muse:delegate  Have muse write tests/test_parser.py covering the public functions
-/muse:fleet     Add a pytest file for each of the twelve modules in src/
+/muse:delegate Create tests/test_ratio.py covering percent() in ratio.py.
+               Do not modify ratio.py. Check: python3 -m pytest tests/test_ratio.py -q
 ```
 
+A supervisor spawns a worker in its own worktree, reads the patch, runs `pytest` **itself**,
+and comes back:
+
+> **Verdict: accept** — 1 round of 3. The supervisor ran the check itself and it passed.
+> **Check:** `python3 -m pytest tests/test_ratio.py -q` → exit 0, `3 passed, 1 xfailed`.
+> **Flagged:** the strict xfail is a tripwire by design — whoever fixes `slugify` gets an
+> XPASS *failure* and has to delete the marker in the same commit.
+> *Patch not applied — your call.*
+
+That is real output. The worker was asked to test a function whose docstring and
+implementation disagree; it asserted the **documented** behaviour, found the bug, and
+encoded it as `xfail(strict=True)` so the suite passes honestly while the bug stays
+recorded. The supervisor then verified with `-rxX` that the xfail was a genuine assertion
+failure rather than a collection error in disguise.
+
+Nothing was applied to the repository. That is the default.
+
+## Why a supervisor, and not just "review it afterwards"
+
+Cheap delegation fails in exactly one place: **a model grading its own homework.**
+
+A reviewer that can only file a report is strictly weaker than one that can re-prompt the
+author in the round where fixing is still cheap. So the grading moves *into* the agent that
+owns the task, and the cheap model's last word is never the deliverable.
+
 ```
-          ┌────────────── one Opus supervisor, one task ──────────────┐
- plan ──▶ │  muse run ──▶ read patch ──▶ verify ──▶ revise ──▶ verify │ ──▶ integrate
-          │       ▲                                   │               │
-          │       └───────────── until right ─────────┘               │
-          └──────────────────────────────────────────────────────────-┘
+          ┌────────────── one supervisor, one task ──────────────┐
+ plan ──▶ │  muse run ──▶ read patch ──▶ verify ──▶ revise ──▶ … │ ──▶ integrate
+          │       ▲                                   │          │
+          │       └───────────── until right ─────────┘          │
+          └──────────────────────────────────────────────────────┘
 ```
 
-A task does not finish when muse stops. It finishes when its supervisor says `accept`,
-`revise` or `reject` — and `accept` is only honest when a check the supervisor ran itself
-passed. `finish` records `verified_by_supervisor` from the **final** check, and
-`/muse:status` flags an accept without one; nothing blocks the verdict itself.
+Two words that are not interchangeable, and the whole design rests on the gap between them:
 
-## Why supervision, not review
+| | means |
+|---|---|
+| `completed` | the worker stopped |
+| `accept` | a supervisor ran a check and the **final** one passed |
 
-Cheap delegation fails in exactly one place: **a model grading its own homework.** A reviewer
-that can only file a report is strictly weaker than one that can re-prompt the author in the
-round where fixing is still cheap. So the grading moves into the agent that owns the task,
-and the cheap model's last word is never the deliverable.
-
-The `muse-supervisor` agent has **no Write or Edit tool**. That is deliberate — a supervisor
-that can patch the worktree by hand will, and then the next round starts from a tree muse did
-not produce, the harvested patch misattributes the hand-edit, and you are paying Opus rates
-to type.
+`task.json` records `verified_by_supervisor`, and `/muse:status` flags an accept without
+one. The supervisor agent has **no `Write` or `Edit` tool** — not an oversight. A
+supervisor that can patch the worktree by hand will, and then the next round starts from a
+tree muse did not produce. Removing the tool makes the architecture true rather than
+merely recommended.
 
 ## Install
-
-Requires the Muse Code CLI (`muse`) on `PATH`, plus `git`, Python 3.9+ and Claude Code.
-(CI exercises Python 3.9, 3.11 and 3.13 on Linux; development is on macOS.)
 
 ```
 /plugin marketplace add jellologic/claude-code-muse
 /plugin install muse@claude-code-muse
 ```
 
-Or from a local clone:
+Requires the Muse Code CLI (`muse`) on `PATH`, plus `git`, Python 3.9+ and Claude Code.
+CI exercises Python 3.9, 3.11 and 3.13 on Linux; development is on macOS.
+
+Then `muse login` once. Not sure it's set up right?
 
 ```
-/plugin marketplace add ~/GitHub/claude-code-muse
-/plugin install muse@claude-code-muse
+/muse:doctor
 ```
 
-Then authenticate muse once (`muse login`) and run any `muse exec` to populate its model
-catalog. A SessionStart hook checks both and stays silent unless something is missing.
-
-## Quick start
-
-From a **clean** git working tree (worktrees branch from a committed ref, so uncommitted
-work is invisible to the worker):
-
-```
-/muse:delegate Create tests/test_parser.py covering parse() and tokenize().
-               Do not modify parser.py. Check: pytest tests/test_parser.py -q
-```
-
-A supervisor spawns a worker in its own worktree, reads the patch, runs `pytest` itself, and
-sends the worker back with specific defects until it passes. You get a verdict, the check's
-exit code, and a patch path — and you decide whether to apply it.
-
-```bash
-git apply --check .muse-fleet/tasks/<id>/patch.diff   # will it apply?
-git apply --3way  .muse-fleet/tasks/<id>/patch.diff   # apply it
-```
+…reports the muse version, whether credentials exist, how fresh the model catalog is,
+**which model would actually be used**, your repo's git state and whether the worktree
+root is writable — with a fix on every failing line.
 
 ## Commands
 
 | Command | Does |
 |---|---|
 | `/muse:delegate <task>` | One task, supervised end to end — run, verify, revise, verdict |
+| `/muse:fleet <job>` | Decompose a job and fan out, one supervisor per task |
 | `/muse:ask <question>` | One question or one contained edit, no worktree, answer on stdout |
-| `/muse:fleet <job>` | Decompose a job and run the supervised fleet, one supervisor per task |
 | `/muse:status` | What every task did, and whether a check actually ran |
-| `/muse:model` | Which contributor model delegation will use, and the interactive pin |
+| `/muse:doctor` | Whether this machine can delegate, and what would break |
+| `/muse:model` | Which contributor model delegation will use |
 | `/muse:cleanup` | Reap worktrees, branches and artifacts a run left behind |
-| `/muse:doctor` | Whether this machine can delegate, what model it would use, what would break |
 
-The `muse-fleet` skill triggers on its own when a job obviously wants fan-out — repetitive
-refactors across many files, tests for a list of modules, one migration pattern repo-wide.
+The `muse-fleet` skill also triggers on its own when a job obviously wants fan-out.
 
-**No command applies a patch.** They stop at a verdict and a patch path, because an accepted
-patch is still a patch you have not read.
+**No command applies a patch.** They stop at a verdict and a patch path, because an
+accepted patch is still a patch you have not read.
 
-**It composes into your own workflows.** muse delegation can be one stage of a Claude
-Code workflow you are writing, not just the whole thing — see "Embedding muse in your own
-workflow" in [`references/workflow.md`](references/workflow.md) for a copy-pasteable stage
-and the four rules that are not obvious from the API (a workflow script has no filesystem,
-so muse is always invoked by an agent; `pluginRoot` and `stamp` must be threaded through
-`args`; `--out` must be absolute; task ids are validated).
-
-**It refuses to send your credentials.** Before spawning a worker, `run` scans the
-worktree and stops if it finds an unmistakable credential — a private-key block, an AWS
-key id, a provider-format token. Contributor-tier content may be used for training, and
-that is not undoable. `/muse:doctor --scan` runs the same check on demand.
-
-**Follow-ups keep their context.** A task's rounds share one muse session, so a revision is
-a genuine follow-up — the worker still has the brief, the files it read and its own
-reasoning, and your feedback can say "the assertion on line 12 is wrong" without restating
-the task. `/muse:ask` does the same via `--session`. When a session cannot be resumed the
-round re-sends the brief and reports `resumed: false` rather than quietly losing the
-context.
-
-## The three rules that decide whether this works
+## Three rules that decide whether this works for you
 
 **Partition by file.** Worktrees isolate agents from each other's *process*, not from each
 other's *intentions*. Two agents editing `calc.py` each produce a clean patch, and those
 patches conflict at merge. Watch for conflict magnets: routing tables, config, registries,
 DI containers, lockfiles, barrel exports, migration directories.
 
-**Every task needs a runnable check.** A supervisor's leverage is running an executable
-oracle against the patch. A task with no check cannot be supervised, only guessed at — say so
-up front and review that patch by hand rather than inventing a check that always passes.
+**Every task needs a runnable check.** The supervisor's leverage is an executable oracle.
+A task with no check cannot be supervised, only guessed at — say so up front and review
+that patch by hand rather than inventing a check that always passes.
 
 **Seed what git does not track.** A worktree is a clean checkout, so `.env`, `node_modules`
-and `.venv` are missing. This fails quietly: the worker cannot run the check, so it reports a
-success it never verified. Copy small config (`--seed .env`), symlink heavy directories
-(`--link node_modules`), and never symlink something an agent might install into.
+and `.venv` are missing. This fails quietly: the worker cannot run the check, so it reports
+a success it never verified.
 
-## Layout
+## It refuses to send your credentials
 
+Before spawning a worker, `run` scans the worktree — after seeding, so it sees the `.env`
+you asked it to copy — and **refuses** on a structurally unmistakable credential: a PEM
+private-key block, an AWS key id, a GitHub/Slack/Stripe/Anthropic-format token.
+Contributor-tier content may be used for training, and that is not undoable.
+
+Credential-shaped assignments warn rather than block, because blocking those would make the
+plugin unusable on any repo with test fixtures. Findings record file, line and kind — never
+the matched text. `/muse:doctor --scan` runs the same check on demand.
+
+See [SECURITY.md](SECURITY.md) for the full trust model, including the sharpest edge: your
+acceptance check runs on the **host**, with your privileges.
+
+## How it is verified
+
+This project's stated rule is *trust the measured result over what a change claims about
+itself*, and it is applied to itself:
+
+- **A free offline suite** — `bash scripts/validate.sh --offline` spawns no muse, needs no
+  credentials, and runs in seconds. CI runs it on every pull request across three Python
+  versions.
+- **A paid live suite** — the full `bash scripts/validate.sh` drives real muse runs through
+  the fleet, the supervised loop, seeding, re-run safety and session resume.
+- **Every guard is negative-controlled.** A check that inspects nothing passes exactly like
+  a check that found nothing, so each one is broken on purpose and confirmed to go red.
+- **End-to-end, not just unit.** `/muse:delegate` and `/muse:fleet` are exercised as real
+  commands in fresh sessions, and the resulting patches are applied and tested independently.
+
+That process has caught things reading never would: a `cleanup --artifacts` path that could
+have deleted a home directory, a harvest that overwrote good patches with empty files on a
+git failure, a `--timeout` that killed a shell while the real worker ran on unbounded, and a
+documented safety control that did not exist.
+
+## Contributing
+
+**Issues and pull requests are welcome, including from AI agents.**
+
+- 🤖 **If you are an AI coding agent, start with [AGENTS.md](AGENTS.md)** — how to reach a
+  verified state in 60 seconds, where to find work, and the five rules that decide whether a
+  PR gets merged.
+- 👤 Humans: [CONTRIBUTING.md](CONTRIBUTING.md) covers the dev loop and house rules.
+- 🔎 Looking for something to do? Try
+  [`good first issue`](https://github.com/jellologic/claude-code-muse/labels/good%20first%20issue),
+  [`help wanted`](https://github.com/jellologic/claude-code-muse/labels/help%20wanted), or
+  [`agent-friendly`](https://github.com/jellologic/claude-code-muse/labels/agent-friendly)
+  — issues self-contained enough to finish from the issue text plus this repo, each with a
+  runnable acceptance check already named.
+
+Two contributions that are always valuable and need no permission:
+
+1. **Make a guard fail.** Every check in `scripts/validate.sh` claims to catch something.
+   Break the thing it watches. If it stays green, that is a real bug and a great issue.
+2. **Find a doc that lies.** Any statement that does not match the code is a defect here.
+   Two have already been found this way, both in this repo's own documentation.
+
+```bash
+git clone https://github.com/jellologic/claude-code-muse.git
+cd claude-code-muse
+bash scripts/validate.sh --offline     # free, seconds, no credentials needed
 ```
-.claude-plugin/plugin.json     manifest
-.claude-plugin/marketplace.json  single-plugin marketplace
-commands/                      the six /muse:* commands
-agents/muse-supervisor.md      Opus, owns one task to a verdict, cannot write code
-hooks/preflight.sh             SessionStart; silent unless delegation would fail
-skills/muse-fleet/SKILL.md     the auto-triggering surface
-references/                    workflow script, CLI surface, routing, field notes
-scripts/                       the drivers — see below
-assets/result-schema.json      structured-output schema for worker self-reports
-evals/evals.json               skill-triggering evals (see note below)
-```
-
-| Script | Does |
-|---|---|
-| `muse_core.py` | worktree, seeding, exclusion and harvest logic shared by both drivers |
-| `muse_task.py` | one task, round by round: `run` / `verify` / `revise` / `show` / `finish` / `cleanup` |
-| `muse_fleet.py` | unsupervised batch fan-out — raw throughput, review batched to the end |
-| `muse_ask.sh` | one question, one answer on stdout |
-| `muse_status.py` | what every task did, and what nobody checked |
-| `muse_cleanup.py` | reap worktrees, branches, artifacts |
-| `use_latest_contributor.sh` | point interactive muse at the newest contributor model |
-| `validate.sh` | the full suite — static checks, unit tests, live runs, the supervisor loop |
-
-## A note on the evals
-
-`evals/evals.json` holds five skill-triggering cases — a bulk test fan-out, the overlap
-trap, the coherent single change that should not fan out, the job with no acceptance check,
-and trusting a worker's self-report. They encode the judgment calls this plugin exists to get right.
-
-They are **not** in the `claude plugin eval` format, which wants `evals/**/case.yaml` or
-`prompt.md` + `graders/*.md`. That runner is early access and was not enabled here, so the
-cases were kept in their original shape rather than converted against a schema that could
-not be run. Convert them when eval access lands.
 
 ## Guardrails
 
 Workers run with `--yolo`, which disables approval prompts and the sandbox. That is
 defensible **only because the blast radius is a throwaway worktree on a throwaway branch.**
-Preserve that property: never point a fleet at a dirty main working copy, keep worktrees
-outside the repo, and use `--max-steps` and `--max-rounds` so a confused agent cannot loop up
-a bill.
+Never point a fleet at a dirty main working copy, keep worktrees outside the repo, and use
+`--max-steps` and `--max-rounds` so a confused agent cannot loop up a bill.
 
-Contributor models state that your content "may be used for product improvement." For
-proprietary or client-confidential code, pass `--model muse-spark-1.3` and pay full rate, or
-do not delegate it.
+For proprietary or client-confidential code, pass `--model muse-spark-1.3` and pay full
+rate, or do not delegate it.
 
-Workers run with `--no-foreign-personal-context`, because muse imports Claude Code personal
-skills by default and a worker that loads a fan-out skill starts planning its own fan-out
-instead of making the one edit it was asked for.
+## Docs
 
-## Validating
-
-```bash
-bash scripts/validate.sh --offline   # free, seconds — spawns no muse
-bash scripts/validate.sh             # everything, including live runs
-```
-
-`--offline` runs the static checks, the unit tests, the preflight guardrails and the
-status/cleanup suite against real git worktrees. It spawns no muse, costs nothing and takes
-seconds, so it can run on every change.
-
-The full run adds live runs of both drivers, the supervisor loop, re-run safety, seeding and
-`muse_ask`. It builds throwaway repos in a temp dir and touches nothing of yours, but it
-makes real muse calls, so it costs a little and takes several minutes. Run it when muse ships
-a new version and you want to know whether any behaviour this plugin depends on has moved.
-
-## Contributing
-
-Contributions are welcome — issues, bug reports and pull requests alike.
-[CONTRIBUTING.md](CONTRIBUTING.md) has the dev loop, where each kind of component goes, and
-the three things that will get a PR sent back. The short version:
-
-```bash
-git clone https://github.com/jellologic/claude-code-muse.git
-cd claude-code-muse
-bash scripts/validate.sh --offline     # seconds, free, spawns no muse
-```
-
-The house rule is that a change must be **measured**, not asserted — and any guard you add
-has to be shown to fail when the thing it watches breaks. CI runs the offline suite on every
-pull request and on pushes to `main`, across Python 3.9, 3.11 and 3.13.
-
-See also [SECURITY.md](SECURITY.md) for the trust model (workers run `--yolo`; acceptance
-checks execute on the host), [CHANGELOG.md](CHANGELOG.md) for what has changed, and the
-[Code of Conduct](CODE_OF_CONDUCT.md).
+| | |
+|---|---|
+| [AGENTS.md](AGENTS.md) | For AI agents: how to contribute here |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Dev loop, house rules, the live suite |
+| [SECURITY.md](SECURITY.md) | Trust model, `--yolo`, host-side checks, credentials |
+| [CHANGELOG.md](CHANGELOG.md) | What changed |
+| `references/workflow.md` | The fleet workflow, and embedding muse in your own |
+| `references/muse-cli.md` | The verified `muse` CLI surface and event schema |
+| `references/routing.md` | When to use muse and when to use Claude |
+| `references/field-notes.md` | What other teams learned running agent fleets |
 
 ## License
 

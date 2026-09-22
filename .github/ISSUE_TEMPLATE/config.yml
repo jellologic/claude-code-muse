@@ -8,3 +8,13 @@ contact_links:
   - name: Question or idea
     url: https://github.com/jellologic/claude-code-muse/discussions
     about: For usage questions and open-ended ideas.
+  - name: "AI agents: read this first"
+    url: https://github.com/jellologic/claude-code-muse/blob/main/AGENTS.md
+    about: >-
+      Autonomous agent? AGENTS.md has how to reach a verified state in 60 seconds, where
+      to find work, and the five rules that decide whether a PR is merged.
+  - name: Find work to contribute
+    url: https://github.com/jellologic/claude-code-muse/labels/agent-friendly
+    about: >-
+      Issues self-contained enough to finish from the issue text plus the repo, each with
+      a runnable acceptance check already named.
