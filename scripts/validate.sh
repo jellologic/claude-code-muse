@@ -938,6 +938,34 @@ done
 [ "$APPLY_OK" -eq 1 ] && ok "all patches apply cleanly to base" || bad "a patch does not apply"
 cd - >/dev/null
 
+# This plugin's whole premise is cost arbitrage, and it reports no spend -- because muse
+# exposes none. That is documented in README/CHANGELOG and in the issue as a hard block.
+# The moment muse starts emitting usage, that documentation becomes false, and "find a
+# doc that lies" is a defect class here. So this FAILS when the block lifts: the failure
+# is the notification, and it costs nothing because it reads events the fleet already
+# wrote.
+python3 - "$D" <<'PY' && ok "muse still exposes no usage data (cost reporting stays blocked)" || bad "muse NOW EXPOSES USAGE — the docs claiming otherwise are stale"
+import glob, os, re, sys
+d = sys.argv[1]
+found, scanned = {}, 0
+for f in glob.glob(os.path.join(d, "*", "events.jsonl")):
+    scanned += 1
+    with open(f, encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            # JSON KEYS only. The word "Usage:" appears in every --help banner and is not
+            # what this is looking for.
+            for m in re.finditer(r'"([a-z_]*(?:token|usage|cost)[a-z_]*)"\s*:', line, re.I):
+                found[m.group(1)] = found.get(m.group(1), 0) + 1
+if not scanned:
+    print("        no events.jsonl to inspect — this probe checked nothing"); sys.exit(1)
+if found:
+    print("        usage-ish keys now present:", dict(list(found.items())[:8]))
+    print("        Cost reporting is unblocked. Implement it in /muse:status and the")
+    print("        fleet report, update README/CHANGELOG, and retire this check.")
+    sys.exit(1)
+sys.exit(0)
+PY
+
 head_ "5. Re-run safety"
 python3 "$FLEET" --tasks "$LAB/v_live_tasks.json" --repo "$LAB/v_live" \
   --schema "$SKILL/assets/result-schema.json" --concurrency 2 --timeout 600 \
