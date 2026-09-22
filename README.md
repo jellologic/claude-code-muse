@@ -207,7 +207,8 @@ has to be shown to fail when the thing it watches breaks. CI runs the offline su
 push and pull request.
 
 See also [SECURITY.md](SECURITY.md) for the trust model (workers run `--yolo`; acceptance
-checks execute on the host) and the [Code of Conduct](CODE_OF_CONDUCT.md).
+checks execute on the host), [CHANGELOG.md](CHANGELOG.md) for what has changed, and the
+[Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License
 
