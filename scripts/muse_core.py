@@ -282,8 +282,12 @@ def validate_task_id(task_id: str) -> str:
             "start with a letter or digit and contain only letters, digits, dot, underscore "
             "or hyphen (max 64 chars). A path separator or '..' would place artifacts "
             "outside the artifact root, where `status` cannot see them.".format(task_id))
-    if task_id in (".", "..") or task_id.endswith(".lock"):
-        raise PreflightError("task id {!r} is reserved".format(task_id))
+    # git refuses a ref ending in .lock, and that regex allows it through. Better a clear
+    # refusal here than git's error three calls later. ("." and ".." cannot reach this:
+    # the pattern already requires a leading letter or digit.)
+    if task_id.endswith(".lock"):
+        raise PreflightError(
+            "task id {!r} cannot end in .lock: it becomes a git branch name".format(task_id))
     return task_id
 
 
