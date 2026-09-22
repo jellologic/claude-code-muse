@@ -44,18 +44,22 @@ run its check and report a success it never verified.
 
 ## 3. Run the workflow
 
-Invoking this command is explicit opt-in to the Workflow tool. Read the script at
-`${CLAUDE_PLUGIN_ROOT}/references/workflow.md` — the JavaScript block is the script — and run
-it with the values from step 2:
+Invoking this command is explicit opt-in to the Workflow tool. The script is **registered**
+by the plugin — run it by name. Do not read it, do not transcribe it:
 
 ```
-Workflow({ script: <the javascript block from references/workflow.md>,
+Workflow({ name: "muse-supervised-fleet",
            args: { job: "$ARGUMENTS",
-                   repo: ".",
+                   repo: "<the absolute path you echoed>",
                    pluginRoot: "<the echoed CLAUDE_PLUGIN_ROOT>",
                    stamp: "<the date you just ran>",
                    maxRounds: 3 } })
 ```
+
+If that name does not resolve, the plugin was installed before workflows were registered —
+say so and stop, rather than falling back to pasting 200 lines of JavaScript from a
+reference file. `${CLAUDE_PLUGIN_ROOT}/references/workflow.md` explains what the script does
+and why; the code itself is at `${CLAUDE_PLUGIN_ROOT}/workflows/muse-supervised-fleet.js`.
 
 It plans the partition, enforces file-disjointness in code (it throws on overlap rather than
 asking nicely), spawns one supervisor per task, and returns a merge order.

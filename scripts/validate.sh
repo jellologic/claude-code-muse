@@ -226,6 +226,47 @@ if problems:
     sys.exit(1)
 PY
 
+# The registered workflow is the plugin's headline path now, so its registration is a
+# thing that can break. A `workflows` key pointing at nothing, or a script whose meta.name
+# does not match the name the skill tells the model to invoke, both fail at run time --
+# after the planning agents have been paid for.
+python3 - <<'PY' && ok "the fleet workflow is registered under the name the docs tell you to call" || bad "the registered workflow and the documented name disagree"
+import json, os, pathlib, re, sys
+ROOT = pathlib.Path(os.environ["PLUGIN_ROOT"])
+problems = []
+manifest = json.loads((ROOT / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
+wf_key = manifest.get("workflows")
+if not wf_key:
+    problems.append("plugin.json declares no `workflows` key, so nothing is registered")
+else:
+    wdir = (ROOT / wf_key.lstrip("./")).resolve()
+    scripts = sorted(wdir.glob("*.js")) if wdir.is_dir() else []
+    if not scripts:
+        problems.append("`workflows` points at %s, which holds no .js" % wf_key)
+    names = set()
+    for f in scripts:
+        src = f.read_text(encoding="utf-8")
+        if not src.lstrip().startswith("export const meta"):
+            problems.append("%s: meta must be the first statement or the loader cannot "
+                            "read it" % f.name)
+        m = re.search(r"name:\s*'([^']+)'", src)
+        if not m:
+            problems.append("%s: meta declares no name" % f.name)
+        else:
+            names.add(m.group(1))
+    # Whatever the docs and the command tell the model to invoke has to be in there.
+    for doc in ("skills/muse-fleet/SKILL.md", "commands/fleet.md", "references/workflow.md"):
+        for called in set(re.findall(r'name:\s*"([a-z0-9-]+)"',
+                                     (ROOT / doc).read_text(encoding="utf-8"))):
+            if called not in names:
+                problems.append("%s tells the model to run %r, which no registered "
+                                "workflow declares (registered: %s)"
+                                % (doc, called, sorted(names) or "none"))
+if problems:
+    for p in problems: print("        " + p)
+    sys.exit(1)
+PY
+
 # Component frontmatter. `claude plugin validate` does walk these files from the PLUGIN
 # manifest, and it does reject frontmatter that fails to parse -- but it does not reject
 # an unknown frontmatter KEY, measured by putting one in and watching it pass. Nor does
@@ -313,10 +354,15 @@ if command -v node >/dev/null 2>&1; then
   # the main script.
   WF_SYNTAX=$(python3 - <<'PY'
 import re, pathlib, os, subprocess, tempfile
-t = pathlib.Path(os.path.join(os.environ["PLUGIN_ROOT"], "references/workflow.md")).read_text()
-blocks = re.findall(r"```javascript\n(.*?)```", t, re.S)
+ROOT = pathlib.Path(os.environ["PLUGIN_ROOT"])
+t = (ROOT / "references/workflow.md").read_text()
+# The registered workflow FIRST -- it is the one the runtime loads and the model runs by
+# name. The markdown fences are the copy-paste snippets, and a syntax error in one of
+# those is exactly as broken for whoever pastes it.
+blocks = [f.read_text() for f in sorted((ROOT / "workflows").glob("*.js"))] \
+       + re.findall(r"```javascript\n(.*?)```", t, re.S)
 if not blocks:
-    print("no javascript blocks found"); raise SystemExit
+    print("no javascript found"); raise SystemExit
 bad = []
 for i, b in enumerate(blocks, 1):
     src = b.replace("export const meta", "const meta", 1)
@@ -341,12 +387,25 @@ PY
 
   # meta.phases titles are matched EXACTLY against phase() calls; a drifted title
   # silently splits the progress display into an orphan group instead of erroring.
-  for RULE in "not write the code" "do NOT apply the patch" "verify" "resumed"; do
-    grep -qi "$RULE" "$SKILL/agents/muse-supervisor.md" \
-      && grep -qi "$RULE" "$SKILL/references/workflow.md" \
-      && ok "supervisor doctrine present in both paths: $RULE" \
-      || bad "doctrine drift between the agent and the workflow prompt: $RULE"
-  done
+  # The same doctrine reaches a supervisor two ways -- the agent definition when
+  # /muse:delegate spawns it, the workflow prompt when the fleet does -- and the two
+  # drift independently. Compared on NORMALISED whitespace: both sources wrap their
+  # prose, and a literal grep for a phrase that happens to straddle a line break fails
+  # for a reason that has nothing to do with drift. That is how this guard first broke.
+  python3 - <<'PY' && ok "supervisor doctrine is present in both paths" || bad "doctrine drift between the agent and the workflow prompt"
+import os, pathlib, re, sys
+ROOT = pathlib.Path(os.environ["PLUGIN_ROOT"])
+flat = lambda p: re.sub(r"\s+", " ", (ROOT / p).read_text(encoding="utf-8")).lower()
+agent = flat("agents/muse-supervisor.md")
+wf = flat("workflows/muse-supervised-fleet.js")
+RULES = ["not write the code", "not apply the patch", "verify", "resumed"]
+missing = [r for r in RULES if r not in agent or r not in wf]
+for r in RULES:
+    where = [n for n, t in (("the agent", agent), ("the workflow", wf)) if r not in t]
+    if where:
+        print("        %r missing from %s" % (r, " and ".join(where)))
+sys.exit(1 if missing else 0)
+PY
 
   # `const STAMP = args.stamp || 'run'` made every fan-out share one artifact root, so a
   # second run of the same job -- or two jobs that both planned a task called
@@ -358,10 +417,12 @@ PY
   # `args.stamp ?? 'run'` or a ternary is caught too.
   python3 - <<'PY' && ok "every workflow header demands a stamp and puts it in --out" || bad "the workflow artifact root is not namespaced"
 import json, os, pathlib, re, subprocess, sys, tempfile
-t = pathlib.Path(os.path.join(os.environ["PLUGIN_ROOT"], "references/workflow.md")).read_text()
-blocks = [b for b in re.findall(r"```javascript\n(.*?)```", t, re.S) if "const STAMP" in b]
+ROOT = pathlib.Path(os.environ["PLUGIN_ROOT"])
+t = (ROOT / "references/workflow.md").read_text()
+blocks = [b for b in [f.read_text() for f in sorted((ROOT / "workflows").glob("*.js"))]
+          + re.findall(r"```javascript\n(.*?)```", t, re.S) if "const STAMP" in b]
 if not blocks:
-    print("        no javascript block defines STAMP -- this guard is measuring nothing")
+    print("        nothing defines STAMP -- this guard is measuring nothing")
     sys.exit(1)
 
 def run_header(src, argv):
@@ -400,8 +461,7 @@ PY
 
   python3 - <<'PY' && ok "workflow meta.phases cover every phase() call" || bad "phase titles drift"
 import re, pathlib, os, sys
-t = pathlib.Path(os.path.join(os.environ["PLUGIN_ROOT"], "references/workflow.md")).read_text()
-b = re.findall(r"```javascript\n(.*?)```", t, re.S)[0]
+b = (pathlib.Path(os.environ["PLUGIN_ROOT"]) / "workflows/muse-supervised-fleet.js").read_text()
 meta  = set(re.findall(r"title:\s*'([^']+)'", b))
 calls = set(re.findall(r"phase\('([^']+)'\)", b)) | set(re.findall(r"phase:\s*'([^']+)'", b))
 if calls - meta:

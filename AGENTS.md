@@ -127,7 +127,8 @@ a speculative patch.
 | `scripts/muse_fleet.py` | Unsupervised batch fan-out |
 | `scripts/muse_doctor.py` | Readiness report |
 | `scripts/validate.sh` | The suite. `--offline` is free; a bare run costs money |
-| `references/` | Long-form: the workflow script, the CLI surface, routing, field notes |
+| `workflows/muse-supervised-fleet.js` | The registered fleet workflow — run by name, never pasted |
+| `references/` | Long-form: why the workflow is shaped that way, the CLI surface, routing, field notes |
 | `hooks/preflight.sh` | SessionStart; silent unless delegation would fail |
 | `hooks/supervisor_stop.py` | SubagentStop (muse-supervisor); what the artifacts say |
 | `hooks/session_end.py` | SessionEnd; worktrees still open, or silence |

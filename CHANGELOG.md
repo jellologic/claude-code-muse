@@ -46,6 +46,15 @@ All notable changes to this plugin are documented here. Format follows
   it counted source files and a mid-size repo passed it; it is now 20000 and
   `MUSE_SCAN_MAX_FILES` overrides it.
 
+- **The fleet workflow is registered, not transcribed** (#26). It shipped as 200 lines of
+  JavaScript inside a markdown code fence, so every fan-out began with a model copying it
+  into the Workflow tool — the most fragile step on the plugin's headline path, and
+  fragile in the most expensive place: a dropped line or a mangled template literal threw
+  *after* the planning agents had been paid for. `workflows/muse-supervised-fleet.js` is
+  registered by the manifest's `workflows` key and invoked by name. `references/workflow.md`
+  keeps the reasoning and no longer carries the code. Whether a plugin-owned workflow gets
+  `${CLAUDE_PLUGIN_ROOT}` substituted is undocumented and unverified, so the script tries
+  the substitution and falls back to `args.pluginRoot` when the token arrives unexpanded.
 - **A `SubagentStop` backstop for the central claim** (#28). `finish` now refuses a bad
   verdict, which closes the path where one gets *written*; it cannot close the path where
   no record is written at all, because the supervisor ran out of turns, was interrupted,

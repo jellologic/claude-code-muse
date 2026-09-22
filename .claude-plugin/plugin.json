@@ -27,5 +27,6 @@
     "ai-agents"
   ],
   "displayName": "Muse Code delegation",
-  "defaultEnabled": true
+  "defaultEnabled": true,
+  "workflows": "./workflows"
 }

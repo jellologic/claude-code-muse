@@ -244,7 +244,8 @@ rate, or do not delegate it.
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Dev loop, house rules, the live suite |
 | [SECURITY.md](SECURITY.md) | Trust model, `--yolo`, host-side checks, credentials |
 | [CHANGELOG.md](CHANGELOG.md) | What changed |
-| `references/workflow.md` | The fleet workflow, and embedding muse in your own |
+| `references/workflow.md` | Why the fleet workflow is shaped that way, and embedding muse in your own |
+| `workflows/muse-supervised-fleet.js` | The registered workflow itself — `Workflow({ name: "muse-supervised-fleet" })` |
 | `references/muse-cli.md` | The verified `muse` CLI surface and event schema |
 | `references/routing.md` | When to use muse and when to use Claude |
 | `references/field-notes.md` | What other teams learned running agent fleets |

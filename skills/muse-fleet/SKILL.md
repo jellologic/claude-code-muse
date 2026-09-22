@@ -150,13 +150,19 @@ the plan and its cost and get a yes first — a fleet spawns N muse runs and N O
 supervisors, every worker runs `--yolo`, and it all costs real money. An inferred trigger is
 not consent to spend it.
 
-Read `${CLAUDE_PLUGIN_ROOT}/references/workflow.md` and run the script in it.
+The script is registered by the plugin. Run it **by name** — reading it and pasting it
+into `script:` is the one step on this path that used to go wrong, because a dropped line
+surfaced as a throw after the planning agents had already been paid for.
 
 ```
-Workflow({ script: <the javascript block in ${CLAUDE_PLUGIN_ROOT}/references/workflow.md>,
-           args: { job: "...", repo: ".", pluginRoot: "<echo ${CLAUDE_PLUGIN_ROOT}>",
+Workflow({ name: "muse-supervised-fleet",
+           args: { job: "...", repo: "<absolute path>",
+                   pluginRoot: "<echo ${CLAUDE_PLUGIN_ROOT}>",
                    stamp: "<YYYYmmdd-HHMM>", maxRounds: 3 } })
 ```
+
+`${CLAUDE_PLUGIN_ROOT}/references/workflow.md` is the reasoning behind its shape; the code
+is `${CLAUDE_PLUGIN_ROOT}/workflows/muse-supervised-fleet.js`.
 
 Two args the script cannot work out for itself. `stamp`, because workflow scripts cannot
 call `Date.now()`. And `pluginRoot`, because a workflow script sees no environment and so
