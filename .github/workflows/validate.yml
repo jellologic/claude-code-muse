@@ -74,3 +74,42 @@ jobs:
             exit 1
           fi
           echo "no hardcoded absolute paths"
+
+  # Windows is a known gap (#3). This leg exists to MEASURE it rather than argue about
+  # it: it runs the same free offline suite under Git Bash and reports what breaks.
+  # continue-on-error so a red Windows leg does not block the build while the gap is
+  # still open -- the job's log is the deliverable. Flip it to blocking once it is green.
+  windows:
+    name: offline suite (windows, reporting only)
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: What the environment actually provides
+        shell: bash
+        run: |
+          echo "bash:    $BASH_VERSION"
+          echo "python:  $(command -v python || echo MISSING)"
+          echo "python3: $(command -v python3 || echo MISSING)"
+          echo "git:     $(git --version)"
+          echo "mktemp:  $(command -v mktemp || echo MISSING)"
+          echo "node:    $(command -v node || echo MISSING)"
+
+      - name: Git identity for the throwaway test repos
+        shell: bash
+        run: |
+          git config --global user.email "ci@example.invalid"
+          git config --global user.name "ci"
+          git config --global init.defaultBranch main
+          git config --global core.symlinks true
+
+      - name: Offline suite under Git Bash
+        shell: bash
+        run: bash scripts/validate.sh --offline
