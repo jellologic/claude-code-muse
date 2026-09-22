@@ -91,15 +91,25 @@ jobs:
       - name: Install the Claude Code CLI
         run: npm install -g @anthropic-ai/claude-code
 
-      - name: Validate both manifests and every component
+      # Both manifests, by path. Validating the PLUGIN manifest also walks every
+      # command, agent and skill -- measured; that walk is what caught three commands
+      # whose frontmatter did not parse. Naming the component directories separately
+      # does not work: a bare directory is treated as a plugin root and refused for
+      # having no manifest of its own.
+      - name: Validate both manifests
         run: |
           set -euo pipefail
-          for target in .claude-plugin/plugin.json .claude-plugin/marketplace.json \
-                        agents commands skills; do
+          for target in .claude-plugin/plugin.json .claude-plugin/marketplace.json; do
             echo "::group::$target"
             claude plugin validate "$target" --strict
             echo "::endgroup::"
           done
+
+      # The local CLI and the runner's can disagree -- 2.1.263 reported "Validation
+      # passed" on the same files this step rejected -- so record which one spoke.
+      - name: Which validator said that
+        if: always()
+        run: claude --version
 
       # A validation step that cannot fail is worth nothing, and this one runs against a
       # tree that is green by construction. Break it on purpose, in a copy, and confirm

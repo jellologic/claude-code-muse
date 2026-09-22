@@ -226,9 +226,11 @@ if problems:
     sys.exit(1)
 PY
 
-# Component frontmatter. `claude plugin validate <dir> --strict` parses these files but
-# does NOT reject an unknown frontmatter key -- measured, by putting one in and watching
-# it pass -- so the manifest validator in CI is not a guard for any of this.
+# Component frontmatter. `claude plugin validate` does walk these files from the PLUGIN
+# manifest, and it does reject frontmatter that fails to parse -- but it does not reject
+# an unknown frontmatter KEY, measured by putting one in and watching it pass. Nor does
+# it know what this project requires of the values. So the validator in CI is a floor,
+# not a substitute for the contract below.
 python3 - <<'PY' && ok "component frontmatter holds the contract the docs claim for it" || bad "component frontmatter has drifted from the documented contract"
 import json, os, pathlib, re, sys
 
