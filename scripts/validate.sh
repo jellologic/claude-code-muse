@@ -226,6 +226,69 @@ if problems:
     sys.exit(1)
 PY
 
+# Configuration must let someone change behaviour and must never change it for someone
+# who did not ask, so the thing worth asserting is BOTH directions: an unset option
+# leaves the historical default exactly where it was, and a set one actually reaches the
+# flag. The manifest default and the code default drifting apart is the silent failure --
+# the prompt would say 3 and the script would use something else.
+python3 - <<'PY' && ok "userConfig changes behaviour when set and nothing when unset" || bad "user configuration is decorative or drifts from the code"
+import importlib.util, json, os, pathlib, sys
+ROOT = pathlib.Path(os.environ["PLUGIN_ROOT"])
+spec = importlib.util.spec_from_file_location("mc", ROOT / "scripts/muse_core.py")
+mc = importlib.util.module_from_spec(spec); spec.loader.exec_module(mc)
+manifest = json.loads((ROOT / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
+cfg = manifest.get("userConfig") or {}
+problems = []
+if not cfg:
+    problems.append("plugin.json declares no userConfig, so every default is hard-coded")
+
+for key, field in cfg.items():
+    for required in ("type", "title", "description"):
+        if required not in field:
+            problems.append("userConfig.%s has no %s" % (key, required))
+    if "default" not in field:
+        problems.append("userConfig.%s has no default, so skipping the prompt changes "
+                        "behaviour for someone who did not ask" % key)
+if "max_rounds" in cfg and not ("min" in cfg["max_rounds"] and "max" in cfg["max_rounds"]):
+    problems.append("max_rounds is the runaway-cost breaker and has no min/max, so it "
+                    "can be configured to something absurd")
+
+# Unset -> the historical default. Set -> the value.
+if mc.user_option("max_rounds", 3) != 3:
+    problems.append("an unset option did not fall back to the built-in default")
+os.environ["CLAUDE_PLUGIN_OPTION_MAX_ROUNDS"] = "7"
+os.environ["CLAUDE_PLUGIN_OPTION_REFUSE_ON_SECRETS"] = "false"
+os.environ["CLAUDE_PLUGIN_OPTION_DEFAULT_EFFORT"] = "xhigh"
+try:
+    if mc.user_option("max_rounds", 3) != 7:
+        problems.append("a numeric option did not reach the code")
+    if mc.user_option("refuse_on_secrets", True) is not False:
+        problems.append("a boolean option did not reach the code")
+    if mc.user_option("default_effort", "low") != "xhigh":
+        problems.append("a string option did not reach the code")
+    if mc.user_option("max_rounds", 3) == 7:
+        # And the flag itself, not just the helper -- a default read but never wired
+        # into add_argument is the shape this guard exists to catch.
+        src = (ROOT / "scripts/muse_task.py").read_text(encoding="utf-8")
+        for key in ("max_rounds", "default_effort", "default_model", "worktree_root",
+                    "refuse_on_secrets"):
+            if 'user_option("%s"' % key not in src:
+                problems.append("%s is prompted for and never read by muse_task" % key)
+finally:
+    for k in ("MAX_ROUNDS", "REFUSE_ON_SECRETS", "DEFAULT_EFFORT"):
+        os.environ.pop("CLAUDE_PLUGIN_OPTION_" + k, None)
+
+# Garbage must not become behaviour.
+os.environ["CLAUDE_PLUGIN_OPTION_MAX_ROUNDS"] = "not-a-number"
+if mc.user_option("max_rounds", 3) != 3:
+    problems.append("an unparseable option value was taken as behaviour")
+os.environ.pop("CLAUDE_PLUGIN_OPTION_MAX_ROUNDS")
+
+if problems:
+    for p in problems: print("        " + p)
+    sys.exit(1)
+PY
+
 # The registered workflow is the plugin's headline path now, so its registration is a
 # thing that can break. A `workflows` key pointing at nothing, or a script whose meta.name
 # does not match the name the skill tells the model to invoke, both fail at run time --

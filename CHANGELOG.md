@@ -46,6 +46,20 @@ All notable changes to this plugin are documented here. Format follows
   it counted source files and a mid-size repo passed it; it is now 20000 and
   `MUSE_SCAN_MAX_FILES` overrides it.
 
+- **Five values are configurable at install time** (#20). Every default was hard-coded:
+  effort, round cap, worktree root, whether `run` refuses on a confirmed credential, and
+  the model. Each `userConfig` entry ships the value the plugin already used, so an
+  install that skips every prompt behaves exactly as before — configuration should let
+  someone change behaviour, never change it for someone who did not ask, and the suite
+  asserts both directions. `max_rounds` carries `min`/`max` because it is the
+  runaway-cost breaker.
+
+  Measured while writing it, and it contradicts the issue: this validator rejects
+  `options` on a `userConfig` field in every shape tried — bare strings, `{value,label}`,
+  `{name,value}`, `{title,value}` and a map. `title` is required; `description`,
+  `default`, `required`, `sensitive`, `min` and `max` are accepted; the types are
+  `string`, `number`, `boolean`, `directory` and `file`. The effort constraint is stated
+  in the field's description instead, and `muse_task.py` validates it regardless.
 - **`/muse:ask --continue`** (#23). The session id was printed to stderr and the user had
   to copy it, so the follow-up path that session resume exists to enable was one manual
   step away from unusable. The last id per repo now lives in `${CLAUDE_PLUGIN_DATA}` — the

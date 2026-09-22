@@ -61,6 +61,32 @@ EV_TERMINAL = "run_terminal"          # the single authoritative record of a rou
 EV_MODEL_CONFIGURED = "run_model_configured"
 EV_MODEL_ID = "model_id"
 
+def user_option(key, default):
+    """A `userConfig` value if the runtime supplied one, else the built-in default.
+
+    The runtime exports these to HOOKS as CLAUDE_PLUGIN_OPTION_<KEY>. Whether a Bash tool
+    call in a session sees them is not documented and was not verified here, so this is a
+    fallback rather than the mechanism -- the commands and the skill pass
+    ${user_config.<key>} explicitly, which is the documented path.
+
+    Every default below is what the plugin did before there was any configuration, so an
+    install that skips the prompts behaves exactly as it used to. That is the property
+    worth protecting: configuration should let someone change behaviour, never change it
+    for someone who did not ask.
+    """
+    raw = os.environ.get("CLAUDE_PLUGIN_OPTION_" + key.upper())
+    if raw is None or raw == "":
+        return default
+    if isinstance(default, bool):
+        return raw.strip().lower() not in ("0", "false", "no", "off")
+    if isinstance(default, int):
+        try:
+            return int(raw)
+        except ValueError:
+            return default
+    return raw
+
+
 DEFAULT_EFFORT = "low"
 DEFAULT_TIMEOUT = 900
 EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]

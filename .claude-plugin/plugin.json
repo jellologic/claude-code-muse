@@ -28,5 +28,39 @@
   ],
   "displayName": "Muse Code delegation",
   "defaultEnabled": true,
-  "workflows": "./workflows"
+  "workflows": "./workflows",
+  "userConfig": {
+    "default_effort": {
+      "type": "string",
+      "title": "Default reasoning effort",
+      "description": "Effort every delegated round starts at: none, minimal, low, medium, high, xhigh or max. Teams differ on whether low is right for their codebase. Raise it and every task costs more; lower it and more tasks come back needing a revision round.",
+      "default": "low"
+    },
+    "max_rounds": {
+      "type": "number",
+      "title": "Maximum revision rounds per task",
+      "description": "The runaway-cost breaker. A supervisor gets this many rounds to get a task right before the script refuses rather than letting it loop up a bill.",
+      "default": 3,
+      "min": 1,
+      "max": 10
+    },
+    "worktree_root": {
+      "type": "directory",
+      "title": "Where worktrees are created",
+      "description": "Leave empty to create them beside the repository, which is the default and keeps them outside it. Set a path if your setup forbids writing next to a checkout. A path INSIDE the repository removes the isolation that makes --yolo defensible.",
+      "default": ""
+    },
+    "refuse_on_secrets": {
+      "type": "boolean",
+      "title": "Refuse to delegate a tree containing a credential",
+      "description": "On by default, and worth keeping: contributor-tier models state that content may be used for product improvement, and sending a private key there is not undoable. Turn it off only for a repository whose credential-shaped content is entirely test fixtures.",
+      "default": true
+    },
+    "default_model": {
+      "type": "string",
+      "title": "Model for delegated work",
+      "description": "latest-contributor resolves the newest contributor-tier model from muse's own catalog at run time, so a new generation is used the day it lands. Pin a full-rate id such as muse-spark-1.3 for proprietary or client-confidential code.",
+      "default": "latest-contributor"
+    }
+  }
 }

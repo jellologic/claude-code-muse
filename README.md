@@ -226,6 +226,21 @@ cd claude-code-muse
 bash scripts/validate.sh --offline     # free, seconds, no credentials needed
 ```
 
+## Configuring it
+
+`/plugin install` prompts for five values, each with a default that is exactly what the
+plugin did before there was any configuration — skip every prompt and nothing changes.
+
+| | |
+|---|---|
+| **Default reasoning effort** | `low`. Raise it and every task costs more; lower it and more tasks need a revision round. |
+| **Maximum rounds per task** | `3`, bounded 1–10. The runaway-cost breaker. |
+| **Worktree root** | empty, meaning beside the repository. A path *inside* the repo removes the isolation that makes `--yolo` defensible. |
+| **Refuse on a credential** | on. Turn it off only where the credential-shaped content is entirely test fixtures. |
+| **Model** | `latest-contributor`, resolved from muse's catalog at run time. Pin `muse-spark-1.3` for proprietary code. |
+
+Every flag still overrides the configured value for one run.
+
 ## Guardrails
 
 Workers run with `--yolo`, which disables approval prompts and the sandbox. That is

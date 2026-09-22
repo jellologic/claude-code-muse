@@ -786,16 +786,21 @@ def main() -> int:
     common(p)
     p.add_argument("--prompt", required=True)
     p.add_argument("--repo", default=".")
-    p.add_argument("--model", default=core.LATEST)
-    p.add_argument("--effort", default=core.DEFAULT_EFFORT, choices=core.EFFORTS)
+    # Defaults come from userConfig where the runtime supplied it, and are otherwise
+    # exactly what they have always been -- an install that skipped the prompts must
+    # behave identically to one from before there was any configuration.
+    p.add_argument("--model", default=core.user_option("default_model", core.LATEST))
+    p.add_argument("--effort", default=core.user_option("default_effort", core.DEFAULT_EFFORT),
+                   choices=core.EFFORTS)
     p.add_argument("--timeout", type=int, default=core.DEFAULT_TIMEOUT)
     p.add_argument("--max-steps", type=int, default=0)
-    p.add_argument("--max-rounds", type=int, default=DEFAULT_MAX_ROUNDS,
+    p.add_argument("--max-rounds", type=int,
+                   default=core.user_option("max_rounds", DEFAULT_MAX_ROUNDS),
                    help="hard cap on revision rounds (runaway-cost breaker)")
     p.add_argument("--base", default="HEAD")
     p.add_argument("--schema")
     p.add_argument("--branch-prefix", default="muse")
-    p.add_argument("--worktree-root", default=None)
+    p.add_argument("--worktree-root", default=core.user_option("worktree_root", None))
     p.add_argument("--stamp", default=None,
                    help="shared run stamp so sibling tasks land under one namespace")
     p.add_argument("--allow-dirty", action="store_true")
@@ -809,6 +814,7 @@ def main() -> int:
     p.add_argument("--no-secret-scan", action="store_true",
                    help="skip the pre-delegation credential scan")
     p.add_argument("--allow-secrets", action="store_true",
+                   default=not core.user_option("refuse_on_secrets", True),
                    help="scan, report, but do not refuse on a confirmed credential")
     p.set_defaults(fn=cmd_run)
 
