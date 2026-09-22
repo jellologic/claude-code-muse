@@ -75,14 +75,13 @@ jobs:
           fi
           echo "no hardcoded absolute paths"
 
-  # Windows is a known gap (#3). This leg exists to MEASURE it rather than argue about
-  # it: it runs the same free offline suite under Git Bash and reports what breaks.
-  # continue-on-error so a red Windows leg does not block the build while the gap is
-  # still open -- the job's log is the deliverable. Flip it to blocking once it is green.
+  # Windows was a known gap (#3). It is green, so this leg is now BLOCKING: the point of
+  # measuring it was to be able to keep it. It runs the same free offline suite under Git
+  # Bash. Note what it does NOT cover -- muse itself is never invoked here, so live
+  # delegation on Windows remains unverified.
   windows:
-    name: offline suite (windows, reporting only)
+    name: offline suite (windows)
     runs-on: windows-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
