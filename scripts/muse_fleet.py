@@ -253,8 +253,11 @@ def main() -> int:
     # with drop_worktree -- so the second run force-removed the first's LIVE worktrees,
     # destroying in-flight work silently. Add entropy; the stamp stays human-readable
     # and still sorts chronologically.
+    # 4 bytes, not 2. Two bytes is 65536 values, and the birthday bound puts a collision
+    # at ~1.9% across only 50 runs -- which a probabilistic test in the suite duly hit.
+    # Four bytes takes that to ~0.0005% across 200.
     stamp = "{}-{}".format(dt.datetime.now().strftime("%Y%m%d-%H%M%S"),
-                           secrets.token_hex(2))
+                           secrets.token_hex(4))
     out = Path(args.out).resolve() if args.out else repo / ".muse-fleet" / stamp
     out.mkdir(parents=True, exist_ok=True)
     if args.worktree_root is None:

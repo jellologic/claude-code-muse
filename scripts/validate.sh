@@ -438,10 +438,17 @@ src = open(os.path.join(os.environ["PLUGIN_ROOT"], "scripts/muse_fleet.py")).rea
 if "secrets.token_hex" not in src:
     print("        stamp has no entropy source"); sys.exit(1)
 import datetime as dt, secrets
-mk = lambda: "{}-{}".format(dt.datetime.now().strftime("%Y%m%d-%H%M%S"), secrets.token_hex(2))
-s = [mk() for _ in range(50)]
+# Mirror what muse_fleet actually does, including the width -- a test that samples less
+# entropy than the code would pass while the code stayed weak.
+import re as _re
+width = int(_re.search(r"secrets\.token_hex\((\d+)\)", src).group(1))
+if width < 4:
+    print("        token_hex(%d) is too thin: ~1.9%% collision across 50 runs" % width)
+    sys.exit(1)
+mk = lambda: "{}-{}".format(dt.datetime.now().strftime("%Y%m%d-%H%M%S"), secrets.token_hex(width))
+s = [mk() for _ in range(200)]
 if len(set(s)) != len(s):
-    print("        collided in 50 draws"); sys.exit(1)
+    print("        collided in 200 draws"); sys.exit(1)
 # and must still sort chronologically on its time prefix
 if [x[:15] for x in s] != sorted(x[:15] for x in s):
     print("        no longer chronological"); sys.exit(1)
