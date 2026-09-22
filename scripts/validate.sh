@@ -11,7 +11,15 @@ SKILL_MD="$SKILL/skills/muse-fleet/SKILL.md"
 FLEET="$SKILL/scripts/muse_fleet.py"
 TASK="$SKILL/scripts/muse_task.py"
 CORE="$SKILL/scripts/muse_core.py"
-LAB="${MUSE_FLEET_LAB:-$(mktemp -d -t musefleetlab)}"
+# `mktemp -d -t NAME` is BSD-only: GNU coreutils rejects a template with no trailing X's
+# and prints nothing, which silently left LAB empty. Every path below is built from it, so
+# an empty LAB turned "$LAB/v_dirty" into "/v_dirty" -- and mkrepo starts with `rm -rf`.
+LAB="${MUSE_FLEET_LAB:-$(mktemp -d "${TMPDIR:-/tmp}/musefleetlab.XXXXXX")}"
+if [ -z "${LAB:-}" ] || [ ! -d "$LAB" ]; then
+  echo "refusing to run: could not create a scratch dir (LAB='${LAB:-}')" >&2
+  echo "every test path is built from it, and this script rm -rf's those paths." >&2
+  exit 1
+fi
 
 # --offline stops before section 4. Sections 1-3 spawn no muse and cost nothing, so they
 # can run on every change; the live sections cost real money and several minutes.
