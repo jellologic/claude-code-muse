@@ -303,8 +303,22 @@ def session_workspace(session_id: str):
     nested, so match the text rather than assuming a shape that may change."""
     base = (Path(os.path.expanduser(MUSE_DATA_DIR)) / "sessions"
             / ".msp-view-v1" / session_id)
-    snaps = sorted(base.glob("snapshot-*.json"), key=lambda f: f.stat().st_mtime,
-                   reverse=True) if base.is_dir() else []
+    # stat() each candidate defensively instead of inside a sort key. Muse rotates these
+    # snapshots, so one can vanish between the glob and the stat -- and a sort key that
+    # raises would send FileNotFoundError straight out of cmd_revise as a traceback,
+    # breaking the one-JSON-object-on-stdout contract a supervisor parses.
+    dated = []
+    if base.is_dir():
+        try:
+            candidates = list(base.glob("snapshot-*.json"))
+        except OSError:
+            candidates = []
+        for f in candidates:
+            try:
+                dated.append((f.stat().st_mtime, f))
+            except OSError:
+                continue    # rotated away mid-walk; the next snapshot will do
+    snaps = [f for _, f in sorted(dated, key=lambda pair: pair[0], reverse=True)]
     for f in snaps:
         try:
             m = re.search(r'"workspaceRoot"\s*:\s*"([^"]+)"', f.read_text())

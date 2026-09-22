@@ -243,6 +243,28 @@ if wrong: print("        wrong:", wrong)
 sys.exit(1 if wrong else 0)
 PY
 
+# Muse rotates these snapshots. A stat() inside a sort key raises if one vanishes
+# between the glob and the sort, and that FileNotFoundError came straight out of
+# cmd_revise as a traceback -- exactly where a supervisor expects one JSON object.
+ROT="$LAB/v_rotate"
+ROTSID="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+mkdir -p "$ROT/sessions/.msp-view-v1/$ROTSID"
+printf '{"x":{"workspaceRoot":"%s/real"}}\n' "$LAB" \
+  > "$ROT/sessions/.msp-view-v1/$ROTSID/snapshot-good.json"
+ln -s "$ROT/sessions/.msp-view-v1/$ROTSID/gone.json" \
+      "$ROT/sessions/.msp-view-v1/$ROTSID/snapshot-dangling.json" 2>/dev/null
+MUSE_DATA_DIR="$ROT" python3 - "$LAB" "$ROTSID" <<'PY' && ok "a snapshot that vanishes mid-walk does not raise" || bad "session_workspace raised on a rotated snapshot"
+import importlib.util, os, sys
+spec = importlib.util.spec_from_file_location("mc", os.path.join(os.environ["PLUGIN_ROOT"], "scripts/muse_core.py"))
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+lab, sid = sys.argv[1], sys.argv[2]
+try:
+    got = m.session_workspace(sid)
+except Exception as e:
+    print("        raised:", type(e).__name__, e); sys.exit(1)
+sys.exit(0 if got == lab + "/real" else 1)
+PY
+
 python3 - <<'PY' && ok "muse_cmd carries --session-id only when given one" || bad "muse_cmd session wiring"
 import importlib.util, os, sys, pathlib
 spec = importlib.util.spec_from_file_location("mc", os.path.join(os.environ["PLUGIN_ROOT"], "scripts/muse_core.py"))
