@@ -46,6 +46,24 @@ All notable changes to this plugin are documented here. Format follows
   it counted source files and a mid-size repo passed it; it is now 20000 and
   `MUSE_SCAN_MAX_FILES` overrides it.
 
+- **A `SubagentStop` backstop for the central claim** (#28). `finish` now refuses a bad
+  verdict, which closes the path where one gets *written*; it cannot close the path where
+  no record is written at all, because the supervisor ran out of turns, was interrupted,
+  or stopped and reported from memory. Scoped by matcher to `muse-supervisor`, it reads
+  what is already on disk — no model call, no heuristic, no new state — and tells the
+  orchestrating agent where the artifacts and the summary disagree. It reports rather than
+  blocks: the hook cannot see the brief, so it cannot tell a supervisor stopping too early
+  from one the user interrupted deliberately.
+- **A `SessionEnd` hook names worktrees still open** (#22). They accumulate silently until
+  someone runs `/muse:cleanup` for an unrelated reason. Authority is `git worktree list`,
+  not a directory scan, and only `muse/` and `fleet/` branches are reported — the user's
+  own worktrees are not this plugin's business.
+- **Only the fleet skill auto-triggers now** (#21). All seven `/muse:*` commands
+  registered as skills and could fire on their descriptions: `commands/` was chosen over
+  `skills/` specifically to avoid that, and the two layouts turn out to be loaded
+  identically. `disable-model-invocation: true` on all seven leaves them typeable and
+  stops them competing with the one surface whose description was carefully tightened.
+  `/muse:cleanup` firing on an inference was the worst case — it removes worktrees.
 - **The supervisor has a turn ceiling** (#25). Every other runaway path was bounded —
   `--max-rounds` on the task, `--max-steps` on muse, a round budget — and the supervisor's
   own agent loop had none, which was the most consistent gap with the project's own stated

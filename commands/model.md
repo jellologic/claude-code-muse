@@ -1,6 +1,7 @@
 ---
 description: Show which Muse Code model delegation will use, and optionally update the interactive pin
 argument-hint: [--write]
+disable-model-invocation: true
 allowed-tools: Bash, Read
 model: haiku
 ---

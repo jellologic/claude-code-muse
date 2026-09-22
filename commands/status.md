@@ -1,6 +1,7 @@
 ---
 description: Report what every delegated muse task did — rounds, verdict, patch size, and whether a check actually ran
 argument-hint: [--out <artifact-root>]
+disable-model-invocation: true
 allowed-tools: Bash(python3:*), Read
 model: haiku
 ---

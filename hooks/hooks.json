@@ -11,6 +11,29 @@
           }
         ]
       }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "muse-supervisor",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/supervisor_stop.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/session_end.py\"",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }

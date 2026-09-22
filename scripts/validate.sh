@@ -117,6 +117,49 @@ for f in routing.md workflow.md muse-cli.md field-notes.md; do
 done
 grep -q 'references/routing.md' "$SKILL_MD" && ok "SKILL.md points at routing.md" || bad "routing.md unreferenced"
 
+# Every command registers as a skill and can fire on its description, not only when
+# typed -- commands/ and skills/ are loaded identically, which is the opposite of the
+# premise commands/ was chosen on. There is deliberately ONE auto-triggering surface,
+# whose description was tightened with exclusions; seven more competing for the same
+# prompts undermines it, and /muse:cleanup firing on an inference removes worktrees.
+python3 - <<'PY' && ok "only the fleet skill auto-triggers; every command is opt-in" || bad "a command can fire without being typed"
+import json, os, pathlib, re, sys
+ROOT = pathlib.Path(os.environ["PLUGIN_ROOT"])
+problems = []
+for f in sorted((ROOT / "commands").glob("*.md")):
+    head = f.read_text(encoding="utf-8").split("---")[1] if "---" in f.read_text(encoding="utf-8") else ""
+    if not re.search(r"^disable-model-invocation:\s*true\s*$", head, re.M):
+        problems.append("commands/%s can be invoked by the model" % f.name)
+skill = (ROOT / "skills/muse-fleet/SKILL.md").read_text(encoding="utf-8")
+if re.search(r"^disable-model-invocation:\s*true\s*$", skill.split("---")[1], re.M):
+    problems.append("the fleet skill is opted out of auto-triggering -- it is the one "
+                    "surface that is supposed to fire on its own")
+# Registered hooks, and the two disciplines their scripts follow.
+hooks = json.loads((ROOT / "hooks/hooks.json").read_text(encoding="utf-8"))
+if "hooks" not in hooks:
+    problems.append('hooks.json must wrap events in a top-level "hooks" key or it '
+                    'registers nothing while parsing fine')
+else:
+    for ev in ("SessionStart", "SubagentStop", "SessionEnd"):
+        if ev not in hooks["hooks"]:
+            problems.append("hook event %s is not registered" % ev)
+    sub = hooks["hooks"].get("SubagentStop") or [{}]
+    if sub[0].get("matcher") != "muse-supervisor":
+        problems.append("SubagentStop is not scoped to muse-supervisor (matcher=%r), so "
+                        "it would fire on unrelated subagents" % sub[0].get("matcher"))
+    for ev, entries in hooks["hooks"].items():
+        for e in entries:
+            for h in e.get("hooks", []):
+                if "${CLAUDE_PLUGIN_ROOT}" not in h.get("command", ""):
+                    problems.append("%s hook command is not rooted at "
+                                    "${CLAUDE_PLUGIN_ROOT}: %r" % (ev, h.get("command")))
+                if not h.get("timeout"):
+                    problems.append("%s hook declares no timeout" % ev)
+if problems:
+    for p in problems: print("        " + p)
+    sys.exit(1)
+PY
+
 # Component frontmatter. `claude plugin validate <dir> --strict` parses these files but
 # does NOT reject an unknown frontmatter key -- measured, by putting one in and watching
 # it pass -- so the manifest validator in CI is not a guard for any of this.
@@ -1469,6 +1512,64 @@ mkdir -p "$SC/not-artifacts" && echo precious > "$SC/not-artifacts/data.txt"
 # --help must not spill source: the old fixed line range printed `set -uo pipefail`.
 bash "$SKILL/scripts/muse_ask.sh" --help 2>/dev/null | grep -q 'set -uo pipefail' \
   && bad "muse_ask.sh --help leaks source lines" || ok "muse_ask.sh --help prints only the header"
+
+# The two hooks that speak. Both follow the discipline preflight.sh set -- silent unless
+# there is something to say, and always exit 0, because a hook that can fail a session is
+# worse than no hook -- so "silent" and "exit 0" are the two things most worth asserting,
+# and a guard that only checks the loud path would miss both.
+HK="$LAB/v_hooks"; mkrepo "$HK"
+printf '.muse-fleet/\n' >> "$HK/.git/info/exclude"
+
+# SessionEnd, nothing open. The control that the loud case below is not unconditional.
+HQ=$(echo '{}' | CLAUDE_PROJECT_DIR="$HK" python3 "$SKILL/hooks/session_end.py" 2>&1)
+HQRC=$?
+[ -z "$HQ" ] && [ "$HQRC" -eq 0 ] \
+  && ok "SessionEnd says nothing when no worktree is open" \
+  || bad "SessionEnd is not silent on a clean project" "rc=$HQRC out=$HQ"
+
+# SessionEnd with one of ours and one of the user's own. Only ours is our business.
+git -C "$HK" worktree add -q -b "muse/20260101-aaaa/t1" "$LAB/v_hooks_wt1" HEAD
+git -C "$HK" worktree add -q -b "my-own-feature" "$LAB/v_hooks_wt2" HEAD
+HL=$(echo '{}' | CLAUDE_PROJECT_DIR="$HK" python3 "$SKILL/hooks/session_end.py" 2>&1)
+HLRC=$?
+[ "$HLRC" -eq 0 ] && ok "SessionEnd exits 0 even when it has something to say" \
+  || bad "SessionEnd can fail a session" "rc=$HLRC"
+echo "$HL" | grep -q 'muse/20260101-aaaa/t1' \
+  && ok "SessionEnd names the delegation worktree still open" \
+  || bad "an open worktree went unreported" "$HL"
+echo "$HL" | grep -q 'my-own-feature' \
+  && bad "SessionEnd reports the user's own worktrees" "$HL" \
+  || ok "SessionEnd leaves the user's own worktrees alone"
+
+# SubagentStop, the backstop for the path `finish` cannot close: the record is never
+# written at all because the supervisor ran out of turns, was interrupted, or stopped and
+# reported from memory.
+mkdir -p "$HK/.muse-fleet/tasks/stopped" "$HK/.muse-fleet/tasks/clean"
+cat > "$HK/.muse-fleet/tasks/stopped/state.json" <<'JSON'
+{"id":"stopped","done":false,"rounds":[{"n":1,"kind":"initial","patch_lines":12}]}
+JSON
+cat > "$HK/.muse-fleet/tasks/clean/state.json" <<'JSON'
+{"id":"clean","done":true,"verdict":"accept","rounds":[{"n":1,"kind":"initial"}]}
+JSON
+cat > "$HK/.muse-fleet/tasks/clean/task.json" <<'JSON'
+{"id":"clean","verdict":"accept","verified_by_supervisor":true,"out_of_band_edit":false}
+JSON
+HS=$(echo '{}' | CLAUDE_PROJECT_DIR="$HK" python3 "$SKILL/hooks/supervisor_stop.py" 2>&1)
+HSRC=$?
+[ "$HSRC" -eq 0 ] && ok "SubagentStop reports without blocking the supervisor" \
+  || bad "SubagentStop blocks or crashes" "rc=$HSRC out=$HS"
+echo "$HS" | grep -q 'stopped' \
+  && ok "a supervisor that stopped without a verdict is surfaced" \
+  || bad "a verdict-less task went unmentioned" "$HS"
+echo "$HS" | grep -q "^  - clean:" \
+  && bad "SubagentStop complains about a properly verified task" "$HS" \
+  || ok "a verified task produces no note"
+
+# And the fully clean project: nothing to say, nothing said.
+rm -rf "$HK/.muse-fleet/tasks/stopped"
+HS2=$(echo '{}' | CLAUDE_PROJECT_DIR="$HK" python3 "$SKILL/hooks/supervisor_stop.py" 2>&1)
+[ -z "$HS2" ] && ok "SubagentStop is silent when the artifacts are clean" \
+  || bad "SubagentStop speaks on a clean run" "$HS2"
 
 head_ "3c. Data-loss and process guards"
 

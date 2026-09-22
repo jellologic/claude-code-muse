@@ -112,6 +112,16 @@ root is writable — with a fix on every failing line.
 | `/muse:model` | Which contributor model delegation will use |
 | `/muse:cleanup` | Reap worktrees, branches and artifacts a run left behind |
 
+Only the `muse-fleet` skill fires on its own; every `/muse:*` command is opt-in, because
+one carefully-scoped auto-triggering surface beats eight competing for the same prompts —
+and `/muse:cleanup` guessing that you meant it would remove worktrees.
+
+Three hooks, all silent unless they have something to say: **SessionStart** warns when
+delegation would fail (no binary, no credentials, a muse version this plugin has not been
+verified against), **SubagentStop** reports what a finished task's artifacts say where
+they disagree with the supervisor's summary, and **SessionEnd** names delegation
+worktrees still holding unapplied patches.
+
 The `muse-fleet` skill also triggers on its own when a job obviously wants fan-out — a
 phrasing like *"this is a lot of grunt work"*, *"don't burn my tokens on this"*, *"farm
 this out"*, or naming Muse Code directly. The explicit commands are more reliable;

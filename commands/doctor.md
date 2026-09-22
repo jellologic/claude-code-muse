@@ -1,6 +1,7 @@
 ---
 description: Report whether this machine can delegate to muse, what model it would use, and what would go wrong
 argument-hint: [--scan] [--repo <path>]
+disable-model-invocation: true
 allowed-tools: Bash(python3:*), Read
 model: haiku
 ---
