@@ -332,8 +332,10 @@ def cmd_finish(args) -> int:
     tdir = task_dir(args)
     st = load_state(tdir)
 
-    # Re-harvest so the recorded patch reflects the tree as it stands right now,
-    # including anything the supervisor fixed by hand inside the worktree.
+    # Re-harvest so the recorded patch reflects the tree as it stands right now. Note what
+    # that means: a supervisor that edited the worktree by hand would have its edit folded
+    # into this patch and misattributed to muse. That is why the supervisor has no Write or
+    # Edit tool -- the architecture is enforced by the toolset, not by this comment.
     h = core.harvest(Path(st["worktree"]), st["base"], st["excludes"], tdir / "patch.diff") \
         if Path(st["worktree"]).exists() else {"patch_lines": 0, "files_changed": [],
                                                "harvest_error": "worktree missing"}

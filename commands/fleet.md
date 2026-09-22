@@ -1,7 +1,7 @@
 ---
 description: Decompose a job into disjoint tasks and run the supervised muse fleet — one Opus supervisor per task, each verified before it completes
 argument-hint: <job> — e.g. "add a pytest file for each module in src/"
-allowed-tools: Bash, Read, Grep, Glob, Workflow, Agent, AskUserQuestion
+allowed-tools: Bash, Read, Grep, Glob, Workflow, Agent, Task, AskUserQuestion
 ---
 
 # Run the supervised fleet

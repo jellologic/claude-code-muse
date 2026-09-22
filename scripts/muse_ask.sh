@@ -25,7 +25,10 @@ WRITE=0
 TIMEOUT=600
 MAX_STEPS=""
 
-usage() { sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+# Print the header comment block, stopping at the first non-comment line. A fixed line
+# range drifts the moment the header is edited -- which is how `--help` started printing
+# `set -uo pipefail` as if it were documentation.
+usage() { awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$0"; exit "${1:-0}"; }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -51,13 +54,20 @@ command -v muse >/dev/null || { echo "muse not found on PATH" >&2; exit 1; }
 # Resolve "latest-contributor" through the same logic the fleet uses, so a single ask and
 # a fleet run never silently disagree about which model they are paying for.
 if [[ "$MODEL" == "latest-contributor" ]]; then
-  MODEL="$(python3 -c "
+  # The path goes in as argv, not interpolated into the source: a plugin root containing
+  # an apostrophe would otherwise break the Python literal. resolve_model already falls
+  # back to muse_core.FALLBACK_MODEL on its own when the catalog is missing, so a second
+  # literal here would just be a pin that goes stale independently.
+  MODEL="$(python3 -c '
 import importlib.util, sys
-spec = importlib.util.spec_from_file_location('mc', '$SKILL_DIR/scripts/muse_core.py')
+spec = importlib.util.spec_from_file_location("mc", sys.argv[1])
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 sys.stdout.write(m.resolve_model(m.LATEST)[0])
-" 2>/dev/null)" || MODEL="muse-spark-1.3-contributor"
-  [[ -z "$MODEL" ]] && MODEL="muse-spark-1.3-contributor"
+' "$SKILL_DIR/scripts/muse_core.py" 2>/dev/null)"
+  if [[ -z "$MODEL" ]]; then
+    echo "could not load $SKILL_DIR/scripts/muse_core.py to resolve a model" >&2
+    exit 1
+  fi
 fi
 
 ARGS=(exec --json --model "$MODEL" --reasoning-effort "$EFFORT"

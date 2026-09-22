@@ -262,6 +262,17 @@ git -C "$SC" branch --format='%(refname:short)' | grep -q '^fleet/s/c$' \
 [ ! -d "$SC/.muse-fleet" ] \
   && ok "cleanup --artifacts removes the artifact root" || bad "artifact root survived"
 
+# --artifacts rmtree's a path the user named. A typo must not take a directory with it,
+# so the marker-file check is the only thing between a mistyped --out and real data loss.
+mkdir -p "$SC/not-artifacts" && echo precious > "$SC/not-artifacts/data.txt"
+(cd "$SC" && python3 "$SKILL/scripts/muse_cleanup.py" --repo . --out not-artifacts --yes --artifacts >/dev/null 2>&1)
+[ -f "$SC/not-artifacts/data.txt" ] \
+  && ok "cleanup refuses to delete a root with no task markers" || bad "DELETED a non-artifact dir"
+
+# --help must not spill source: the old fixed line range printed `set -uo pipefail`.
+bash "$SKILL/scripts/muse_ask.sh" --help 2>/dev/null | grep -q 'set -uo pipefail' \
+  && bad "muse_ask.sh --help leaks source lines" || ok "muse_ask.sh --help prints only the header"
+
 # ------------------------------------------------------------ 4. live runs
 if [ "$OFFLINE" = "1" ]; then
   printf '\n\033[33mSKIP\033[0m  sections 4+ (live muse runs) — --offline\n'

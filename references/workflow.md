@@ -222,7 +222,8 @@ Invoke it with the job and the repo as `args`:
 
 ```
 Workflow({ script: <above>, args: { job: "add pytest coverage to the four untested modules",
-                                    repo: ".", stamp: "20260919-1430", maxRounds: 3 } })
+                                    repo: ".", pluginRoot: "<echo ${CLAUDE_PLUGIN_ROOT}>",
+                                    stamp: "20260919-1430", maxRounds: 3 } })
 ```
 
 ## Why each choice is the way it is

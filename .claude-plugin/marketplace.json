@@ -9,6 +9,11 @@
     {
       "name": "muse",
       "source": "./",
+      "author": {
+        "name": "jellologic",
+        "email": "31935831+jellologic@users.noreply.github.com",
+        "url": "https://github.com/jellologic"
+      },
       "description": "Offload bulk coding work to Muse Code in isolated git worktrees, each supervised by an Opus agent that verifies and re-prompts until the patch is right.",
       "version": "1.0.0",
       "category": "development",

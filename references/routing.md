@@ -111,8 +111,10 @@ with its own timeouts, harvesting, exclusions and teardown.
 A single muse question — cheap analysis inside a larger Claude pipeline:
 
 ```javascript
+// Inside the main script, where `const PLUGIN = args.pluginRoot` is in scope. A workflow
+// script sees no environment, so ${CLAUDE_PLUGIN_ROOT} here would be an undefined identifier.
 const inventory = await agent(
-  `Run: ${CLAUDE_PLUGIN_ROOT}/scripts/muse_ask.sh --effort low \\
+  `Run: ${PLUGIN}/scripts/muse_ask.sh --effort low \\
      "List every file importing 'requests' with its line number"
    Return its stdout verbatim.`,
   { label: 'inventory', effort: 'low' })

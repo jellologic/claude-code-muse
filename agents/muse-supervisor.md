@@ -30,7 +30,7 @@ description: |
   </commentary>
   </example>
 model: opus
-color: purple
+color: magenta
 tools: ["Bash", "Read", "Grep", "Glob"]
 ---
 

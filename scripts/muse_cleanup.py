@@ -97,6 +97,34 @@ def artifact_index(root: Path):
     return idx
 
 
+def looks_like_artifact_root(root: Path) -> bool:
+    """Does this directory actually hold delegated-task artifacts?
+
+    --out is free-form, and --artifacts deletes the whole tree. A typo must not take a
+    directory with it, so require the marker files a task always writes before removing
+    anything.
+    """
+    if not root.is_dir():
+        return False
+    for _dirpath, _dirs, files in os.walk(root):
+        if "state.json" in files or "task.json" in files:
+            return True
+    return False
+
+
+def remove_artifact_root(out: str) -> None:
+    root = Path(out)
+    if not root.exists():
+        return
+    if not looks_like_artifact_root(root):
+        print("refusing to delete {}: no state.json or task.json anywhere under it, so "
+              "this does not look like a muse artifact root".format(root))
+        return
+    # No ignore_errors: a partial delete must be visible, not swallowed.
+    shutil.rmtree(root)
+    print("removed artifact root {}".format(root))
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Reap muse delegation worktrees and artifacts.")
     ap.add_argument("--repo", default=".")
@@ -142,9 +170,8 @@ def main() -> int:
 
     if not targets:
         print("nothing to remove under {}".format(repo))
-        if args.artifacts and args.yes and Path(args.out).exists():
-            shutil.rmtree(args.out, ignore_errors=True)
-            print("removed artifact root {}".format(args.out))
+        if args.artifacts and args.yes:
+            remove_artifact_root(args.out)
         return 0
 
     print("{} worktree(s) to remove:".format(len(targets)))
@@ -173,9 +200,8 @@ def main() -> int:
         wt_root.rmdir()
         print("removed empty {}".format(wt_root))
 
-    if args.artifacts and Path(args.out).exists():
-        shutil.rmtree(args.out, ignore_errors=True)
-        print("removed artifact root {}".format(args.out))
+    if args.artifacts:
+        remove_artifact_root(args.out)
 
     print("\n{} worktree(s) removed.".format(removed))
     return 0

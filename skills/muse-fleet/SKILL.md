@@ -139,7 +139,7 @@ not consent to spend it.
 Read `${CLAUDE_PLUGIN_ROOT}/references/workflow.md` and run the script in it.
 
 ```
-Workflow({ script: <${CLAUDE_PLUGIN_ROOT}/references/workflow.md>,
+Workflow({ script: <the javascript block in ${CLAUDE_PLUGIN_ROOT}/references/workflow.md>,
            args: { job: "...", repo: ".", pluginRoot: "<echo ${CLAUDE_PLUGIN_ROOT}>",
                    stamp: "<YYYYmmdd-HHMM>", maxRounds: 3 } })
 ```
@@ -282,6 +282,10 @@ Every muse run uses `--yolo`, which disables approval prompts and the sandbox. T
 defensible **only because the blast radius is a throwaway worktree on a throwaway branch**.
 Preserve that property:
 
+- **The acceptance check is not sandboxed.** The worker runs in a throwaway worktree, but
+  `muse_task.py verify` runs its `--command` on the host with your privileges, and in the
+  fleet path that string was written by a model. Read a planned check like a command you
+  are about to type yourself; the worktree is only its working directory, not a boundary.
 - Never point a fleet at a dirty main working copy.
 - Keep worktrees outside the repo (the scripts' default) so `.muse/` never pollutes it.
 - Use `--max-steps` on open-ended prompts and `--max-rounds` on supervised ones so a
