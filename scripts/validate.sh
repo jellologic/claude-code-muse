@@ -938,8 +938,12 @@ spec = importlib.util.spec_from_file_location(
 mc = importlib.util.module_from_spec(spec); spec.loader.exec_module(mc)
 repo, wt, sha, tid, out = sys.argv[1:6]
 excludes = [".muse-fleet/", "build"]
+# "HEAD" is what --base defaults to, and it is not interchangeable with "main" here:
+# inside a worktree HEAD resolves to that worktree's own branch, so after finish
+# --commit a diff against it is empty. That is the shape of the erasure these fixtures
+# have to be able to reproduce.
 json.dump({"id": tid, "repo": repo, "worktree": wt, "branch": "muse/gate/" + tid,
-           "base": "main", "base_sha": sha, "excludes": excludes,
+           "base": "HEAD", "base_sha": sha, "excludes": excludes,
            "rounds": [{"n": 1, "kind": "initial",
                        "patch_fingerprint": mc.patch_fingerprint(
                            pathlib.Path(wt), sha, excludes)}],
@@ -1047,6 +1051,66 @@ GJ=$(python3 "$TASK" finish --id gexcl --out "$GOUT" --verdict accept 2>/dev/nul
 gate_json "$GJ" "d.get('verdict')=='accept' and d.get('verified_by_supervisor') is True and d.get('out_of_band_edit') is False" \
   && ok "churn in an excluded path invalidates nothing" \
   || bad "an excluded file broke the certification" "$GJ"
+
+# The timeout path had no test at all, and the comment above it claimed a group kill
+# that never happened: subprocess.run's timeout signals the direct child only, and
+# start_new_session made that strictly worse by detaching the survivors into a session
+# nothing could find afterwards. They keep writing into a worktree `finish --cleanup` is
+# about to force-remove, and those writes land in the patch after the check was declared.
+#
+# Detected by consequence rather than by process listing, because pgrep is not portable
+# and a surviving process that does nothing is not the problem: the grandchild appends to
+# a file on a loop, and a tree that is really dead stops appending.
+gate_task gkill
+KILLMARK="$LAB/v_gate_survivor.txt"
+: > "$KILLMARK"
+KOUT=$(python3 "$TASK" verify --id gkill --out "$GOUT" --timeout 2 \
+  --command "sh -c 'while : ; do printf . >> \"$KILLMARK\" ; sleep 0.1 ; done' & sleep 60" 2>/dev/null)
+gate_json "$KOUT" "d.get('timed_out') is True and d.get('passed') is False" \
+  && ok "a hung check times out as a parseable failure" || bad "timeout did not report" "$KOUT"
+# The control for the guard itself: if the grandchild never ran, a dead-tree assertion
+# passes for the wrong reason.
+KILLED_AT=$(wc -c < "$KILLMARK" | tr -d ' ')
+[ "$KILLED_AT" -gt 0 ] \
+  && ok "the check really did spawn a grandchild that outlived its shell" \
+  || bad "the survivor fixture never started, so the next check proves nothing"
+sleep 2
+KILLED_AFTER=$(wc -c < "$KILLMARK" | tr -d ' ')
+[ "$KILLED_AFTER" -eq "$KILLED_AT" ] \
+  && ok "a timed-out check leaves no survivors writing into the worktree" \
+  || bad "grandchildren outlived the timeout" "grew from $KILLED_AT to $KILLED_AFTER bytes"
+
+# The deliverable erased from every record, then the branch holding it reaped as
+# finished. finish --commit advances the worktree HEAD after the harvest, and the second
+# finish used to diff against the muse commit: 9 lines became 0, task.json reported an
+# empty patch, and cleanup treats a finished task as safe to reap. Pinning the base to a
+# sha closed that path; this holds it closed, because the symptom is silent.
+gate_task gtwice
+python3 "$TASK" verify --id gtwice --out "$GOUT" --command "test -f added.py" >/dev/null 2>&1
+python3 "$TASK" finish --id gtwice --out "$GOUT" --verdict accept --commit --summary "first" >/dev/null 2>&1
+TWICE_BYTES=$(wc -c < "$GOUT/gtwice/patch.diff" | tr -d ' ')
+GJ=$(python3 "$TASK" finish --id gtwice --out "$GOUT" --verdict reject --summary "second" 2>/dev/null)
+gate_json "$GJ" "d.get('status')=='refused' and d.get('verdict')=='accept'" \
+  && ok "a second finish is refused rather than replacing the first verdict" \
+  || bad "the second verdict overwrote the first" "$GJ"
+# --force is the escape hatch, and the thing it must NOT do is lose the work. This is
+# the original data-loss reproduction, run with the guard deliberately out of the way.
+GJ=$(python3 "$TASK" finish --id gtwice --out "$GOUT" --verdict accept --force --summary "third" 2>/dev/null)
+gate_json "$GJ" "d.get('patch_lines') and d.get('patch_lines') > 0" \
+  && ok "a forced re-finish after --commit still sees the work" \
+  || bad "the committed work vanished from the harvest" "$GJ"
+[ "$(wc -c < "$GOUT/gtwice/patch.diff" | tr -d ' ')" -eq "$TWICE_BYTES" ] \
+  && ok "patch.diff is byte-identical across the re-finish" \
+  || bad "patch.diff changed size across a re-finish" \
+      "was $TWICE_BYTES, now $(wc -c < "$GOUT/gtwice/patch.diff" | tr -d ' ')"
+
+# A refusal is not a finish. The accept gate returns before `done` is set, so the path
+# the gate tells a supervisor to take -- verify, then finish again -- must stay open.
+python3 "$TASK" verify --id gnone --out "$GOUT" --command "test -f added.py" >/dev/null 2>&1
+GJ=$(python3 "$TASK" finish --id gnone --out "$GOUT" --verdict accept 2>/dev/null)
+gate_json "$GJ" "d.get('verdict')=='accept' and d.get('verified_by_supervisor') is True" \
+  && ok "the recovery the gate prescribes is not blocked by the re-finish guard" \
+  || bad "a refused accept locked the task out of finishing" "$GJ"
 
 # Only `accept` claims verification. Gating `reject` would strand a task whose check
 # never passed -- which is precisely the task most in need of a verdict.

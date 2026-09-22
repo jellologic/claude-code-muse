@@ -486,27 +486,39 @@ def cmd_verify(args) -> int:
         # The patch this check actually ran against.
         "patch_before": fp(),
     }
+    # Popen rather than subprocess.run, and this is the whole point of the method: run's
+    # timeout kills only the direct child. The command is a shell line that spawns a test
+    # runner or a build, and start_new_session detaches those into their own session --
+    # which makes a shell-only kill strictly WORSE, because nothing afterwards can find
+    # them. They keep writing into a worktree that `finish --cleanup` is about to force
+    # remove, and those writes land in the harvested patch after the check was declared.
+    # kill_process_tree signals the whole group, which is what the session was created
+    # for. This comment used to claim the group kill happened; it did not.
+    p = subprocess.Popen(args.command, cwd=str(wt), shell=True,
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                         text=True, start_new_session=True)
     try:
-        # start_new_session so a hung check can be killed as a group: the command is a
-        # shell line that may spawn a test runner or a build, and killing only the shell
-        # leaves those running against a worktree that is about to be removed.
-        r = subprocess.run(args.command, cwd=str(wt), shell=True,
-                           capture_output=True, text=True, timeout=args.timeout,
-                           start_new_session=True)
+        stdout, stderr = p.communicate(timeout=args.timeout)
         rec.update({
-            "exit_code": r.returncode,
-            "passed": r.returncode == 0,
-            "stdout_tail": tail(r.stdout),
-            "stderr_tail": tail(r.stderr),
+            "exit_code": p.returncode,
+            "passed": p.returncode == 0,
+            "stdout_tail": tail(stdout or ""),
+            "stderr_tail": tail(stderr or ""),
         })
-    except subprocess.TimeoutExpired as e:
+    except subprocess.TimeoutExpired:
         # A hung check must come back as a parseable failure. Raising here would hand
         # the supervisor a traceback on stdout instead of JSON, and it would have no
         # way to tell "the check hung" from "the script is broken".
+        core.kill_process_tree(p)
+        try:
+            # Drain whatever it managed to write. Safe to block briefly now: every
+            # writer holding the other end of these pipes has just been signalled.
+            stdout, stderr = p.communicate(timeout=10)
+        except (subprocess.TimeoutExpired, ValueError, OSError):
+            stdout = stderr = ""
         rec.update({
             "exit_code": None, "passed": False, "timed_out": True,
-            "stdout_tail": tail((e.stdout or b"").decode(errors="replace")
-                                if isinstance(e.stdout, bytes) else (e.stdout or "")),
+            "stdout_tail": tail(stdout or ""),
             "stderr_tail": "acceptance check exceeded {}s".format(args.timeout),
         })
     # Taken AFTER the command, and this is the one finish compares against. A check is
@@ -551,14 +563,36 @@ def cmd_finish(args) -> int:
     tdir = task_dir(args)
     st = load_state(tdir)
 
+    # cmd_revise refuses a finished task and this had no equivalent guard, so a second
+    # finish silently replaced the first verdict, summary and concerns and re-harvested
+    # on top -- folding in whatever had been written since. A refusal is not a finish:
+    # the accept gate returns before `done` is set, so re-verifying and finishing again
+    # after one is the normal path and is not what this stops.
+    if st.get("done") and not args.force:
+        emit({"id": st["id"], "status": "refused",
+              "reason": "task already finished with verdict '{}'. Finishing again would "
+                        "replace that verdict and re-harvest over the recorded patch. "
+                        "Pass --force if that is genuinely what you want."
+                        .format(st.get("verdict")),
+              "verdict": st.get("verdict"),
+              "patch": str(tdir / "patch.diff")})
+        return 1
+
     # Re-harvest so the recorded patch reflects the tree as it stands right now. Note what
     # that means: a supervisor that edited the worktree by hand gets its edit folded into
     # this patch. Withholding Write and Edit from the supervisor makes that unlikely, not
     # impossible -- it still has Bash, and a shell redirect is a write -- so the fold is
     # measured below as out_of_band_edit rather than assumed away.
-    h = core.harvest(Path(st["worktree"]), harvest_base(st), st["excludes"], tdir / "patch.diff") \
-        if Path(st["worktree"]).exists() else {"patch_lines": 0, "files_changed": [],
-                                               "harvest_error": "worktree missing"}
+    wt_here = Path(st["worktree"])
+    h = core.harvest(wt_here, harvest_base(st), st["excludes"], tdir / "patch.diff") \
+        if wt_here.exists() else {"patch_lines": 0, "files_changed": [],
+                                  "harvest_error": "worktree missing"}
+    # Taken here, beside the harvest, and deliberately BEFORE --commit: this has to
+    # describe the same bytes that just went into patch.diff. Pinning the base to a sha
+    # makes a commit invisible to the diff, so measuring after would give the same answer
+    # today -- but it would make this correct by coincidence rather than by construction.
+    now = core.patch_fingerprint(wt_here, harvest_base(st), st["excludes"]) \
+        if wt_here.exists() else None
     if args.commit and h["patch_lines"]:
         core.commit_worktree(Path(st["worktree"]),
                              "muse({}): {}".format(st["id"], (args.summary or st["id"])[:70]))
@@ -569,8 +603,6 @@ def cmd_finish(args) -> int:
     # collect-only gate succeeded and the real check went red. Observed exactly that.
     verifs = st.get("verifications", [])
     final = verifs[-1] if verifs else None
-    now = core.patch_fingerprint(Path(st["worktree"]), harvest_base(st), st["excludes"]) \
-        if Path(st["worktree"]).exists() else None
     # Three separate questions, deliberately not collapsed: did a check run, did the last
     # one pass, and was it looking at THIS patch. Only all three together mean verified.
     passed = bool(final) and bool(final.get("passed"))
@@ -731,6 +763,8 @@ def main() -> int:
                    help="residual concern for the human reviewer (repeatable)")
     p.add_argument("--commit", action="store_true")
     p.add_argument("--cleanup", action="store_true")
+    p.add_argument("--force", action="store_true",
+                   help="finish a task that already has a verdict, replacing it")
     p.set_defaults(fn=cmd_finish)
 
     p = sub.add_parser("cleanup", help="drop the worktree and branch")

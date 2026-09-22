@@ -64,7 +64,13 @@ $T finish --id <id> --out <out> --verdict accept|revise|reject --summary "..."
 
 `run` refuses over an id that already has a task: re-running would overwrite its
 `patch.diff` and orphan its worktree. Copy the patch elsewhere first and pass `--force`, or
-use a different `--id`.
+use a different `--id`. `finish` refuses a task that already has a verdict for the same
+reason — it would replace the verdict and re-harvest over the recorded patch. A *refused*
+accept is not a verdict, so re-verifying and finishing again after one is the normal path
+and is not what that stops.
+
+`verify --timeout <s>` kills the whole process group, not just the shell it started, so a
+hung build leaves nothing behind writing into a worktree you are about to reap.
 
 Rounds share one worktree **and one muse session**, so `revise` edits the previous round's
 work rather than starting over, and the worker still has its brief and its own reasoning in

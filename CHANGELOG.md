@@ -32,6 +32,22 @@ All notable changes to this plugin are documented here. Format follows
 
 ### Fixed
 
+- **A timed-out acceptance check left its grandchildren running** (#13). `cmd_verify`
+  carried a comment saying `start_new_session` let a hung check be killed as a group, and
+  then called `subprocess.run(timeout=...)`, which signals only the direct child —
+  `kill_process_tree` existed for exactly this and was never called. The session made it
+  *worse*: survivors were detached where nothing could reap them. The review timed out a
+  check at 3s and found five `sleep 600` processes still alive afterwards, writing into a
+  worktree `finish --cleanup` was about to force-remove. It now uses `Popen` +
+  `kill_process_tree`, matching `run_muse`. The timeout path had no test at all; it has
+  three now, including a control proving the survivor fixture really spawns one.
+- **A second `finish` replaced the first verdict silently** (#12). `cmd_revise` refuses a
+  finished task and this had no equivalent guard, so a second call overwrote the verdict,
+  summary and concerns and re-harvested on top. With `--commit` it also used to erase the
+  deliverable — 9 patch lines became 0, `task.json` reported an empty patch, and
+  `/muse:cleanup` reaps a finished task's branch. Pinning the base to a sha closed the
+  erasure; the guard now closes the overwrite. `--force` is the override, and a *refused*
+  accept is not a finish, so the recovery the gate prescribes stays open.
 - **`harvest` failed on any repository with a `.gitignore`.** Found by a guard written for
   the above, and shipped for as long as the exclude list has existed. `git add -A --
   ':(exclude,glob)__pycache__'` exits 1 when git *already* ignores `__pycache__`, and
