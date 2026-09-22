@@ -1,16 +1,18 @@
 ---
 name: muse-fleet
 description: >-
-  Delegate bulk coding work to Muse Code (`muse exec`) instances running in isolated git
-  worktrees, each supervised by an Opus agent that reviews the patch, runs the acceptance
-  check and sends muse back for revisions until the work is right. Use this whenever a job
-  splits into several independent, mechanical edits — repetitive refactors across many
-  files, adding tests or docstrings to a list of modules, applying one migration pattern
-  repo-wide, bulk dependency or lint fixes, drafting several independent implementations to
-  compare — and especially whenever the user mentions muse, offloading work to a cheaper
-  model, running agents in parallel, fanning out tasks, worktree isolation, conserving
-  Claude usage limits, or says the work is "a lot of grunt work" or "don't burn my tokens
-  on this". Prefer this over doing many similar edits inline.
+  This skill should be used when a coding job splits into several independent, mechanical
+  edits that can be delegated to Muse Code (`muse exec`) workers in isolated git worktrees,
+  each supervised by an Opus agent that runs the acceptance check and re-prompts until the
+  patch is right. Use it for repetitive refactors across many files, a test or a docstring
+  per module in a list, one migration pattern applied repo-wide, bulk dependency or lint
+  fixes, or competing drafts of one function — and whenever the user names Muse Code or
+  `muse exec`, asks to offload coding work to a cheaper model, to fan tasks out across
+  parallel workers, or says the work is grunt work or "don't burn my tokens on this".
+  Requires the `muse` binary on PATH. Not for a single coherent change threaded through
+  many files, for debugging, for work needing a design decision, or for parallelism that
+  has nothing to do with muse — git worktrees on a human branch, Task-tool subagents, or
+  background jobs.
 ---
 
 # Muse Fleet
@@ -46,16 +48,9 @@ itself.
 
 ## The plugin surface
 
-Six commands you type, one agent the fan-out uses, and the scripts underneath all three.
-
-| Command | Does |
-|---|---|
-| `/muse:delegate <task>` | One task, supervised end to end — run, verify, revise, verdict. The common case. |
-| `/muse:ask <question>` | One question or one contained edit, no worktree, answer on stdout. |
-| `/muse:fleet <job>` | Decompose a job and run the supervised fleet: N tasks, one supervisor each. |
-| `/muse:status` | What every task in the current run did, and whether a check actually ran. |
-| `/muse:model` | The contributor model that will be used, and the interactive pin. |
-| `/muse:cleanup` | Reap worktrees, branches and artifacts a run left behind. |
+Six commands you type — `/muse:delegate`, `/muse:ask`, `/muse:fleet`, `/muse:status`,
+`/muse:model`, `/muse:cleanup` — one agent the fan-out spawns, and the scripts under both.
+"Running it" below says which to reach for.
 
 The `muse-supervisor` agent is what `/muse:delegate` and the fleet workflow spawn: one
 Opus agent that owns one task to a verdict. **It has no Write or Edit tool.** That is not
@@ -115,14 +110,33 @@ by hand. Do not invent a check that always passes.
 
 ## Running it
 
-**Type `/muse:fleet <job>` and this is all handled.** What follows is what that command
-does, and is also the path to take when the skill triggered on its own rather than by a
-typed command.
+Pick the path before doing anything else. Four exist and they are not interchangeable.
 
-The Workflow tool requires explicit opt-in, and a skill
-instructing you to call it is one of the accepted forms — so invoking this skill for a
-fan-out job authorises the script in `${CLAUDE_PLUGIN_ROOT}/references/workflow.md`. Read that file and run it.
-It plans the partition, spawns one Opus supervisor per task, and returns a merge order.
+| Situation | Do |
+|---|---|
+| A question, an inventory, one small contained edit | `${CLAUDE_PLUGIN_ROOT}/scripts/muse_ask.sh` |
+| One task needing a check and revision rounds | Spawn the `muse-supervisor` agent with the brief |
+| 2–5 independent tasks, files already partitioned | One `muse-supervisor` agent per task, all spawned in one message |
+| A job that still needs decomposing | The workflow script in `${CLAUDE_PLUGIN_ROOT}/references/workflow.md` |
+| 20+ trivial tasks, review batched to the end | `${CLAUDE_PLUGIN_ROOT}/scripts/muse_fleet.py` |
+
+**Spawning `muse-supervisor` is the default for one or a few tasks.** Hand-driving
+`muse_task.py` yourself puts the same agent in both the driving and the judging seat, which
+is the one separation this whole design exists to keep.
+
+
+When the job still needs decomposing, run the supervised fleet workflow below. It plans the
+partition, spawns one Opus supervisor per task, and returns a merge order. (`/muse:fleet
+<job>` runs exactly this; these steps are the path for when this skill triggered on its own
+rather than by a typed command.)
+
+The Workflow tool requires explicit opt-in. A typed `/muse:fleet` **is** that opt-in and
+needs no further confirmation. When this skill fired on an inferred trigger instead, state
+the plan and its cost and get a yes first — a fleet spawns N muse runs and N Opus
+supervisors, every worker runs `--yolo`, and it all costs real money. An inferred trigger is
+not consent to spend it.
+
+Read `${CLAUDE_PLUGIN_ROOT}/references/workflow.md` and run the script in it.
 
 ```
 Workflow({ script: <${CLAUDE_PLUGIN_ROOT}/references/workflow.md>,
@@ -145,20 +159,23 @@ loop; every one prints a single JSON object on stdout.
 ```bash
 T=${CLAUDE_PLUGIN_ROOT}/scripts/muse_task.py
 
-python3 $T run    --id tests-auth --out .muse-fleet/x --repo . --effort low \
+# --out defaults to .muse-fleet/tasks; pass it only to override.
+python3 $T run    --id tests-auth --repo . --effort low \
                   --prompt "Create tests/test_auth.py covering login() and logout(). Do not modify auth.py."
-python3 $T verify --id tests-auth --out .muse-fleet/x --command "pytest tests/test_auth.py -q"
-python3 $T revise --id tests-auth --out .muse-fleet/x \
-                  --feedback "test_logout asserts the current buggy return of None; it must assert True."
-python3 $T finish --id tests-auth --out .muse-fleet/x --verdict accept --summary "..."
+python3 $T verify --id tests-auth --command "pytest tests/test_auth.py -q"
+python3 $T revise --id tests-auth --feedback-file /tmp/review.txt
+python3 $T finish --id tests-auth --verdict accept --summary "..."
 ```
 
 Rounds share one worktree, so `revise` edits the previous round's output rather than
 starting over, and the harvested patch is always the cumulative diff against base — the
 thing you would actually merge. `--max-rounds` (default 3) is a hard ceiling: the script
-refuses past it rather than letting a supervisor loop up a bill.
+refuses past it rather than letting a supervisor loop up a bill. It is accepted **only on
+`run`**, where it goes into `state.json` and is then enforced on every later `revise` —
+passing it to `revise` is an argparse error. Use `--feedback-file` for a review longer than
+a sentence; it avoids shell-quoting a paragraph and keeps the text intact.
 
-Artifacts land in `<out>/<id>/`:
+Artifacts land in `<out>/<id>/` (`<out>` defaults to `.muse-fleet/tasks`):
 
 ```
 patch.diff          cumulative work against base — the deliverable
@@ -255,8 +272,8 @@ Apply patches one at a time and run the test suite between them. If two conflict
 decomposition was wrong — fix the partition rather than hand-merging.
 
 ```bash
-git apply --check .muse-fleet/x/tests-auth/patch.diff   # will it apply?
-git apply --3way  .muse-fleet/x/tests-auth/patch.diff   # apply it
+git apply --check .muse-fleet/tasks/tests-auth/patch.diff   # will it apply?
+git apply --3way  .muse-fleet/tasks/tests-auth/patch.diff   # apply it
 ```
 
 ## Guardrails
@@ -368,24 +385,16 @@ flags, and the failure modes. Read it when adapting the scripts or debugging a r
 `muse_task.py` and `muse_fleet.py`, so the supervised and unsupervised paths cannot drift
 apart in what a patch contains.
 
-`${CLAUDE_PLUGIN_ROOT}/scripts/validate.sh` re-runs the full suite — static checks, unit tests, preflight
-guardrails, live runs of both paths, the supervisor loop, re-run safety, seeding, and
-`muse_ask`. It builds throwaway repos in a temp dir and touches nothing of yours. Run it
-after changing the scripts, or when muse ships a new version and you want to know whether
-any behaviour this skill depends on has moved:
-
-```bash
-bash ${CLAUDE_PLUGIN_ROOT}/scripts/validate.sh
-```
-
-It makes real muse calls, so it costs a little and takes several minutes.
+`${CLAUDE_PLUGIN_ROOT}/scripts/validate.sh` is the maintainer's suite — run it only if asked to
+verify the plugin itself. `--offline` is free and takes seconds; a bare run makes real muse
+calls. README.md covers it.
 
 `${CLAUDE_PLUGIN_ROOT}/references/field-notes.md` collects what other teams learned running parallel coding agent
 fleets — decomposition failures, the verification bottleneck, agent-count limits, conflict
 magnets, and Anthropic's own orchestrator-worker findings. Read it when deciding *whether*
 and *how hard* to fan out, rather than how to drive the CLI.
 
-Two facts from it that bite hardest, repeated because they cause silent data loss:
+Two facts that bite hardest, both from `${CLAUDE_PLUGIN_ROOT}/references/muse-cli.md`, repeated because they cause silent data loss:
 
 - **Muse never commits.** It leaves the worktree dirty. Harvest by staging first.
 - **`git diff` omits untracked files.** A brand-new test suite reads as "no changes" unless

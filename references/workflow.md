@@ -263,7 +263,7 @@ a worktree at all:
 
 ```javascript
 const inventory = await agent(
-  `Run: ${SKILL}/scripts/muse_ask.sh --effort low \\
+  `Run: ${PLUGIN}/scripts/muse_ask.sh --effort low \\
      "List every file importing 'requests', with line numbers"
    Return its stdout verbatim.`,
   { label: 'inventory', effort: 'low' })

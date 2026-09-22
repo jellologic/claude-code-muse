@@ -81,11 +81,13 @@ fan-out unit is **one Opus agent per task**, each driving `muse_task.py` through
 rounds as its task needs. `references/workflow.md` has the full script.
 
 ```javascript
+// PLUGIN is the value of ${CLAUDE_PLUGIN_ROOT}, passed in as args.pluginRoot:
+// a workflow script sees no environment and cannot read it itself.
 const results = await parallel(tasks.map(t => () => agent(
-  `Run:  python3 ${SKILL}/scripts/muse_task.py run --id ${t.id} --out ${OUT} \\
+  `Run:  python3 ${PLUGIN}/scripts/muse_task.py run --id ${t.id} --out ${OUT} \\
            --prompt ${JSON.stringify(t.prompt)}
    Read the patch it prints. Run your own check:
-         python3 ${SKILL}/scripts/muse_task.py verify --id ${t.id} --out ${OUT} \\
+         python3 ${PLUGIN}/scripts/muse_task.py verify --id ${t.id} --out ${OUT} \\
            --command ${JSON.stringify(t.check)}
    Wrong or failing → revise --feedback "<specific defects>" and verify again.
    Then finish --verdict <accept|revise|reject>. Do not write the code yourself.`,
