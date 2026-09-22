@@ -27,6 +27,17 @@ native_path() {
 # a bare shell script named "muse" is invisible to native python no matter how executable
 # bash thinks it is -- which made every preflight-dependent check fail there for a reason
 # that had nothing to do with the code under test.
+shell_path() {   # inverse of native_path: PATH entries must not contain a drive colon
+  if command -v cygpath >/dev/null 2>&1; then cygpath -u "$1"; else printf '%s' "$1"; fi
+}
+
+# A PATH with python and git but deliberately without muse. "/usr/bin:/bin" is not a
+# portable way to express that -- on Windows it omits python entirely, so the doctor
+# could not run at all and reported no verdict.
+minimal_path() {
+  printf '%s:%s' "$(dirname "$(command -v python3)")" "$(dirname "$(command -v git)")"
+}
+
 make_muse_stub() {  # make_muse_stub <dir>
   mkdir -p "$1"
   printf '#!/bin/sh\nexit 0\n' > "$1/muse"
@@ -341,7 +352,7 @@ head_ "3. Preflight guardrails (no muse spawned)"
 # the guards. If muse is genuinely installed, nothing here changes.
 if ! command -v muse >/dev/null 2>&1; then
   make_muse_stub "$LAB/stub-bin"
-  PATH="$LAB/stub-bin:$PATH"
+  PATH="$(shell_path "$LAB/stub-bin"):$PATH"
   export PATH
   printf '  \033[33mNOTE\033[0m  muse not installed — using a stub so the repo guards stay testable\n'
 fi
@@ -780,8 +791,8 @@ DOC_CRASHED=""
 for COND in "healthy" "stub" "bare"; do
   case "$COND" in
     healthy) DOUT=$(python3 "$DOC" --repo "$SKILL" 2>&1) ;;
-    stub)    DOUT=$(env PATH="$DLAB/stubbin:$PATH" python3 "$DOC" --repo "$SKILL" 2>&1) ;;
-    bare)    DOUT=$(env PATH="/usr/bin:/bin" MUSE_CONFIG_DIR="$DLAB/nocfg" \
+    stub)    DOUT=$(env PATH="$(shell_path "$DLAB/stubbin"):$PATH" python3 "$DOC" --repo "$SKILL" 2>&1) ;;
+    bare)    DOUT=$(env PATH="$(minimal_path)" MUSE_CONFIG_DIR="$DLAB/nocfg" \
                     MUSE_CATALOG_GLOB="$DLAB/nocat/*.json" python3 "$DOC" --repo "$DLAB/empty" 2>&1) ;;
   esac
   case "$DOUT" in
@@ -796,7 +807,7 @@ done
   && ok "doctor reaches a verdict on a healthy, stubbed and bare machine" \
   || bad "doctor crashed or gave no verdict" "$DOC_CRASHED"
 
-env PATH="/usr/bin:/bin" MUSE_CONFIG_DIR="$DLAB/nocfg" python3 "$DOC" --repo "$DLAB/empty" >/dev/null 2>&1
+env PATH="$(minimal_path)" MUSE_CONFIG_DIR="$DLAB/nocfg" python3 "$DOC" --repo "$DLAB/empty" >/dev/null 2>&1
 [ $? -ne 0 ] && ok "doctor exits non-zero when something is blocking" || bad "doctor reported a broken machine as ready"
 
 # Well-formed regardless of verdict: a consumer parses this to decide what to do about a
