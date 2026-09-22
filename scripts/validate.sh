@@ -565,6 +565,82 @@ TMPLEAK=$(grep -nE "$TMPPAT" "$SKILL/scripts/validate.sh" || true)
   && ok "the suite writes no fixed scratch path (all of it is under \$LAB)" \
   || bad "a fixed scratch path crept back in" "$TMPLEAK"
 
+# The converted eval suite cannot be RUN here -- `claude plugin eval` is early access --
+# so these checks hold what can be held without it: the layout the CLI's own --help
+# documents, and consistency with the legacy evals.json that is still the source of
+# truth until someone runs the new suite green.
+python3 - <<'PY' && ok "eval cases are well-formed and consistent with evals.json" || bad "eval suite"
+import glob, json, os, pathlib, sys
+root = pathlib.Path(os.environ["PLUGIN_ROOT"]) / "evals"
+legacy = json.loads((root / "evals.json").read_text(encoding="utf-8"))["evals"]
+problems = []
+
+dirs = sorted(p for p in root.iterdir() if p.is_dir())
+if len(dirs) != len(legacy):
+    problems.append("%d case dirs vs %d in evals.json" % (len(dirs), len(legacy)))
+
+def frontmatter(path):
+    # Deliberately not pyyaml: CI's setup-python does not install it, and a guard that
+    # silently skips on ImportError is a guard that checks nothing.
+    t = path.read_text(encoding="utf-8")
+    if not t.startswith("---\n"):
+        return None
+    body = t.split("---\n", 2)
+    if len(body) < 3:
+        return None
+    out = {}
+    for line in body[1].splitlines():
+        if ":" in line and not line.startswith((" ", "\t", "#")):
+            k, v = line.split(":", 1)
+            out[k.strip()] = v.strip()
+    return out
+
+for d in dirs:
+    pm = d / "prompt.md"
+    if not pm.exists():
+        problems.append("%s: no prompt.md" % d.name); continue
+    fm = frontmatter(pm)
+    if not fm or "name" not in fm:
+        problems.append("%s: prompt.md frontmatter missing or nameless" % d.name); continue
+    graders = sorted((d / "graders").glob("*.md")) if (d / "graders").is_dir() else []
+    if not graders:
+        problems.append("%s: no graders" % d.name); continue
+
+    negative = d.name.startswith("negative-")
+    kinds = {}
+    for g in graders:
+        gfm = frontmatter(g) or {}
+        kinds[g.name] = gfm
+        if "type" not in gfm:
+            problems.append("%s/%s: grader has no type" % (d.name, g.name))
+    tool_graders = [v for v in kinds.values() if v.get("type") == "tool_used"]
+    if not tool_graders:
+        problems.append("%s: no tool_used grader, so skill firing is unasserted" % d.name)
+        continue
+    tg = tool_graders[0]
+    if negative:
+        # A negative case whose bounds are not both zero asserts nothing useful.
+        if tg.get("min") != "0" or tg.get("max") != "0":
+            problems.append("%s: negative case must bound the skill at min 0 max 0, got "
+                            "min=%s max=%s" % (d.name, tg.get("min"), tg.get("max")))
+    else:
+        if tg.get("min") in (None, "0"):
+            problems.append("%s: positive case must require the skill (min >= 1)" % d.name)
+
+# Every legacy case must have a converted home, or the conversion silently dropped one.
+names = {d.name for d in dirs}
+import re
+for case in legacy:
+    slug = re.sub(r"[^a-z0-9]+", "-", case["name"].lower()).strip("-")
+    if slug not in names:
+        problems.append("evals.json case %r has no converted directory" % case["name"])
+
+if problems:
+    for p in problems[:8]:
+        print("        " + p)
+    sys.exit(1)
+PY
+
 # Numbers in prose rot: README and CONTRIBUTING both claimed "55 checks" long after the
 # suite reached 65, and nothing noticed. The suite prints its own count, so the docs must
 # not restate it. CHANGELOG is exempt -- a released version's count is a historical fact.
