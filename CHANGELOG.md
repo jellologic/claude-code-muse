@@ -6,6 +6,37 @@ All notable changes to this plugin are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **`finish --verdict accept` is now gated rather than annotated** (#9). Every document in
+  this repo said `accept` means a supervisor ran a check that passed; nothing enforced it,
+  `--verdict` was a plain argparse choice, and the suite's most relevant test asserted that
+  an accept with no check at all was allowed. `finish` now refuses, emits `status:
+  refused`, exits non-zero, and names which of the three conditions failed. The worktree
+  survives the refusal even under `--cleanup`, because reaping it would destroy the only
+  copy of the work the supervisor was just told to go verify.
+- **`--accept-unverified "<reason>"` is the one way past the gate.** Some correct patches
+  make a check legitimately go red — a strict xfail that starts XPASSing is the shipped
+  example. The reason lands in `task.json` and `/muse:status` prints it on the row, so the
+  override costs a human a decision instead of disappearing into a boolean.
+
+### Fixed
+
+- **A verification is now bound to the tree it certified** (#8). `verify` recorded
+  `after_round` and nothing ever read it, so a check could pass at round *n*, the worktree
+  could change, and `finish` would harvest a patch no check had ever seen and report
+  `verified_by_supervisor: true`. The review reproduced it end to end: `test ! -f
+  BACKDOOR.py` exited 0, `BACKDOOR.py` was then created, and the task came out accepted and
+  verified with zero flags. `verify` now records a `git write-tree` hash of the staged
+  worktree and `finish` compares it against the tree it harvests; a mismatch is reported as
+  stale and refuses the accept. This closes most of the out-of-band-write gap too: a
+  supervisor's shell redirect between check and finish no longer passes as muse's work.
+- **`/muse:status` no longer reads a stale certification as verified.** It computed
+  `verified` from exit codes alone, which cannot see this case — from the artifacts a run
+  with a moved tree looks perfect. An explicit `false` written by `finish` now outranks the
+  evidence in that one direction only, so an old `task.json`'s stale `true` still cannot
+  launder a red check into a green row.
+
 ### Documentation
 
 - **The session-restart requirement is documented.** Plugin commands, skills and agents

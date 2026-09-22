@@ -836,14 +836,131 @@ echo "$VEROUT" | grep -q 'final check FAILED' \
   && ok "status distinguishes a failed check from no check at all" \
   || bad "wrong wording for a failed final check"
 
-python3 - <<'PY' && ok "finish records verified from the FINAL check, not any that passed" || bad "verified_by_supervisor uses any-passed"
-import importlib.util, os, sys, re
-src = open(os.path.join(os.environ["PLUGIN_ROOT"], "scripts/muse_task.py")).read()
-# The old form marked a task verified whenever ANY check had ever passed.
-bad_form = re.search(r"verified\s*=\s*\[v for v in st\.get\(\"verifications\".*if v\.get\(\"passed\"\)\]", src)
-good_form = "verifs[-1].get(\"passed\")" in src
-sys.exit(0 if (good_form and not bad_form) else 1)
+# A green check against a tree that is not the one harvested is the one case status
+# cannot reconstruct from exit codes: from here the run looks perfect. `finish` writes
+# an explicit false for it, so that false has to outrank the evidence in exactly this
+# direction -- and only this one, so an old task.json's stale true cannot launder a red
+# check into a green row.
+STL="$LAB/v_stale"; mkdir -p "$STL/.muse-fleet/tasks/moved"
+cat > "$STL/.muse-fleet/tasks/moved/state.json" <<'JSON'
+{"id":"moved","done":true,"verdict":"accept","max_rounds":3,"rounds":[{"n":1,"kind":"initial"}],
+ "verifications":[{"after_round":1,"command":"pytest -q","exit_code":0,"passed":true,
+                   "tree_hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}
+JSON
+cat > "$STL/.muse-fleet/tasks/moved/task.json" <<'JSON'
+{"id":"moved","verdict":"accept","patch_lines":5,"files_changed":["a.py"],"rounds_used":1,
+ "verified_by_supervisor":false,
+ "verifications":[{"after_round":1,"command":"pytest -q","exit_code":0,"passed":true,
+                   "tree_hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}
+JSON
+STLOUT=$(python3 "$SKILL/scripts/muse_status.py" --out "$STL/.muse-fleet" 2>&1)
+echo "$STLOUT" | grep -q 'UNVERIFIED' \
+  && ok "a check that passed against a different tree reads UNVERIFIED" \
+  || bad "a stale certification read as verified" "$STLOUT"
+
+# The override is not a defect -- finish refuses without it -- but it is the one row a
+# human has to read before merging, so it has to say why, not just flag a boolean.
+OVR="$LAB/v_override"; mkdir -p "$OVR/.muse-fleet/tasks/xfail"
+cat > "$OVR/.muse-fleet/tasks/xfail/state.json" <<'JSON'
+{"id":"xfail","done":true,"verdict":"accept","max_rounds":3,"rounds":[{"n":1,"kind":"initial"}]}
+JSON
+cat > "$OVR/.muse-fleet/tasks/xfail/task.json" <<'JSON'
+{"id":"xfail","verdict":"accept","patch_lines":5,"files_changed":["a.py"],"rounds_used":1,
+ "verified_by_supervisor":false,"verifications":[],
+ "accepted_unverified":"the check encodes the bug this patch fixes"}
+JSON
+OVROUT=$(python3 "$SKILL/scripts/muse_status.py" --out "$OVR/.muse-fleet" 2>&1)
+echo "$OVROUT" | grep -q 'the check encodes the bug this patch fixes' \
+  && ok "status quotes the reason an accept was overridden" \
+  || bad "the override reason is not surfaced" "$OVROUT"
+
+# #8 and #9 together: `accept` is GATED, not merely annotated. Every document in this
+# repo says accept means a supervisor ran a check that passed ON THIS PATCH, and until
+# now nothing enforced it -- this suite itself asserted that an accept with no check was
+# allowed. Driven through the real CLI on a real worktree, because the guard this
+# replaced greped muse_task.py for the gate's SHAPE, and a source grep stays green while
+# the body is reverted.
+GATE="$LAB/v_gate"; GATEWT="$LAB/v_gate_wt"
+mkrepo "$GATE"; mkdir -p "$GATEWT"
+printf '.muse-fleet/\n' >> "$GATE/.git/info/exclude"
+GATESHA=$(git -C "$GATE" rev-parse --verify HEAD)
+GOUT="$GATE/.muse-fleet/tasks"
+
+gate_task() {   # gate_task <id> -- a task in the exact shape `run` leaves behind
+  git -C "$GATE" worktree add -q -b "muse/gate/$1" "$GATEWT/$1" "$GATESHA"
+  mkdir -p "$GOUT/$1"
+  python3 - "$GATE" "$GATEWT/$1" "$GATESHA" "$1" "$GOUT" <<'PY'
+import json, os, sys
+repo, wt, sha, tid, out = sys.argv[1:6]
+json.dump({"id": tid, "repo": repo, "worktree": wt, "branch": "muse/gate/" + tid,
+           "base": "main", "base_sha": sha, "excludes": [".muse-fleet/"],
+           "rounds": [{"n": 1, "kind": "initial"}], "max_rounds": 3, "done": False},
+          open(os.path.join(out, tid, "state.json"), "w", encoding="utf-8"))
 PY
+  printf 'def added():\n    return 1\n' > "$GATEWT/$1/added.py"
+}
+
+gate_json() {   # gate_json <emitted json> <python expr over d>
+  echo "$1" | python3 -c "
+import json,sys
+try: d=json.load(sys.stdin)
+except Exception: sys.exit(1)
+sys.exit(0 if ($2) else 1)"
+}
+
+gate_task gnone
+GJ=$(python3 "$TASK" finish --id gnone --out "$GOUT" --verdict accept 2>/dev/null)
+gate_json "$GJ" "d.get('status')=='refused' and d.get('passed') is False" \
+  && ok "accept with no acceptance check at all is refused" \
+  || bad "accepted a patch that nobody ever checked" "$GJ"
+
+# The original sighting: a supervisor ran `--collect-only` (exit 0) and then the real
+# check (exit 1). Under any-passed that task read verified.
+gate_task gred
+python3 "$TASK" verify --id gred --out "$GOUT" --command "true"   >/dev/null 2>&1
+python3 "$TASK" verify --id gred --out "$GOUT" --command "exit 3" >/dev/null 2>&1
+GJ=$(python3 "$TASK" finish --id gred --out "$GOUT" --verdict accept 2>/dev/null)
+gate_json "$GJ" "d.get('status')=='refused' and d.get('passed') is False and 'exited 3' in (d.get('reason') or '')" \
+  && ok "a cheap gate that passed cannot certify a real check that failed" \
+  || bad "any-passed still certifies an accept" "$GJ"
+
+# #8: the window between `verify` and `finish`. The check was green, then the tree moved
+# -- a supervisor hand-edit, a stray build, a second agent -- and finish harvests a patch
+# no check ever saw. The exit code alone cannot tell those apart; the tree hash can.
+gate_task gstale
+python3 "$TASK" verify --id gstale --out "$GOUT" --command "test -f added.py" >/dev/null 2>&1
+printf 'SNEAKED = True\n' > "$GATEWT/gstale/sneaked.py"
+GJ=$(python3 "$TASK" finish --id gstale --out "$GOUT" --verdict accept 2>/dev/null)
+gate_json "$GJ" "d.get('status')=='refused' and d.get('passed') is True and d.get('stale') is True" \
+  && ok "a tree edited after the check passed cannot be accepted on that check" \
+  || bad "the harvested patch was never the one that was verified" "$GJ"
+
+# The control. A gate that refuses everything passes the three tests above and is
+# useless, so the legitimate path has to be shown to still go through.
+gate_task gok
+python3 "$TASK" verify --id gok --out "$GOUT" --command "test -f added.py" >/dev/null 2>&1
+GJ=$(python3 "$TASK" finish --id gok --out "$GOUT" --verdict accept 2>/dev/null)
+gate_json "$GJ" "d.get('verdict')=='accept' and d.get('verified_by_supervisor') is True" \
+  && ok "a check that passed on this exact tree accepts" \
+  || bad "the gate refuses a legitimately verified patch" "$GJ"
+
+# Some correct patches make a check legitimately fail -- a strict xfail that starts
+# XPASSing is the shipped example. The override exists so that case is recorded rather
+# than laundered through a check that was made to pass.
+gate_task gxfail
+GJ=$(python3 "$TASK" finish --id gxfail --out "$GOUT" --verdict accept \
+       --accept-unverified "the check encodes the bug this patch fixes" 2>/dev/null)
+gate_json "$GJ" "d.get('verdict')=='accept' and d.get('verified_by_supervisor') is False and d.get('accepted_unverified')" \
+  && ok "--accept-unverified records the override instead of faking a check" \
+  || bad "the escape hatch either blocks or hides itself" "$GJ"
+
+# Only `accept` claims verification. Gating `reject` would strand a task whose check
+# never passed -- which is precisely the task most in need of a verdict.
+gate_task greject
+GJ=$(python3 "$TASK" finish --id greject --out "$GOUT" --verdict reject --summary "wrong approach" 2>/dev/null)
+gate_json "$GJ" "d.get('verdict')=='reject' and d.get('verified_by_supervisor') is False" \
+  && ok "a verdict that never claimed verification still finishes without a check" \
+  || bad "the gate swallowed a non-accept verdict" "$GJ"
 
 # A revision that could not resume is a silent quality problem -- the worker got feedback
 # and a re-sent brief but no memory of its own attempt, so it is closer to a fresh try
@@ -1303,14 +1420,32 @@ python3 "$TASK" cleanup --id divide --out "$SOUT" >/dev/null 2>&1
 [ "$(git -C "$SLAB" worktree list | wc -l)" -eq 1 ] \
   && ok "cleanup removed the worktree" || bad "worktree left behind"
 
-# An accept with no executed check must stay visible rather than reading like a good run.
+# An accept with no executed check is REFUSED, not merely flagged, and the refusal has to
+# leave the task recoverable: --cleanup was requested here, and reaping the worktree on
+# the way out would destroy the only copy of the work the supervisor was just told to go
+# verify. Offline coverage of the gate is in section 3; this proves it holds on a task a
+# real muse actually produced.
 python3 "$TASK" run --id noverify --out "$SOUT" --repo "$SLAB" --worktree-root "$SWT" \
   --prompt "Add a noop() function to calc.py that returns None." >/dev/null 2>&1
+NOVWT=$(python3 -c "
+import json,sys
+print(json.load(open(sys.argv[1]))['worktree'])" "$SOUT/noverify/state.json" 2>/dev/null)
 FIN2=$(python3 "$TASK" finish --id noverify --out "$SOUT" --verdict accept --cleanup 2>/dev/null)
 echo "$FIN2" | python3 -c "
 import json,sys; d=json.load(sys.stdin)
-sys.exit(0 if d['verified_by_supervisor'] is False else 1)" \
-  && ok "unverified accept is flagged, not hidden" || bad "unverified accept looked verified" "$FIN2"
+sys.exit(0 if d.get('status')=='refused' and d.get('passed') is False else 1)" \
+  && ok "a live accept with no executed check is refused" || bad "unverified accept was allowed" "$FIN2"
+[ -n "$NOVWT" ] && [ -d "$NOVWT" ] \
+  && ok "a refused finish leaves the worktree intact despite --cleanup" \
+  || bad "the refusal reaped the work it asked the supervisor to go verify" "$NOVWT"
+
+# The same task, once a check has actually run against that tree.
+python3 "$TASK" verify --id noverify --out "$SOUT" --command "test -f calc.py" >/dev/null 2>&1
+FIN3=$(python3 "$TASK" finish --id noverify --out "$SOUT" --verdict accept --cleanup 2>/dev/null)
+echo "$FIN3" | python3 -c "
+import json,sys; d=json.load(sys.stdin)
+sys.exit(0 if d.get('verdict')=='accept' and d['verified_by_supervisor'] is True else 1)" \
+  && ok "the same task accepts once a check has run on its tree" || bad "gate blocks a verified live task" "$FIN3"
 
 head_ "9. Session resume (live)"
 # The offline section proves the flag is wired. This proves muse actually remembers:

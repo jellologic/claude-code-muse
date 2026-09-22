@@ -64,8 +64,11 @@ Two words that are not interchangeable, and the whole design rests on the gap be
 | `completed` | the worker stopped |
 | `accept` | a supervisor ran a check and the **final** one passed |
 
-`task.json` records `verified_by_supervisor`, and `/muse:status` flags an accept without
-one. The supervisor agent has **no `Write` or `Edit` tool** — not an oversight. A
+`finish --verdict accept` **refuses** unless the final check passed *and* ran against the
+tree being harvested — so a green check from before something touched the worktree does not
+certify the patch that ships. `--accept-unverified "<reason>"` is the deliberate way past
+it, for the case where a correct patch makes a check legitimately go red; the reason is
+recorded and `/muse:status` prints it. The supervisor agent has **no `Write` or `Edit` tool** — not an oversight. A
 supervisor that can patch the worktree by hand will, and then the next round starts from a
 tree muse did not produce. Removing the tool makes the architecture true rather than
 merely recommended.

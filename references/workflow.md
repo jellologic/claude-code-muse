@@ -340,7 +340,8 @@ const delegate = t => agent(
    Read the patch it prints. Then run the check YOURSELF:
      ${TASK} verify --id ${t.id} --out ${OUT} --command ${JSON.stringify(t.check)}
    Wrong or failing -> revise --feedback "<specific defects>" and verify again.
-   Then finish --verdict <accept|revise|reject>. accept requires a check that passed.`,
+   Then finish --verdict <accept|revise|reject>. finish REFUSES accept unless the final
+   check passed against the current tree; re-verify rather than working around it.`,
   { label: `muse:${t.id}`, phase: 'Delegate', model: 'opus', effort: 'high', schema: VERDICT })
 
 phase('Delegate')
@@ -390,9 +391,11 @@ loudly. Prefer the inline prompt above when the workflow has to run anywhere; us
 ## Things that go wrong
 
 **Accepting without verifying.** The single failure this architecture exists to prevent.
-The script exposes it (`verified_by_supervisor` in `task.json`, the `⚠` log line) rather
-than hiding it, because a supervisor that skipped its check produces a report
-indistinguishable from a good one unless you surface it.
+`finish` now refuses the verdict outright, so this surfaces as a task that never reached
+`accept` rather than one that reached it hollow — expect `null` from a delegate agent that
+tried to skip the check, and read the `⚠` log line. `verified_by_supervisor` in `task.json`
+is still the field to aggregate on, because `--accept-unverified` can put a reasoned
+override through the gate.
 
 **A task with no runnable check.** The planner is told to produce one for every task. If
 it genuinely cannot — a docs rewrite, a naming change — say so in the plan and expect to

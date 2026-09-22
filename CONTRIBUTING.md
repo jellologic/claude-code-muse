@@ -84,9 +84,10 @@ are paying frontier-model rates to type. The restriction is what makes the archi
 instead of merely recommended.
 
 **Conflating `completed` with `accept`.** `completed` means the worker stopped. `accept`
-means a supervisor ran an acceptance check and it passed. `task.json` records
-`verified_by_supervisor` precisely so an accept with no executed check stays visible. Any
-change that lets those two blur together is a change to the point of the project.
+means a supervisor ran an acceptance check, it passed, and it ran against the tree that was
+harvested — `finish` refuses the verdict otherwise, and `--accept-unverified "<reason>"`
+records the override rather than hiding it. Any change that lets those two blur together is
+a change to the point of the project.
 
 **A guard that cannot fail.** A check that inspects nothing passes exactly like a check that
 found nothing.

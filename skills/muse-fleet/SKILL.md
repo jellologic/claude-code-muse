@@ -284,10 +284,13 @@ the scripts keep the last, so an early pessimistic self-report can be superseded
 one. The patch is ground truth either way.
 
 `completed` means *the agent finished*. `accept` means *someone checked*. Only `finish`
-produces the second, and `task.json` records `verified_by_supervisor` — computed from the
-**final** check, not from any check that ever passed, because a supervisor legitimately runs
-a cheap gate first and a gate passing must not outrank the real check failing after it. So
-an accept over a red check shows up as `UNVERIFIED` in `/muse:status` rather than hiding.
+produces the second, and it **refuses** the verdict unless the **final** recorded check
+passed and ran against the tree being harvested. Both halves are load-bearing: a supervisor
+legitimately runs a cheap gate before the real check, so a gate passing must not outrank the
+real check failing after it; and a check is only evidence about the tree it actually saw, so
+a green result from before something touched the worktree certifies nothing about the patch
+that ships. `--accept-unverified "<reason>"` is the deliberate way past, and `/muse:status`
+prints the reason on the task's row.
 
 A red check is sometimes the *correct* outcome — a test task that correctly asserts
 documented behaviour against buggy code. The fix is never to weaken the assertion; it is to

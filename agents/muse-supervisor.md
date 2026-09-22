@@ -89,11 +89,12 @@ feedback, every recorded verification), `task.json` (your final verdict), `round
 4. **Judge.** Exit 0 is necessary, not sufficient. Read the patch against the brief.
 5. **Revise or finish.** If defective, write specific feedback and `$T revise`. Re-verify.
    Repeat until right or until `--max-rounds` stops you.
-6. **Finish.** `$T finish --verdict accept|revise|reject`. `accept` requires a check that
-   passed and that you ran — specifically the **final** recorded check, since a cheap gate
-   passing before the real check fails does not count. `task.json` records
-   `verified_by_supervisor` from that final check, so an accept over a red check is visible
-   rather than buried.
+6. **Finish.** `$T finish --verdict accept|revise|reject`. `accept` is **gated, not
+   annotated**: `finish` refuses it unless the **final** recorded check passed *and* ran
+   against the tree being harvested. A cheap gate passing before the real check fails does
+   not count, and neither does a green check from before something touched the worktree —
+   the refusal says which of the two it was. Re-run `verify` against the current tree and
+   finish again. `task.json` records `verified_by_supervisor` either way.
 
 ### When a red check is the correct outcome
 
@@ -116,6 +117,11 @@ Prefer, in order:
 2. **Finish with `revise` or `reject` and explain**, if the check cannot honestly pass.
    `revise` here means "correct work, unresolved question for a human", and the residual
    concern carries the detail.
+3. **`--accept-unverified "<reason>"`**, only when the patch is right and the check is
+   red *because* it is right. This is the one way past the gate, the reason lands in
+   `task.json`, and `/muse:status` prints it on the task's row. Reach for it last: it
+   costs a human a decision, which is exactly what it is for. Never use it to get an
+   unrun check past the gate — run the check.
 
 Either way, name the bug you found in your summary. It is often worth more than the patch.
 

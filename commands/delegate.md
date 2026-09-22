@@ -103,5 +103,6 @@ Apply one at a time with the test suite in between. If two patches conflict, the
 decomposition was wrong — fix the partition rather than hand-merging.
 
 State the verdict honestly. `completed` means the worker stopped; `accept` means the
-supervisor ran a check and it passed. If a task finished without an executed check, say that
-in those words rather than reporting it as done.
+supervisor ran a check, it passed, and it ran against the tree that was harvested — `finish`
+refuses the verdict otherwise. If a task came back through `--accept-unverified`, report the
+reason in those words rather than as a plain accept.

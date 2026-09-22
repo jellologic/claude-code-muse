@@ -85,10 +85,17 @@ def summarise(tdir: Path) -> dict:
         "verdict": (task or {}).get("verdict") or st.get("verdict"),
         "rounds_used": (task or {}).get("rounds_used") or len(st.get("rounds") or []),
         "max_rounds": st.get("max_rounds"),
-        # Evidence outranks the recorded flag. The exit codes are right here, and a
-        # stored verified_by_supervisor can be stale (written by an older version) or
-        # simply wrong -- neither should make a red final check read as green.
-        "verified": final_passed if verifs else bool((task or {}).get("verified_by_supervisor")),
+        # Evidence outranks the recorded flag, with one exception in the other
+        # direction. The exit codes are right here, and a stored
+        # verified_by_supervisor can be stale (written by an older version) or simply
+        # wrong -- neither should make a red final check read as green. But `finish`
+        # also writes an explicit False for a green check that ran against a DIFFERENT
+        # tree than the one harvested, and that fact is not recoverable from the exit
+        # codes alone: from here the run looks perfect. So a False is believed, and
+        # anything else falls back to the evidence.
+        "verified": (final_passed and (task or {}).get("verified_by_supervisor") is not False)
+                    if verifs else bool((task or {}).get("verified_by_supervisor")),
+        "accepted_unverified": (task or {}).get("accepted_unverified"),
         "checks_run": len(verifs),
         "last_check": (last or {}).get("command"),
         "last_exit": (last or {}).get("exit_code"),
@@ -110,7 +117,12 @@ def summarise(tdir: Path) -> dict:
 def flags(r: dict) -> list:
     """The things a human should not have to notice for themselves."""
     out = []
-    if r["verdict"] == "accept" and not r["verified"]:
+    if r.get("accepted_unverified"):
+        # Not a defect -- `finish` refuses an unverified accept, so this is a deliberate,
+        # reasoned override. It is still the one row a human should read before merging.
+        out.append("accepted WITHOUT a passing check, by explicit override: {}"
+                   .format(r["accepted_unverified"]))
+    elif r["verdict"] == "accept" and not r["verified"]:
         out.append("ACCEPTED WITHOUT A PASSING FINAL CHECK"
                    if r["checks_run"] else "ACCEPTED WITHOUT AN EXECUTED CHECK")
     if r["finished"] and not r["patch_lines"]:

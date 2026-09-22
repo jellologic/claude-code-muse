@@ -478,6 +478,9 @@ def cmd_verify(args) -> int:
     rec = {
         "after_round": len(st["rounds"]),
         "command": args.command,
+        # The tree this check actually ran against. finish compares it with the tree it
+        # harvests; a mismatch means the patch changed after the check certified it.
+        "tree_hash": core.worktree_tree_hash(wt),
     }
     try:
         # start_new_session so a hung check can be killed as a group: the command is a
@@ -551,7 +554,37 @@ def cmd_finish(args) -> int:
     # rounds before a fixed one -- so "any passed" marks a task verified whenever a
     # collect-only gate succeeded and the real check went red. Observed exactly that.
     verifs = st.get("verifications", [])
-    verified = bool(verifs) and bool(verifs[-1].get("passed"))
+    final = verifs[-1] if verifs else None
+    tree_now = core.worktree_tree_hash(Path(st["worktree"])) \
+        if Path(st["worktree"]).exists() else None
+    # Three separate questions, deliberately not collapsed: did a check run, did the last
+    # one pass, and was it looking at THIS tree. Only all three together mean verified.
+    passed = bool(final) and bool(final.get("passed"))
+    certified = bool(final) and bool(final.get("tree_hash")) and final["tree_hash"] == tree_now
+    stale = passed and bool(final.get("tree_hash")) and not certified
+    verified = passed and certified
+
+    # #9: the verdict is now GATED, not merely annotated. Four documents say `accept`
+    # means a supervisor ran a check that passed; until now nothing stopped an accept
+    # with no check at all, and the suite asserted that was allowed.
+    if args.verdict == "accept" and not verified and not args.accept_unverified:
+        if stale:
+            why = ("the check that passed ran against a different tree than the one being "
+                   "harvested -- something changed the worktree after it was verified")
+        elif final is None:
+            why = "no acceptance check was ever run on this task"
+        elif not passed:
+            why = "the final acceptance check exited {}".format(final.get("exit_code"))
+        else:
+            why = ("the passing check recorded no tree hash, so it cannot be tied to this "
+                   "patch (state written by an older version)")
+        emit({"id": st["id"], "status": "refused", "reason":
+              "refusing --verdict accept: {}. Run `verify` against the current tree, or "
+              "pass --accept-unverified \"<reason>\" if this is the known case where a "
+              "correct patch makes a check legitimately fail.".format(why),
+              "passed": passed, "certified": certified, "stale": stale})
+        return 1
+
     st.update({
         "done": True,
         "verdict": args.verdict,
@@ -559,6 +592,7 @@ def cmd_finish(args) -> int:
         "concerns": args.concern or [],
         "final_patch_lines": h["patch_lines"],
         "final_files_changed": h["files_changed"],
+        "accepted_unverified": args.accept_unverified or None,
     })
     save_state(tdir, st)
 
@@ -572,6 +606,7 @@ def cmd_finish(args) -> int:
         # The distinction that matters downstream: a green check the supervisor ran
         # itself, versus a patch nobody executed.
         "verified_by_supervisor": bool(verified),
+        "accepted_unverified": args.accept_unverified or None,
         "verifications": st.get("verifications", []),
     }
     if h.get("harvest_error"):
@@ -659,6 +694,9 @@ def main() -> int:
     p = sub.add_parser("finish", help="final harvest and verdict")
     common(p)
     p.add_argument("--verdict", required=True, choices=["accept", "revise", "reject"])
+    p.add_argument("--accept-unverified", metavar="REASON",
+                   help="accept despite no passing check tied to this tree; the reason is "
+                        "recorded in task.json and shown by /muse:status")
     p.add_argument("--summary", default="")
     p.add_argument("--concern", action="append", default=None,
                    help="residual concern for the human reviewer (repeatable)")

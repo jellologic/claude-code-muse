@@ -554,6 +554,27 @@ def run_muse(cmd, prompt: str, repo: Path, events: Path, stderr: Path, timeout: 
     return out
 
 
+def worktree_tree_hash(wt: Path):
+    """A content hash of everything in the worktree, or None if it cannot be taken.
+
+    This is what binds a verification to the thing it verified. `git write-tree` over a
+    fully staged index is exact, cheap, and ignores mtimes -- two trees with identical
+    content hash identically. Without it, `verify` certifies a moment and `finish`
+    reports a different one, with nothing comparing the two."""
+    try:
+        add = subprocess.run(["git", "-C", str(wt), "add", "-A"],
+                             capture_output=True, text=True)
+        if add.returncode != 0:
+            return None
+        wr = subprocess.run(["git", "-C", str(wt), "write-tree"],
+                            capture_output=True, text=True)
+        if wr.returncode != 0:
+            return None
+        return wr.stdout.strip() or None
+    except OSError:
+        return None
+
+
 def harvest(wt: Path, base: str, excludes, patch_path: Path):
     """Stage everything and diff against base.
 

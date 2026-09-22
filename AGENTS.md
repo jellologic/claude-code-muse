@@ -65,8 +65,10 @@ In rough order of usefulness:
    produce, the harvest misattributes the hand-edit, and you are paying frontier rates to
    type. The restriction is what makes the architecture true rather than recommended.
 4. **Never blur `completed` into `accept`.** `completed` means the worker stopped.
-   `accept` means a supervisor ran a check and the **final** one passed. `task.json`
-   records `verified_by_supervisor` precisely so an accept over a red check stays visible.
+   `accept` means a supervisor ran a check, the **final** one passed, and it ran against
+   the tree that was harvested. `finish` enforces all three and refuses otherwise;
+   `--accept-unverified "<reason>"` is the only way past, and it records why. Any change
+   that lets an unchecked patch come out `accept` is a change to the point of the project.
 5. **Every intra-plugin path uses `${CLAUDE_PLUGIN_ROOT}`.** No absolute paths, no `~/`,
    nothing relative to the working directory. CI fails the build on this.
 
