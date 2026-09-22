@@ -382,6 +382,82 @@ git -C "$SC" branch --format='%(refname:short)' | grep -q '^fleet/s/c$' \
 [ ! -d "$SC/.muse-fleet" ] \
   && ok "cleanup --artifacts removes the artifact root" || bad "artifact root survived"
 
+# Numbers in prose rot: README and CONTRIBUTING both claimed "55 checks" long after the
+# suite reached 65, and nothing noticed. The suite prints its own count, so the docs must
+# not restate it. CHANGELOG is exempt -- a released version's count is a historical fact.
+DRIFT=$(grep -rnE '[0-9]+ (free )?checks' "$SKILL/README.md" "$SKILL/CONTRIBUTING.md" \
+        "$SKILL/skills/muse-fleet/SKILL.md" 2>/dev/null)
+[ -z "$DRIFT" ] \
+  && ok "no doc restates the check count (it rots; the suite prints it)" \
+  || bad "a doc hardcodes a check count" "$DRIFT"
+
+# Both of these produced a raw Python traceback or escaped the artifact root before.
+# muse_task promises exactly one JSON object on stdout; a supervisor parses that stream,
+# and a traceback or an empty stream tells it nothing.
+EDG="$LAB/v_edge"; mkdir -p "$EDG"; git init -q -b main "$EDG"
+EOUT=$(cd "$EDG" && python3 "$TASK" run --id x --repo "$EDG" --prompt noop 2>/dev/null)
+echo "$EOUT" | python3 -c "
+import json,sys
+try: d=json.load(sys.stdin)
+except Exception: sys.exit(1)
+sys.exit(0 if d.get('status')=='refused' and 'no commits' in d.get('reason','') else 1)" \
+  && ok "a repo with no commits is refused in JSON, not a traceback" \
+  || bad "empty repo did not refuse cleanly" "$EOUT"
+
+# An id becomes a directory name and a git branch component.
+TRAV="$LAB/v_trav"; mkrepo "$TRAV"
+printf '.muse-fleet/\n' >> "$TRAV/.git/info/exclude"
+TOUT=$(cd "$TRAV" && python3 "$TASK" run --id "../../ESCAPED" --repo "$TRAV" --prompt noop 2>/dev/null)
+echo "$TOUT" | python3 -c "
+import json,sys
+try: d=json.load(sys.stdin)
+except Exception: sys.exit(1)
+sys.exit(0 if d.get('status')=='refused' else 1)" \
+  && ok "a task id with a path separator is refused" || bad "traversal id accepted" "$TOUT"
+[ ! -d "$LAB/ESCAPED" ] && [ ! -d "$TRAV/ESCAPED" ] \
+  && ok "no artifacts were written outside the artifact root" || bad "id escaped the artifact root"
+
+python3 - <<'PY' && ok "task id validation accepts normal ids and rejects the dangerous shapes" || bad "validate_task_id logic"
+import importlib.util, os, sys
+spec = importlib.util.spec_from_file_location("mc", os.path.join(os.environ["PLUGIN_ROOT"], "scripts/muse_core.py"))
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+good = ["tests-auth", "a", "mod_1.2", "A9"]
+bad_ids = ["../x", "a/b", "", ".", "..", "-lead", "x" * 65, "a b", "x;rm -rf /", "a\nb"]
+wrong = []
+for g in good:
+    try: m.validate_task_id(g)
+    except Exception: wrong.append("rejected good: " + g)
+for b in bad_ids:
+    try:
+        m.validate_task_id(b); wrong.append("accepted bad: %r" % b)
+    except m.PreflightError: pass
+if wrong: print("        ", wrong)
+sys.exit(1 if wrong else 0)
+PY
+
+# Re-running an existing task id overwrote its harvested patch and orphaned its worktree,
+# both silently. The lost patch may be work nobody applied yet.
+CLB="$LAB/v_clobber"; mkrepo "$CLB"
+printf '.muse/\n.muse-fleet/\n' >> "$CLB/.git/info/exclude"
+mkdir -p "$CLB/.muse-fleet/tasks/dup" "$LAB/v_clobber_wt"
+printf 'diff --git a/calc.py b/calc.py\n+precious\n' > "$CLB/.muse-fleet/tasks/dup/patch.diff"
+python3 - "$CLB" "$LAB/v_clobber_wt/old" <<'PY'
+import json, sys
+repo, wt = sys.argv[1], sys.argv[2]
+json.dump({"id":"dup","repo":repo,"worktree":wt,"branch":"muse/old/dup",
+           "rounds":[{"n":1}],"verdict":"accept","done":True},
+          open(repo + "/.muse-fleet/tasks/dup/state.json","w"))
+PY
+CLBOUT=$(cd "$CLB" && python3 "$TASK" run --id dup --repo "$CLB" --prompt noop 2>/dev/null)
+echo "$CLBOUT" | python3 -c "
+import json,sys
+try: d=json.load(sys.stdin)
+except Exception: sys.exit(1)
+sys.exit(0 if d.get('status')=='refused' else 1)" \
+  && ok "run refuses to clobber an existing task's patch" || bad "run clobbered an existing task" "$CLBOUT"
+grep -q precious "$CLB/.muse-fleet/tasks/dup/patch.diff" \
+  && ok "the existing patch survived the refusal" || bad "existing patch was destroyed"
+
 # The central guarantee: `accept` means a check PASSED, not that some check once did.
 # Observed in a real run -- a supervisor ran a cheap `--collect-only` gate (exit 0) and
 # then the real acceptance check (exit 1), and "any passed" marked the task verified.

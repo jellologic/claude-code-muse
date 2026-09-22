@@ -200,7 +200,10 @@ def main() -> int:
     repo = Path(args.repo).resolve()
     if args.schema:
         check_schema(args.schema)
-    head = preflight(repo, require_clean=not args.allow_dirty)
+    try:
+        head = preflight(repo, require_clean=not args.allow_dirty)
+    except core.PreflightError as e:
+        sys.exit(str(e))
 
     stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     out = Path(args.out).resolve() if args.out else repo / ".muse-fleet" / stamp
@@ -212,6 +215,13 @@ def main() -> int:
     tasks = json.loads(Path(args.tasks).read_text())
     if not isinstance(tasks, list) or not tasks:
         sys.exit("--tasks must be a non-empty JSON list")
+    # Each id becomes a worktree directory and a git branch component; a path separator
+    # would place artifacts outside the run's output root.
+    for task in tasks:
+        try:
+            core.validate_task_id(str(task.get("id", "")))
+        except core.PreflightError as e:
+            sys.exit(str(e))
     ids = [t["id"] for t in tasks]
     if len(set(ids)) != len(ids):
         sys.exit("task ids must be unique (they name worktrees and branches)")

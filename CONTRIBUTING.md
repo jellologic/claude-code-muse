@@ -25,7 +25,7 @@ You need `git`, `python3`, `bash` and Claude Code. You need the Muse Code CLI (`
 ```bash
 git clone https://github.com/jellologic/claude-code-muse.git
 cd claude-code-muse
-bash scripts/validate.sh --offline     # 55 checks, seconds, free
+bash scripts/validate.sh --offline     # seconds, free, spawns no muse
 ```
 
 ## The dev loop

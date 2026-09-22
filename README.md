@@ -199,7 +199,7 @@ the three things that will get a PR sent back. The short version:
 ```bash
 git clone https://github.com/jellologic/claude-code-muse.git
 cd claude-code-muse
-bash scripts/validate.sh --offline     # 55 checks, seconds, free, no muse calls
+bash scripts/validate.sh --offline     # seconds, free, spawns no muse
 ```
 
 The house rule is that a change must be **measured**, not asserted — and any guard you add

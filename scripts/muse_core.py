@@ -191,15 +191,16 @@ def preflight(repo: Path, require_clean: bool) -> str:
     """Fail loudly before spawning anything. A run that dies halfway leaves worktrees
     behind, so it is much cheaper to refuse up front."""
     if shutil.which("muse") is None:
-        sys.exit("muse not found on PATH")
+        raise PreflightError("muse not found on PATH")
     try:
         git(repo, "rev-parse", "--git-dir")
     except Exception:
-        sys.exit("{} is not a git repository (worktree isolation requires git)".format(repo))
+        raise PreflightError(
+            "{} is not a git repository (worktree isolation requires git)".format(repo))
 
     dirty = git(repo, "status", "--porcelain", check=False)
     if dirty and require_clean:
-        sys.exit(
+        raise PreflightError(
             "working copy is dirty; commit/stash first, or pass --allow-dirty.\n"
             "Worktrees branch from a committed ref, so uncommitted work is invisible "
             "to the run and will look like the agents deleted it."
@@ -216,7 +217,15 @@ def preflight(repo: Path, require_clean: bool) -> str:
     except OSError:
         pass
 
-    return git(repo, "rev-parse", "HEAD")
+    try:
+        return git(repo, "rev-parse", "HEAD")
+    except Exception:
+        # A fresh `git init` with nothing committed. Worktrees branch from a committed
+        # ref, so there is nothing to branch from -- say that rather than surfacing
+        # git's "ambiguous argument 'HEAD'" as a traceback.
+        raise PreflightError(
+            "{} has no commits yet. Worktrees branch from a committed ref, so commit "
+            "something before delegating.".format(repo))
 
 
 def check_schema(path: str) -> None:
@@ -248,6 +257,35 @@ def absent_locals(repo: Path, named):
 
 
 # ------------------------------------------------------------- running muse
+
+class PreflightError(Exception):
+    """A refusal to start, carrying a message meant for the caller.
+
+    Raised rather than sys.exit'd so the caller can honour its own output contract --
+    muse_task promises exactly one JSON object on stdout, and a bare exit leaves the
+    supervisor parsing an empty stream."""
+
+
+# Used for a worktree directory name and a git branch component, so it has to be safe for
+# both. A bare `--id ../../x` escaped the artifact root entirely and left the task
+# invisible to `status`, which scans below that root.
+TASK_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+
+def validate_task_id(task_id: str) -> str:
+    """Return the id, or raise PreflightError explaining why it is unusable."""
+    if not task_id:
+        raise PreflightError("task id is empty")
+    if not TASK_ID_RE.match(task_id):
+        raise PreflightError(
+            "task id {!r} is not usable: it names a directory and a git branch, so it must "
+            "start with a letter or digit and contain only letters, digits, dot, underscore "
+            "or hyphen (max 64 chars). A path separator or '..' would place artifacts "
+            "outside the artifact root, where `status` cannot see them.".format(task_id))
+    if task_id in (".", "..") or task_id.endswith(".lock"):
+        raise PreflightError("task id {!r} is reserved".format(task_id))
+    return task_id
+
 
 def session_workspace(session_id: str):
     """The workspace root a session is bound to, or None if it cannot be determined.

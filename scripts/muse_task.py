@@ -159,13 +159,51 @@ def do_round(st: dict, tdir: Path, prompt: str, args, kind: str,
 
 def cmd_run(args) -> int:
     repo = Path(args.repo).resolve()
-    head = core.preflight(repo, require_clean=not args.allow_dirty)
+    try:
+        core.validate_task_id(args.id)
+        head = core.preflight(repo, require_clean=not args.allow_dirty)
+    except core.PreflightError as e:
+        # One JSON object on stdout, even on refusal: a supervisor parses this stream and
+        # an empty one tells it nothing.
+        emit({"id": args.id, "status": "refused", "reason": str(e)})
+        return 1
     if args.schema:
         core.check_schema(args.schema)
 
     model, how = core.resolve_model(args.model)
     tdir = task_dir(args)
     tdir.mkdir(parents=True, exist_ok=True)
+
+    # Re-running an id that already has a task is destructive twice over: harvest
+    # overwrites patch.diff, and replacing state.json orphans the previous worktree and
+    # branch -- `cleanup` then has no record of them and skips them as unfinished. Both
+    # happen silently, and the lost patch may be work nobody applied yet.
+    prior = None
+    if state_path(tdir).exists():
+        try:
+            prior = json.loads(state_path(tdir).read_text())
+        except ValueError:
+            prior = None
+    if prior is not None and not args.force:
+        emit({
+            "id": args.id, "status": "refused",
+            "reason": "task {} already exists at {}. Re-running would overwrite its patch "
+                      "and orphan its worktree. Apply or copy the patch first, then pass "
+                      "--force, or use a different --id.".format(args.id, tdir),
+            "existing_patch": str(tdir / "patch.diff") if (tdir / "patch.diff").exists() else None,
+            "existing_worktree": prior.get("worktree"),
+            "existing_verdict": prior.get("verdict"),
+            "rounds_used": len(prior.get("rounds") or []),
+        })
+        return 1
+    if prior is not None:
+        # --force: tear down what we are about to orphan, using the OLD recorded paths.
+        # The `wt`/`branch` computed below belong to the new stamp and would not match.
+        try:
+            core.drop_worktree(Path(prior["repo"]), Path(prior["worktree"]), prior["branch"])
+        except (KeyError, OSError) as e:
+            print("muse_task[{}]: could not drop the previous worktree ({}); "
+                  "it may need `git worktree prune`".format(args.id, e), file=sys.stderr)
 
     stamp = args.stamp or dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     branch = "{}/{}/{}".format(args.branch_prefix, stamp, args.id)
@@ -471,6 +509,8 @@ def main() -> int:
     p.add_argument("--exclude", action="append", default=None)
     p.add_argument("--warn-patch-lines", type=int, default=5000)
     p.add_argument("--inherit-skills", action="store_true")
+    p.add_argument("--force", action="store_true",
+                   help="re-run over an existing task, discarding its patch and worktree")
     p.set_defaults(fn=cmd_run)
 
     p = sub.add_parser("revise", help="run muse again in the same worktree with feedback")
@@ -509,6 +549,13 @@ def main() -> int:
     p.set_defaults(fn=cmd_cleanup)
 
     args = ap.parse_args()
+    # Every subcommand turns --id into a filesystem path; cmd_run re-checks so its
+    # refusal carries the same JSON shape as its other failures.
+    try:
+        core.validate_task_id(args.id)
+    except core.PreflightError as e:
+        emit({"id": args.id, "status": "refused", "reason": str(e)})
+        return 1
     return args.fn(args)
 
 
