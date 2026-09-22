@@ -5,19 +5,18 @@ set -uo pipefail
 
 # Self-locate rather than trusting an install path: this script must validate the copy
 # it actually ships inside, not whatever other copy happens to be installed.
-SKILL="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# On Windows this is Git Bash driving a NATIVE python. Bash translates MSYS paths in
+# argv when it invokes a native program, so `python3 /d/a/x.py` works -- but a path
+# embedded in a python -c STRING, or exported in an environment variable, gets no
+# translation and reaches python as an unresolvable literal. Normalise once, here, so
+# every consumer downstream is handed something both shells understand. cygpath -m gives
+# "D:/a/repo": native, with forward slashes, so it stays safe to embed either side.
+native_path() {
+  if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi
+}
 
-# PLUGIN_ROOT is consumed by Python, and on Windows that is a NATIVE interpreter while
-# this is Git Bash. Bash translates MSYS paths in argv when it invokes a native program,
-# but environment variables pass through untouched -- so a raw "/d/a/repo" reached Python
-# as a literal and every os.path.join(os.environ["PLUGIN_ROOT"], ...) raised
-# FileNotFoundError. cygpath -m gives "D:/a/repo": native, and forward slashes so it
-# stays safe to embed in shell and Python strings alike.
-if command -v cygpath >/dev/null 2>&1; then
-  export PLUGIN_ROOT="$(cygpath -m "$SKILL")"
-else
-  export PLUGIN_ROOT="$SKILL"
-fi
+SKILL="$(native_path "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)")"
+export PLUGIN_ROOT="$SKILL"
 SKILL_MD="$SKILL/skills/muse-fleet/SKILL.md"
 FLEET="$SKILL/scripts/muse_fleet.py"
 TASK="$SKILL/scripts/muse_task.py"
@@ -25,7 +24,7 @@ CORE="$SKILL/scripts/muse_core.py"
 # `mktemp -d -t NAME` is BSD-only: GNU coreutils rejects a template with no trailing X's
 # and prints nothing, which silently left LAB empty. Every path below is built from it, so
 # an empty LAB turned "$LAB/v_dirty" into "/v_dirty" -- and mkrepo starts with `rm -rf`.
-LAB="${MUSE_FLEET_LAB:-$(mktemp -d "${TMPDIR:-/tmp}/musefleetlab.XXXXXX")}"
+LAB="$(native_path "${MUSE_FLEET_LAB:-$(mktemp -d "${TMPDIR:-/tmp}/musefleetlab.XXXXXX")}")"
 if [ -z "${LAB:-}" ] || [ ! -d "$LAB" ]; then
   echo "refusing to run: could not create a scratch dir (LAB='${LAB:-}')" >&2
   echo "every test path is built from it, and this script rm -rf's those paths." >&2
