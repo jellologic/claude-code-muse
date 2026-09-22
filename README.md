@@ -206,6 +206,7 @@ rate, or do not delegate it.
 | `references/muse-cli.md` | The verified `muse` CLI surface and event schema |
 | `references/routing.md` | When to use muse and when to use Claude |
 | `references/field-notes.md` | What other teams learned running agent fleets |
+| `evals/evals.json` | Skill-triggering cases: five that must fire, four that must **not** |
 
 ## License
 
