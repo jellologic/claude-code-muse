@@ -6,7 +6,18 @@ set -uo pipefail
 # Self-locate rather than trusting an install path: this script must validate the copy
 # it actually ships inside, not whatever other copy happens to be installed.
 SKILL="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-export PLUGIN_ROOT="$SKILL"
+
+# PLUGIN_ROOT is consumed by Python, and on Windows that is a NATIVE interpreter while
+# this is Git Bash. Bash translates MSYS paths in argv when it invokes a native program,
+# but environment variables pass through untouched -- so a raw "/d/a/repo" reached Python
+# as a literal and every os.path.join(os.environ["PLUGIN_ROOT"], ...) raised
+# FileNotFoundError. cygpath -m gives "D:/a/repo": native, and forward slashes so it
+# stays safe to embed in shell and Python strings alike.
+if command -v cygpath >/dev/null 2>&1; then
+  export PLUGIN_ROOT="$(cygpath -m "$SKILL")"
+else
+  export PLUGIN_ROOT="$SKILL"
+fi
 SKILL_MD="$SKILL/skills/muse-fleet/SKILL.md"
 FLEET="$SKILL/scripts/muse_fleet.py"
 TASK="$SKILL/scripts/muse_task.py"
