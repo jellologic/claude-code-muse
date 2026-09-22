@@ -363,6 +363,30 @@ echo "$out" | grep -q 'muse-spark-9.9-contributor' \
   && ok "resolves the newest CONTRIBUTOR model through the subprocess path" \
   || bad "default model resolution" "$out"
 
+# os.killpg/os.getpgid/signal.SIGKILL are POSIX-only and absent on Windows as ATTRIBUTES,
+# so touching them raises AttributeError -- which the OSError handler did not catch. A
+# timeout handler that crashes turns a recoverable timeout into a lost run.
+python3 - <<'PY' && ok "process-tree kill degrades instead of crashing without process groups" || bad "kill_process_tree raises where process groups are unavailable"
+import importlib.util, os, subprocess, sys, time
+real = {}
+for name in ("killpg", "getpgid"):          # exactly what Windows lacks and we call
+    if hasattr(os, name):
+        real[name] = getattr(os, name); delattr(os, name)
+try:
+    spec = importlib.util.spec_from_file_location(
+        "mc", os.path.join(os.environ["PLUGIN_ROOT"], "scripts/muse_core.py"))
+    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+    if m.HAVE_PROCESS_GROUPS:
+        print("        capability probe did not notice the missing attributes"); sys.exit(1)
+    p = subprocess.Popen(["sh", "-c", "sleep 60"])
+    time.sleep(0.3)
+    m.kill_process_tree(p)                   # must not raise
+    if p.poll() is None:
+        print("        child survived the fallback kill"); sys.exit(1)
+finally:
+    for n, v in real.items(): setattr(os, n, v)
+PY
+
 # A 1-second stamp is not a unique namespace: two fleets started in the same second
 # computed identical branches AND worktree paths, and run_task opens with drop_worktree,
 # so the second silently force-removed the first's live worktrees.

@@ -6,7 +6,29 @@ All notable changes to this plugin are documented here. Format follows
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- **A fleet no longer deletes a concurrent run's live worktrees** (#2). The run namespace
+  was a 1-second timestamp, so two fleets started in the same second computed identical
+  branches and worktree paths — and `run_task` opens with `drop_worktree`. The stamp now
+  carries entropy, and a worktree that exists and is non-empty is refused rather than
+  force-removed.
+- **`session_workspace` raised when a snapshot vanished mid-walk** (#5). The `stat()` ran
+  inside a sort key, outside the `try`; muse rotates those snapshots, so the resulting
+  `FileNotFoundError` came out of `cmd_revise` as a traceback where a supervisor expects
+  one JSON object.
+- **`kill_process_tree` crashed where process groups do not exist** (part of #3).
+  `os.killpg`, `os.getpgid` and `signal.SIGKILL` are absent on Windows *as attributes*, so
+  they raise `AttributeError` rather than the `OSError` that was being caught — turning a
+  recoverable timeout into a lost run. The capability is now probed once at import and the
+  kill degrades to the direct child.
+
+### Changed
+
+- The test suite writes no fixed scratch path; everything is under its own `mktemp` dir
+  (#1). Fixed `/tmp` paths collide between users on a shared host and can be pre-created
+  as symlinks. Also stops `--repo /tmp`, which would have had preflight write
+  `.git/info/exclude` there.
 
 ## [1.2.0] - 2026-09-22
 

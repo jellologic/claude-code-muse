@@ -462,18 +462,37 @@ def scan_secrets(root: Path, max_files: int = SCAN_MAX_FILES):
             "files_scanned": scanned, "truncated": truncated}
 
 
+# os.killpg, os.getpgid and signal.SIGKILL are POSIX-only -- on Windows they do not
+# exist as attributes at all, so touching them raises AttributeError rather than OSError.
+# Resolve the capability once, at import, instead of discovering it inside a timeout
+# handler where the failure would mask the timeout it was called to handle.
+HAVE_PROCESS_GROUPS = (hasattr(os, "killpg") and hasattr(os, "getpgid")
+                       and hasattr(signal, "SIGKILL"))
+
+
 def kill_process_tree(p) -> None:
-    """SIGKILL a child and everything it spawned.
+    """Kill a child and everything it spawned, as far as the platform allows.
 
     p.kill() signals only the direct child. Anything it started -- npm, pytest, a build
     -- survives, keeps writing into the worktree and keeps costing money after the
-    timeout has been declared."""
-    try:
-        os.killpg(os.getpgid(p.pid), signal.SIGKILL)
-    except (ProcessLookupError, PermissionError, OSError):
+    timeout has been declared. Where process groups exist we kill the whole group; where
+    they do not (Windows) we fall back to the direct child, which is weaker but is what
+    the platform offers.
+    """
+    killed_group = False
+    if HAVE_PROCESS_GROUPS:
+        try:
+            os.killpg(os.getpgid(p.pid), signal.SIGKILL)
+            killed_group = True
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+    if not killed_group:
         try:
             p.kill()
-        except OSError:
+        except (OSError, AttributeError):
+            # AttributeError is belt-and-braces: Popen.kill uses SIGKILL on POSIX and
+            # TerminateProcess on Windows, so it should always resolve -- but a partially
+            # stubbed platform must not turn a timeout into a crash.
             pass
     try:
         p.wait(timeout=10)
