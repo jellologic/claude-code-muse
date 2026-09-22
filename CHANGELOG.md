@@ -8,6 +8,11 @@ All notable changes to this plugin are documented here. Format follows
 
 ### Fixed
 
+- **The fleet script's `--out` defaulted to a relative path.** `muse_task` resolves it
+  against the current directory and an agent's Bash cwd resets between tool calls, so
+  `run` and `verify` could address different task directories and the second would report
+  "no such task". It is now absolute, and the rule is documented for hand-written
+  workflows.
 - **`cleanup --artifacts` could `rmtree` your home directory.** The marker check walked the
   tree unbounded, so it answered "this is an artifact root" for `$HOME` — any stray
   `state.json` anywhere beneath it. The check is now bounded to two levels, and a separate
@@ -46,6 +51,12 @@ All notable changes to this plugin are documented here. Format follows
   `verify` executes on the host with your privileges.
 - Task ids in the fleet plan schema now carry the pattern the code enforces, so a plan
   cannot pass planning and then have every task refused.
+
+### Added
+
+- **Guidance for embedding muse in your own Claude Code workflow** — muse as one stage of
+  a workflow you are writing, rather than only the shipped fan-out. Verified by running a
+  real workflow that delegated a task and got back an independently-checked `accept`.
 
 ### Documentation
 

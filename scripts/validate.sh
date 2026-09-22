@@ -79,20 +79,46 @@ grep -q 'references/routing.md' "$SKILL_MD" && ok "SKILL.md points at routing.md
 # out verbatim to be run. Nothing else would notice a typo in it until someone spent real
 # money discovering it mid-run.
 if command -v node >/dev/null 2>&1; then
-  python3 - > /tmp/v_wf.mjs <<'PY'
-import re, pathlib, os
+  # EVERY javascript block, not just the first: the embedding section ships snippets that
+  # users copy-paste, and a syntax error in one of those is exactly as broken as one in
+  # the main script.
+  WF_SYNTAX=$(python3 - <<'PY'
+import re, pathlib, os, subprocess, tempfile
 t = pathlib.Path(os.path.join(os.environ["PLUGIN_ROOT"], "references/workflow.md")).read_text()
-b = re.findall(r"```javascript\n(.*?)```", t, re.S)[0].replace("export const meta", "const meta", 1)
-# The runtime evaluates the body inside an async function, so top-level await and return
-# are legal there but not in a bare module. Reproduce that shape or the check is a lie.
-print("const agent=()=>{},parallel=()=>{},pipeline=()=>{},phase=()=>{},log=()=>{},args={};")
-print("async function __body(){"); print(b); print("}")
+blocks = re.findall(r"```javascript\n(.*?)```", t, re.S)
+if not blocks:
+    print("no javascript blocks found"); raise SystemExit
+bad = []
+for i, b in enumerate(blocks, 1):
+    src = b.replace("export const meta", "const meta", 1)
+    # The runtime evaluates the body inside an async function, so top-level await and
+    # return are legal there but not in a bare module. Reproduce that shape or the
+    # check is a lie.
+    body = ("const agent=async()=>({tasks:[]}),parallel=async()=>[],pipeline=async()=>[],"
+            "phase=()=>{},log=()=>{};\nglobalThis.args={pluginRoot:'/p',stamp:'s',repo:'/r'};"
+            "\nconst tasks=[];\nasync function __body(){\n" + src + "\n}")
+    f = tempfile.NamedTemporaryFile("w", suffix=".mjs", delete=False)
+    f.write(body); f.close()
+    r = subprocess.run(["node", "--check", f.name], capture_output=True, text=True)
+    os.unlink(f.name)
+    if r.returncode != 0:
+        bad.append("block %d: %s" % (i, r.stderr.strip().splitlines()[-1][:80] if r.stderr.strip() else "?"))
+print("; ".join(bad))
 PY
-  node --check /tmp/v_wf.mjs 2>/dev/null \
-    && ok "workflow.md script parses as the runtime evaluates it" || bad "workflow script syntax"
+)
+  [ -z "$WF_SYNTAX" ] \
+    && ok "every workflow.md javascript block parses as the runtime evaluates it" \
+    || bad "workflow script syntax" "$WF_SYNTAX"
 
   # meta.phases titles are matched EXACTLY against phase() calls; a drifted title
   # silently splits the progress display into an orphan group instead of erroring.
+  for RULE in "not write the code" "do NOT apply the patch" "verify" "resumed"; do
+    grep -qi "$RULE" "$SKILL/agents/muse-supervisor.md" \
+      && grep -qi "$RULE" "$SKILL/references/workflow.md" \
+      && ok "supervisor doctrine present in both paths: $RULE" \
+      || bad "doctrine drift between the agent and the workflow prompt: $RULE"
+  done
+
   python3 - <<'PY' && ok "workflow meta.phases cover every phase() call" || bad "phase titles drift"
 import re, pathlib, os, sys
 t = pathlib.Path(os.path.join(os.environ["PLUGIN_ROOT"], "references/workflow.md")).read_text()

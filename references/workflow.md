@@ -54,9 +54,13 @@ export const meta = {
 // The caller resolves it (`echo ${CLAUDE_PLUGIN_ROOT}`) and passes it in as args.pluginRoot.
 const PLUGIN = args.pluginRoot
 if (!PLUGIN) throw new Error('args.pluginRoot is required: pass the value of ${CLAUDE_PLUGIN_ROOT}')
-const TASK  = `python3 ${PLUGIN}/scripts/muse_task.py`
+const TASK  = `python3 "${PLUGIN}/scripts/muse_task.py"`
+// Absolute, deliberately. muse_task resolves --out against the CURRENT DIRECTORY, and an
+// agent's Bash cwd resets between tool calls -- so a relative --out lets `run` and
+// `verify` address different task directories and the second one reports "no such task".
+// Pass args.repo as an absolute path.
 const REPO  = args.repo || '.'
-const OUT   = args.out  || '.muse-fleet/supervised'
+const OUT   = args.out  || `${REPO}/.muse-fleet/supervised`
 const STAMP = args.stamp || 'run'   // Date.now() throws in workflow scripts — pass one in.
 const ROUNDS = args.maxRounds || 3
 
@@ -182,6 +186,14 @@ const supervise = t => agent(
    not there. reject = wrong approach, a human should look. Do not report accept on a
    check you did not run.
 
+   Do NOT apply the patch and do NOT edit any file yourself. Integration is decided
+   once, later, over an unmodified repo; a supervisor that applies its own patch breaks
+   that for every other task.
+
+   If a round's JSON says "resumed": false there is a "session_warning": that round
+   re-sent the whole brief and muse remembers nothing of its previous attempt, so read
+   its output as a first attempt rather than a correction.
+
    Return the finish JSON's verdict, the rounds you used, whether your check passed,
    the patch path, and any residual concern a human should know before merging.`,
   { label: `task:${t.id}`, phase: 'Build', model: 'opus', effort: 'high',
@@ -294,6 +306,86 @@ concerns appended to the brief.
 **Competing implementations** — point N supervisors at the same brief with different
 approaches and disjoint output paths, then have Integrate pick a winner. The disjoint-file
 rule still holds; they just write to `impl_a.py`, `impl_b.py`.
+
+## Embedding muse in your own workflow
+
+The script above is the whole fan-out. More often you want muse as **one stage** of a
+workflow you are writing — research, then delegate, then review. The shape is small:
+
+```javascript
+// Two values a workflow script cannot obtain for itself. Pass both in via args:
+//   ${CLAUDE_PLUGIN_ROOT} is not expanded in script scope, and Date.now() throws.
+// Resolve them in the turn that calls Workflow: `echo ${CLAUDE_PLUGIN_ROOT}` and `date`.
+const TASK  = `python3 "${args.pluginRoot}/scripts/muse_task.py"`
+const REPO  = args.repo || '.'
+const OUT   = `${REPO}/.muse-fleet/tasks`   // absolute: see the cwd rule below
+const STAMP = args.stamp
+
+const VERDICT = {
+  type: 'object',
+  required: ['verdict', 'check_exit_code', 'patch_path', 'notes'],
+  properties: {
+    verdict:         { type: 'string', enum: ['accept', 'revise', 'reject'] },
+    check_exit_code: { type: 'integer' },
+    patch_path:      { type: 'string' },
+    notes:           { type: 'string' },
+  },
+}
+
+const delegate = t => agent(
+  `Own one delegated task to a verdict. Do not write the code yourself and do not
+   apply the patch.
+     ${TASK} run    --id ${t.id} --out ${OUT} --repo ${REPO} --stamp ${STAMP} \\
+       --effort ${t.effort || 'low'} --prompt ${JSON.stringify(t.prompt)}
+   Read the patch it prints. Then run the check YOURSELF:
+     ${TASK} verify --id ${t.id} --out ${OUT} --command ${JSON.stringify(t.check)}
+   Wrong or failing -> revise --feedback "<specific defects>" and verify again.
+   Then finish --verdict <accept|revise|reject>. accept requires a check that passed.`,
+  { label: `muse:${t.id}`, phase: 'Delegate', model: 'opus', effort: 'high', schema: VERDICT })
+
+phase('Delegate')
+const done = (await parallel(tasks.map(t => () => delegate(t)))).filter(Boolean)
+```
+
+Four rules that are not obvious from the API:
+
+- **A workflow script cannot call muse.** Scripts have no filesystem and no Node API, so
+  every muse invocation happens inside an `agent()` that runs Bash. The script decides
+  *what* and *how many*; the agent does.
+- **Thread `pluginRoot` and `stamp` through `args`.** `${CLAUDE_PLUGIN_ROOT}` is not
+  expanded in script scope and `Date.now()` throws — both would otherwise fail at the
+  first shell call, after the planning agents have already been paid for.
+- **Task ids must match `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`.** An id names a worktree
+  directory and a git branch, and `run` refuses anything else. If a planning agent
+  invents ids, put that pattern in its schema, or every task dies at step one.
+- **Use an absolute `--out`, and pass `repo` absolute.** `muse_task` resolves `--out`
+  against the current directory, and an agent's Bash cwd resets between tool calls — so a
+  relative `--out` lets `run` create `<somewhere>/.muse-fleet/...` and `verify` look in
+  `<elsewhere>/.muse-fleet/...` and report "no such task". Proven: the same `--out` from
+  two directories yields two different task directories.
+- **Reap what you spawn.** Each task leaves a worktree and a branch. A workflow that fans
+  out many of them should finish with `muse_cleanup.py --yes` (or `finish --cleanup` per
+  task) once the patches are harvested, or the worktree root grows every run.
+- **Do not add `isolation: 'worktree'`.** `muse_task.py` already gives each task its own
+  worktree; a second one nests them and costs setup per agent for nothing.
+
+### Using the plugin's own supervisor agent
+
+`agentType` reuses `agents/muse-supervisor.md` instead of restating the doctrine inline,
+which keeps one source of truth:
+
+```javascript
+agent(`Task id: ${t.id}\nRepo: ${REPO}\nPlugin root: ${args.pluginRoot}\n` +
+      `Brief: ${t.prompt}\nAcceptance check: ${t.check}`,
+      { agentType: 'muse:muse-supervisor', label: `muse:${t.id}`, phase: 'Delegate' })
+```
+
+The catch, measured: `agent({agentType})` **throws** when the type is not registered —
+`agent type 'muse:muse-supervisor' not found` — and plugin agents only register for
+sessions that started *after* the plugin was installed. Worse, a thunk that throws inside
+`parallel()` resolves to `null`, so the task is **silently dropped** rather than failing
+loudly. Prefer the inline prompt above when the workflow has to run anywhere; use
+`agentType` when you control the environment, and `.filter(Boolean)` either way.
 
 ## Things that go wrong
 

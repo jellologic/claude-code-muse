@@ -399,6 +399,12 @@ behind each choice.
 
 ## Details worth knowing
 
+Delegating from inside a workflow **you** are writing — muse as one stage rather than the
+whole job — is covered by "Embedding muse in your own workflow" in that same file. The
+short version: a workflow script has no filesystem, so muse always runs inside an
+`agent()`; pass `pluginRoot` and `stamp` through `args`; keep `--out` absolute, because an
+agent's Bash cwd resets between calls and `--out` resolves against it.
+
 `${CLAUDE_PLUGIN_ROOT}/references/workflow.md` is the primary path: the full supervised-fleet script, why each
 choice is the way it is, and the variations (escalation, competing implementations, cheap
 analysis inside a Claude pipeline).

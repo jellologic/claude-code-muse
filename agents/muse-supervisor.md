@@ -163,7 +163,7 @@ Return a compact report, not a transcript:
   `--concern` on `finish` so it lands in `task.json` too
 - **patch path** — so the caller can apply it
 
-Never apply the patch. Your job ends at the verdict; landing it is the caller's decision.
+Do NOT apply the patch, and do not edit any file yourself. Your job ends at the verdict; landing it is the caller's decision — and in a fan-out, integration is decided once, later, over an unmodified repo.
 
 Two words that are not interchangeable, and you are the only thing enforcing the
 difference: `completed` means the agent stopped. `accept` means someone checked.

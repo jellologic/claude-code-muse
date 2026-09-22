@@ -100,6 +100,13 @@ refactors across many files, tests for a list of modules, one migration pattern 
 **No command applies a patch.** They stop at a verdict and a patch path, because an accepted
 patch is still a patch you have not read.
 
+**It composes into your own workflows.** muse delegation can be one stage of a Claude
+Code workflow you are writing, not just the whole thing — see "Embedding muse in your own
+workflow" in [`references/workflow.md`](references/workflow.md) for a copy-pasteable stage
+and the four rules that are not obvious from the API (a workflow script has no filesystem,
+so muse is always invoked by an agent; `pluginRoot` and `stamp` must be threaded through
+`args`; `--out` must be absolute; task ids are validated).
+
 **Follow-ups keep their context.** A task's rounds share one muse session, so a revision is
 a genuine follow-up — the worker still has the brief, the files it read and its own
 reasoning, and your feedback can say "the assertion on line 12 is wrong" without restating
