@@ -1,0 +1,83 @@
+# Security
+
+## Reporting a vulnerability
+
+Use GitHub's private vulnerability reporting:
+**[Report a vulnerability](https://github.com/jellologic/claude-code-muse/security/advisories/new)**
+(Security → Advisories → Report a vulnerability).
+
+Please do not open a public issue for something exploitable. Include the version, your OS,
+and the smallest reproduction you have. Expect an initial response within a week; this is a
+small project maintained in spare time, so please set expectations accordingly.
+
+Describe the class of problem rather than attaching a working exploit.
+
+## The trust model, stated plainly
+
+This plugin runs a coding agent that edits code and executes shell commands. Some of that is
+intentionally privileged. Knowing which parts, and why, is more useful than a blanket
+warning — so here is the whole picture.
+
+### Workers run with `--yolo`
+
+Every delegated muse run passes `--yolo`, which disables tool-approval prompts and the OS
+sandbox. That is defensible for exactly one reason: **the blast radius is a throwaway git
+worktree on a throwaway branch**, created outside your repository and deleted by
+`/muse:cleanup`.
+
+That argument holds only while its preconditions do. Preserve them:
+
+- Never point a fleet at a dirty main working copy. The drivers refuse by default; do not
+  reach for `--allow-dirty` to silence it.
+- Keep worktrees outside the repo. That is the default; overriding `--worktree-root` to a
+  path inside your project removes the isolation.
+- Use `--max-steps` on open-ended prompts and `--max-rounds` on supervised ones so a
+  confused agent cannot loop indefinitely.
+
+### The acceptance check runs on the host, not in the sandbox
+
+This is the sharpest edge in the project and the one most likely to surprise you.
+
+`muse_task.py verify` executes its `--command` with **your privileges**, on your machine.
+The worktree is only that command's working directory — it is not a security boundary. And
+in the fleet path, the check string is *written by a model*: `references/workflow.md` has
+the planner emit a `check` field per task, which is then handed to `verify`.
+
+Read a planned acceptance check the same way you would read a command you are about to type
+yourself. `/muse:fleet` surfaces the planned checks before the run for this reason. If you
+are reviewing a fleet plan quickly, that is the field to slow down on.
+
+### What this plugin sends where
+
+- Prompts, file contents the worker reads, and its patches go to **Meta's Muse Code API**
+  under whichever model you selected.
+- **Contributor-tier models state that your content "may be used for product improvement."**
+  For proprietary or client-confidential code, either pass `--model muse-spark-1.3` and pay
+  full rate, or do not delegate that code at all. This is a licensing and confidentiality
+  decision, not a technical control, and the plugin cannot make it for you.
+- Nothing is sent anywhere else. There is no telemetry, no analytics, and no network call
+  in this plugin outside the `muse` CLI itself.
+
+### Credentials
+
+The plugin never reads your credentials. `hooks/preflight.sh` checks only that
+`~/.config/muse/auth.json` exists and is non-empty — a size test, never a read — so it can
+tell you to run `muse login` before a fan-out fails on every worker at once. Credentials are
+handled entirely by the `muse` CLI.
+
+### Destructive operations
+
+`/muse:cleanup` deletes git worktrees, branches and, with `--artifacts`, patch files. It is
+a dry run unless you pass `--yes`; it refuses to remove a task that never reached a verdict
+unless you pass `--all`, because an unfinished task's work exists only in its worktree; and
+`--artifacts` refuses to delete any directory that does not contain a `state.json` or
+`task.json` marker, so a mistyped `--out` cannot take a real directory with it.
+
+## Out of scope
+
+- The behaviour of the `muse` CLI itself, or of Meta's API. Report those upstream.
+- A model producing wrong or low-quality code. That is what the supervisor and the
+  acceptance check exist to catch, and `/muse:status` flags any patch accepted without an
+  executed check.
+- `--yolo` as such, given the worktree isolation documented above. If you can show the
+  isolation does not hold, that is very much in scope and worth reporting.

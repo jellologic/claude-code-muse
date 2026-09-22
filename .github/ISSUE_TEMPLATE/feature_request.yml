@@ -1,0 +1,54 @@
+name: Feature request
+description: Suggest a capability or a change in behaviour
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you hitting
+      description: >-
+        The situation, not the solution. What were you trying to delegate, and where did the
+        plugin get in the way?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you have in mind
+      description: Rough is fine.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part
+      options:
+        - A /muse:* command
+        - The muse-fleet skill (auto-triggering)
+        - The muse-supervisor agent
+        - The scripts (muse_task / muse_fleet / muse_core / status / cleanup)
+        - The fleet workflow
+        - Docs
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: check
+    attributes:
+      label: How would we know it works
+      description: >-
+        This project leans hard on executable checks. If there is a command that would exit
+        0 only when your feature genuinely works, naming it here is the single most useful
+        thing in the issue.
+
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: Compatible with the project's constraints?
+      description: See CONTRIBUTING.md. Not blockers — just worth thinking about up front.
+      options:
+        - label: Does not require giving muse-supervisor a Write or Edit tool
+        - label: Does not blur `completed` (the worker stopped) into `accept` (someone checked)

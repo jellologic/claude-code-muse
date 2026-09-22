@@ -7,16 +7,22 @@
     "email": "31935831+jellologic@users.noreply.github.com",
     "url": "https://github.com/jellologic"
   },
-  "homepage": "https://github.com/jellologic/muse-code",
-  "repository": "https://github.com/jellologic/muse-code",
+  "homepage": "https://github.com/jellologic/claude-code-muse",
+  "repository": "https://github.com/jellologic/claude-code-muse",
   "license": "MIT",
   "keywords": [
+    "claude-code",
+    "claude-code-plugin",
     "muse",
+    "muse-code",
     "delegation",
     "parallel-agents",
     "git-worktree",
     "code-generation",
+    "coding-agent",
+    "agent-orchestration",
     "cost-optimization",
-    "supervision"
+    "supervision",
+    "ai-agents"
   ]
 }

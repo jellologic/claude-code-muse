@@ -1,0 +1,68 @@
+name: validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline:
+    name: offline suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # node parses the workflow script in references/workflow.md; without it that check
+      # skips silently, which would make a syntax error in the fleet script invisible here.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Git identity for the throwaway test repos
+        run: |
+          git config --global user.email "ci@example.invalid"
+          git config --global user.name "ci"
+          git config --global init.defaultBranch main
+
+      # No muse calls, no credentials, no cost. The suite stubs the muse binary for the
+      # preflight section so the repo guards stay testable on a runner without it.
+      - name: Offline suite
+        run: bash scripts/validate.sh --offline
+
+      - name: Manifests parse
+        run: |
+          python3 - <<'PY'
+          import json
+          for p in [".claude-plugin/plugin.json", ".claude-plugin/marketplace.json", "hooks/hooks.json"]:
+              json.load(open(p))
+              print("ok", p)
+          PY
+
+      - name: Hook events are wrapped correctly
+        run: |
+          python3 - <<'PY'
+          import json, sys
+          d = json.load(open("hooks/hooks.json"))
+          # Without the top-level "hooks" key this file parses fine and registers nothing.
+          if "hooks" not in d or "SessionStart" not in d["hooks"]:
+              sys.exit('hooks.json must wrap events in a top-level "hooks" key')
+          print("hooks.json wrapper present")
+          PY
+
+      - name: No hardcoded absolute paths
+        run: |
+          if grep -rn "/Users/\|/home/runner" \
+               --include="*.md" --include="*.json" --include="*.py" --include="*.sh" \
+               . --exclude-dir=.git; then
+            echo "::error::hardcoded absolute path — use \${CLAUDE_PLUGIN_ROOT} instead"
+            exit 1
+          fi
+          echo "no hardcoded absolute paths"

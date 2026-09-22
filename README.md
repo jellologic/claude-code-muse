@@ -1,12 +1,23 @@
-# muse
+# muse — a Claude Code plugin for delegating bulk coding work
 
-Offload bulk coding work to Muse Code (`muse exec`) instances running in isolated git
-worktrees, each supervised by an Opus agent that reads the patch, runs the acceptance check
-itself, and sends muse back for revisions until the work is right.
+Offload repetitive coding work to **Muse Code** (`muse exec`) workers running in isolated
+**git worktrees**, each supervised by a **Claude agent** that reads the patch, runs your
+acceptance check itself, and sends the worker back for revisions until the work is right.
+
+[![validate](https://github.com/jellologic/claude-code-muse/actions/workflows/validate.yml/badge.svg)](https://github.com/jellologic/claude-code-muse/actions/workflows/validate.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-8A2BE2)](https://docs.claude.com/en/docs/claude-code/plugins)
 
 **muse types, Claude judges.** Mechanical edits do not need a frontier model deliberating
-over them; push that work down to the discounted contributor tier and spend your own budget
-on the parts that need judgment.
+over them; push that work down to a cheap model and spend your own budget on the parts that
+need judgment. Built for the jobs that are too big to do by hand and too boring to be worth
+your context window: a test file per module, one migration pattern applied repo-wide, type
+hints across a package, bulk lint or dependency fixes.
+
+```
+/muse:delegate  Have muse write tests/test_parser.py covering the public functions
+/muse:fleet     Add a pytest file for each of the twelve modules in src/
+```
 
 ```
           ┌────────────── one Opus supervisor, one task ──────────────┐
@@ -36,19 +47,38 @@ to type.
 Requires the Muse Code CLI (`muse`) on `PATH`, plus `git`, `python3` and Claude Code.
 
 ```
-/plugin marketplace add jellologic/muse-code
-/plugin install muse@muse-code
+/plugin marketplace add jellologic/claude-code-muse
+/plugin install muse@claude-code-muse
 ```
 
 Or from a local clone:
 
 ```
-/plugin marketplace add ~/GitHub/muse-code
-/plugin install muse@muse-code
+/plugin marketplace add ~/GitHub/claude-code-muse
+/plugin install muse@claude-code-muse
 ```
 
 Then authenticate muse once (`muse login`) and run any `muse exec` to populate its model
 catalog. A SessionStart hook checks both and stays silent unless something is missing.
+
+## Quick start
+
+From a **clean** git working tree (worktrees branch from a committed ref, so uncommitted
+work is invisible to the worker):
+
+```
+/muse:delegate Create tests/test_parser.py covering parse() and tokenize().
+               Do not modify parser.py. Check: pytest tests/test_parser.py -q
+```
+
+A supervisor spawns a worker in its own worktree, reads the patch, runs `pytest` itself, and
+sends the worker back with specific defects until it passes. You get a verdict, the check's
+exit code, and a patch path — and you decide whether to apply it.
+
+```bash
+git apply --check .muse-fleet/tasks/<id>/patch.diff   # will it apply?
+git apply --3way  .muse-fleet/tasks/<id>/patch.diff   # apply it
+```
 
 ## Commands
 
@@ -152,6 +182,25 @@ The full run adds live runs of both drivers, the supervisor loop, re-run safety,
 makes real muse calls, so it costs a little and takes several minutes. Run it when muse ships
 a new version and you want to know whether any behaviour this plugin depends on has moved.
 
+## Contributing
+
+Contributions are welcome — issues, bug reports and pull requests alike.
+[CONTRIBUTING.md](CONTRIBUTING.md) has the dev loop, where each kind of component goes, and
+the three things that will get a PR sent back. The short version:
+
+```bash
+git clone https://github.com/jellologic/claude-code-muse.git
+cd claude-code-muse
+bash scripts/validate.sh --offline     # 55 checks, seconds, free, no muse calls
+```
+
+The house rule is that a change must be **measured**, not asserted — and any guard you add
+has to be shown to fail when the thing it watches breaks. CI runs the offline suite on every
+push and pull request.
+
+See also [SECURITY.md](SECURITY.md) for the trust model (workers run `--yolo`; acceptance
+checks execute on the host) and the [Code of Conduct](CODE_OF_CONDUCT.md).
+
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).

@@ -1,6 +1,6 @@
 {
-  "name": "muse-code",
-  "description": "Delegate coding work to Muse Code under Claude supervision.",
+  "name": "claude-code-muse",
+  "description": "Claude Code plugin that delegates bulk coding work to Muse Code workers in isolated git worktrees, each supervised to a verdict.",
   "owner": {
     "name": "jellologic",
     "url": "https://github.com/jellologic"
@@ -17,7 +17,14 @@
       "description": "Offload bulk coding work to Muse Code in isolated git worktrees, each supervised by an Opus agent that verifies and re-prompts until the patch is right.",
       "version": "1.0.0",
       "category": "development",
-      "keywords": ["muse", "delegation", "parallel-agents", "git-worktree"]
+      "keywords": [
+        "claude-code",
+        "muse",
+        "delegation",
+        "parallel-agents",
+        "git-worktree",
+        "coding-agent"
+      ]
     }
   ]
 }

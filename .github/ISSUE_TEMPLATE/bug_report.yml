@@ -1,0 +1,79 @@
+name: Bug report
+description: Something in the plugin behaves differently from what it documents
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing: a lot of "the plugin did nothing" reports turn out to be the
+        **cache copy**. The installed plugin does not live-update when you edit the repo.
+        Run `claude plugin details muse` — if a component count is 0, that is the bug.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what you got instead.
+      placeholder: |
+        Expected: /muse:delegate spawns a supervisor and returns a verdict.
+        Got: it reported "working copy is dirty" and stopped.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Exact command or prompt
+      description: The literal thing you typed. Redact anything confidential.
+      render: shell
+    validations:
+      required: true
+
+  - type: input
+    id: muse-version
+    attributes:
+      label: muse --version
+      placeholder: "Muse Code 1.3.0 (1.3.0-R3401.1)"
+    validations:
+      required: true
+
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Plugin version
+      description: From `claude plugin details muse` (the first line).
+      placeholder: "muse 1.0.0"
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: OS and shell
+      placeholder: "macOS 15.2, zsh"
+    validations:
+      required: true
+
+  - type: textarea
+    id: inventory
+    attributes:
+      label: Output of `claude plugin details muse`
+      description: >-
+        The component inventory. A zero count for Skills, Agents or Hooks tells us
+        immediately that a config is mis-shaped rather than the logic being wrong.
+      render: shell
+
+  - type: textarea
+    id: validate
+    attributes:
+      label: Output of `bash scripts/validate.sh --offline`
+      description: Only if you have the repo cloned. Free, takes seconds, and rules a lot out.
+      render: shell
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I reinstalled after editing (`marketplace update` → uninstall → install)
+        - label: I am not reporting a model writing poor code — that is what the supervisor and the acceptance check are for

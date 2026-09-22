@@ -161,6 +161,21 @@ sys.exit(0 if m.resolve_model(m.LATEST)[0].endswith('-contributor') else 1)" \
 
 # ------------------------------------------------------------ 3. guardrails
 head_ "3. Preflight guardrails (no muse spawned)"
+
+# core.preflight() checks `shutil.which("muse")` before it checks anything about the repo,
+# so without muse on PATH every guard below reports "muse not found" and four real guards
+# go untested -- which is exactly the environment CI and a new contributor have. This
+# section spawns nothing, so a stub that satisfies the which() lookup is enough to reach
+# the guards. If muse is genuinely installed, nothing here changes.
+if ! command -v muse >/dev/null 2>&1; then
+  mkdir -p "$LAB/stub-bin"
+  printf '#!/bin/sh\nexit 0\n' > "$LAB/stub-bin/muse"
+  chmod +x "$LAB/stub-bin/muse"
+  PATH="$LAB/stub-bin:$PATH"
+  export PATH
+  printf '  \033[33mNOTE\033[0m  muse not installed — using a stub so the repo guards stay testable\n'
+fi
+
 echo '[{"id":"x","prompt":"noop"}]' > /tmp/v_tasks.json
 
 cat > /tmp/v_badschema.json <<'EOF'
