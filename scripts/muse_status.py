@@ -55,7 +55,9 @@ def summarise(tdir: Path) -> dict:
     task = load(tdir / "task.json")
 
     verifs = (task or st).get("verifications") or st.get("verifications") or []
-    passed = [v for v in verifs if v.get("passed")]
+    # Final state, not best-ever: a gate check that passed must not outrank the real
+    # acceptance check that failed after it.
+    final_passed = bool(verifs) and bool(verifs[-1].get("passed"))
     last = verifs[-1] if verifs else None
 
     patch = tdir / "patch.diff"
@@ -83,7 +85,10 @@ def summarise(tdir: Path) -> dict:
         "verdict": (task or {}).get("verdict") or st.get("verdict"),
         "rounds_used": (task or {}).get("rounds_used") or len(st.get("rounds") or []),
         "max_rounds": st.get("max_rounds"),
-        "verified": bool((task or {}).get("verified_by_supervisor") or passed),
+        # Evidence outranks the recorded flag. The exit codes are right here, and a
+        # stored verified_by_supervisor can be stale (written by an older version) or
+        # simply wrong -- neither should make a red final check read as green.
+        "verified": final_passed if verifs else bool((task or {}).get("verified_by_supervisor")),
         "checks_run": len(verifs),
         "last_check": (last or {}).get("command"),
         "last_exit": (last or {}).get("exit_code"),
@@ -106,7 +111,8 @@ def flags(r: dict) -> list:
     """The things a human should not have to notice for themselves."""
     out = []
     if r["verdict"] == "accept" and not r["verified"]:
-        out.append("ACCEPTED WITHOUT AN EXECUTED CHECK")
+        out.append("ACCEPTED WITHOUT A PASSING FINAL CHECK"
+                   if r["checks_run"] else "ACCEPTED WITHOUT AN EXECUTED CHECK")
     if r["finished"] and not r["patch_lines"]:
         out.append("empty patch")
     if r["patch_lines"] and r["patch_lines"] > 5000:
@@ -175,10 +181,18 @@ def main() -> int:
 
     unverified = [r for r in rows if r["verdict"] == "accept" and not r["verified"]]
     if unverified:
-        print("{} task(s) accepted with no executed check: {}".format(
-            len(unverified), ", ".join(r["id"] for r in unverified)))
+        # Two different failures, and saying "nothing ran" about a check that ran and
+        # went red would be its own inaccuracy.
+        never = [r for r in unverified if not r["checks_run"]]
+        failed = [r for r in unverified if r["checks_run"]]
+        if never:
+            print("{} task(s) accepted with no executed check: {}".format(
+                len(never), ", ".join(r["id"] for r in never)))
+        if failed:
+            print("{} task(s) accepted while their final check FAILED: {}".format(
+                len(failed), ", ".join(r["id"] for r in failed)))
         print("Treat those patches as unproven — `accept` there means somebody said so, "
-              "not that anything ran.")
+              "not that a check passed.")
     return 0
 
 

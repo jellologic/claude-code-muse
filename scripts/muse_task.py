@@ -390,7 +390,12 @@ def cmd_finish(args) -> int:
         core.commit_worktree(Path(st["worktree"]),
                              "muse({}): {}".format(st["id"], (args.summary or st["id"])[:70]))
 
-    verified = [v for v in st.get("verifications", []) if v.get("passed")]
+    # The LAST verification, not "any that ever passed". A supervisor legitimately runs
+    # several checks -- a cheap gate first, the real acceptance check after, and failing
+    # rounds before a fixed one -- so "any passed" marks a task verified whenever a
+    # collect-only gate succeeded and the real check went red. Observed exactly that.
+    verifs = st.get("verifications", [])
+    verified = bool(verifs) and bool(verifs[-1].get("passed"))
     st.update({
         "done": True,
         "verdict": args.verdict,

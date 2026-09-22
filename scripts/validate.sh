@@ -382,6 +382,38 @@ git -C "$SC" branch --format='%(refname:short)' | grep -q '^fleet/s/c$' \
 [ ! -d "$SC/.muse-fleet" ] \
   && ok "cleanup --artifacts removes the artifact root" || bad "artifact root survived"
 
+# The central guarantee: `accept` means a check PASSED, not that some check once did.
+# Observed in a real run -- a supervisor ran a cheap `--collect-only` gate (exit 0) and
+# then the real acceptance check (exit 1), and "any passed" marked the task verified.
+VER="$LAB/v_ver"; mkdir -p "$VER/.muse-fleet/tasks/gate"
+cat > "$VER/.muse-fleet/tasks/gate/state.json" <<'JSON'
+{"id":"gate","done":true,"verdict":"accept","max_rounds":3,"rounds":[{"n":1,"kind":"initial"}],
+ "verifications":[{"after_round":1,"command":"pytest --collect-only","exit_code":0,"passed":true},
+                  {"after_round":1,"command":"pytest -q","exit_code":1,"passed":false}]}
+JSON
+cat > "$VER/.muse-fleet/tasks/gate/task.json" <<'JSON'
+{"id":"gate","verdict":"accept","patch_lines":5,"files_changed":["a.py"],"rounds_used":1,
+ "verified_by_supervisor":true,
+ "verifications":[{"after_round":1,"command":"pytest --collect-only","exit_code":0,"passed":true},
+                  {"after_round":1,"command":"pytest -q","exit_code":1,"passed":false}]}
+JSON
+VEROUT=$(python3 "$SKILL/scripts/muse_status.py" --out "$VER/.muse-fleet" 2>&1)
+echo "$VEROUT" | grep -q 'UNVERIFIED' \
+  && ok "a gate-passed/check-failed task reads UNVERIFIED, not verified" \
+  || bad "a failing final check read as verified" "$VEROUT"
+echo "$VEROUT" | grep -q 'final check FAILED' \
+  && ok "status distinguishes a failed check from no check at all" \
+  || bad "wrong wording for a failed final check"
+
+python3 - <<'PY' && ok "finish records verified from the FINAL check, not any that passed" || bad "verified_by_supervisor uses any-passed"
+import importlib.util, os, sys, re
+src = open(os.path.join(os.environ["PLUGIN_ROOT"], "scripts/muse_task.py")).read()
+# The old form marked a task verified whenever ANY check had ever passed.
+bad_form = re.search(r"verified\s*=\s*\[v for v in st\.get\(\"verifications\".*if v\.get\(\"passed\"\)\]", src)
+good_form = "verifs[-1].get(\"passed\")" in src
+sys.exit(0 if (good_form and not bad_form) else 1)
+PY
+
 # A revision that could not resume is a silent quality problem -- the worker got feedback
 # and a re-sent brief but no memory of its own attempt, so it is closer to a fresh try
 # than a correction. It must be visible in the report, not buried in state.json.

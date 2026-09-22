@@ -274,8 +274,15 @@ the scripts keep the last, so an early pessimistic self-report can be superseded
 one. The patch is ground truth either way.
 
 `completed` means *the agent finished*. `accept` means *someone checked*. Only `finish`
-produces the second, and `task.json` records `verified_by_supervisor` so an accept with no
-executed check is visible rather than buried.
+produces the second, and `task.json` records `verified_by_supervisor` — computed from the
+**final** check, not from any check that ever passed, because a supervisor legitimately runs
+a cheap gate first and a gate passing must not outrank the real check failing after it. So
+an accept over a red check shows up as `UNVERIFIED` in `/muse:status` rather than hiding.
+
+A red check is sometimes the *correct* outcome — a test task that correctly asserts
+documented behaviour against buggy code. The fix is never to weaken the assertion; it is to
+encode the divergence so the suite passes honestly (`pytest.mark.xfail(strict=True)`), or to
+finish with `revise` and name the bug. Blessing a bug is the most expensive defect here.
 
 Apply patches one at a time and run the test suite between them. If two conflict, your
 decomposition was wrong — fix the partition rather than hand-merging.

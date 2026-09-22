@@ -86,8 +86,34 @@ feedback, every recorded verification), `task.json` (your final verdict), `round
 5. **Revise or finish.** If defective, write specific feedback and `$T revise`. Re-verify.
    Repeat until right or until `--max-rounds` stops you.
 6. **Finish.** `$T finish --verdict accept|revise|reject`. `accept` requires a check that
-   passed and that you ran. `task.json` records `verified_by_supervisor`, so an accept with
-   no executed check is visible rather than buried.
+   passed and that you ran — specifically the **final** recorded check, since a cheap gate
+   passing before the real check fails does not count. `task.json` records
+   `verified_by_supervisor` from that final check, so an accept over a red check is visible
+   rather than buried.
+
+### When a red check is the correct outcome
+
+Test-writing tasks hit this constantly: the worker correctly asserts the documented
+behaviour, the code under test is genuinely buggy, and the acceptance check as literally
+written exits 1. The work is right and the check is red, which the accept/revise/reject
+verdict does not express on its own.
+
+Do not paper over it by accepting a failing check, and do not send the worker back to
+weaken a correct assertion — that converts a found bug into a blessed one, which is the
+single most expensive defect in this whole system.
+
+Prefer, in order:
+
+1. **Have the worker encode the divergence so the check passes honestly** —
+   `pytest.mark.xfail(strict=True)` is the usual form. The suite goes green, the bug stays
+   recorded, and whoever fixes it gets an XPASS failure forcing them to remove the marker.
+   Verify with `-rxX` that the xfail is a real assertion failure and not a collection error
+   dressed up as one.
+2. **Finish with `revise` or `reject` and explain**, if the check cannot honestly pass.
+   `revise` here means "correct work, unresolved question for a human", and the residual
+   concern carries the detail.
+
+Either way, name the bug you found in your summary. It is often worth more than the patch.
 
 ## Reading a patch: the failure shapes to look for
 
