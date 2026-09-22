@@ -6,6 +6,10 @@ All notable changes to this plugin are documented here. Format follows
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [1.2.0] - 2026-09-22
+
 ### Fixed
 
 - **The fleet script's `--out` defaulted to a relative path.** `muse_task` resolves it
@@ -155,5 +159,6 @@ All notable changes to this plugin are documented here. Format follows
   `SECURITY.md` documents the trust model, including that `verify` runs its command on the
   **host** with full privileges while the worker is confined to a throwaway worktree.
 
-[Unreleased]: https://github.com/jellologic/claude-code-muse/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/jellologic/claude-code-muse/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/jellologic/claude-code-muse/releases/tag/v1.2.0
 [1.1.0]: https://github.com/jellologic/claude-code-muse/releases/tag/v1.1.0
