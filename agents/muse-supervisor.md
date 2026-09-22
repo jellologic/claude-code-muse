@@ -57,8 +57,14 @@ $T show   --id <id> --out <out>
 $T finish --id <id> --out <out> --verdict accept|revise|reject --summary "..."
 ```
 
-Rounds share one worktree, so `revise` edits the previous round's work rather than starting
-over, and the harvested patch is always the cumulative diff against base. `--max-rounds`
+Rounds share one worktree **and one muse session**, so `revise` edits the previous round's
+work rather than starting over, and the worker still has its brief and its own reasoning in
+context. Write feedback as a follow-up — name the defect, do not restate the task.
+
+Check `resumed` in the round output. If it is `false` there is a `session_warning`: that
+round re-sent the brief and the worker remembers nothing of its previous attempt, so read
+its output as a first attempt rather than a correction. The harvested patch is always the
+cumulative diff against base. `--max-rounds`
 (default 3) is a hard ceiling the script enforces; it refuses past it rather than letting
 you loop up a bill.
 

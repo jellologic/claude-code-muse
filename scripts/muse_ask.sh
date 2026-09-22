@@ -8,6 +8,12 @@
 #   muse_ask.sh --schema s.json --effort low "List every file importing requests"
 #   muse_ask.sh --write --effort medium "Add a docstring to add() in calc.py"
 #
+# Follow-ups: every run prints its session id on stderr. Pass it back with --session to
+# continue the same conversation instead of re-explaining the context:
+#
+#   muse_ask.sh "Summarise retry.py"                    # prints: session <uuid>
+#   muse_ask.sh --session <uuid> "Now list its callers"  # remembers the summary
+#
 # Read-only by default: writes are disabled and the sandbox stays on, so this is safe to
 # point at a dirty working copy. --write opts into editing (and disables the sandbox),
 # which you should only do against a worktree or a repo you are willing to have modified.
@@ -18,6 +24,7 @@ set -uo pipefail
 
 SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 EFFORT="low"
+SESSION=""
 MODEL="latest-contributor"
 SCHEMA=""
 REPO="."
@@ -39,6 +46,7 @@ while [[ $# -gt 0 ]]; do
     --timeout)   TIMEOUT="$2"; shift 2 ;;
     --max-steps) MAX_STEPS="$2"; shift 2 ;;
     --write)     WRITE=1; shift ;;
+    --session)   SESSION="$2"; shift 2 ;;
     -h|--help)   usage 0 ;;
     --)          shift; break ;;
     -*)          echo "unknown flag: $1" >&2; usage 1 ;;
@@ -70,7 +78,14 @@ sys.stdout.write(m.resolve_model(m.LATEST)[0])
   fi
 fi
 
+# Reusing a session id across invocations continues that conversation; an id muse has
+# never seen simply starts a new one under that id, so this is safe either way.
+if [[ -z "$SESSION" ]]; then
+  SESSION="$(python3 -c 'import uuid;print(uuid.uuid4())')"
+fi
+
 ARGS=(exec --json --model "$MODEL" --reasoning-effort "$EFFORT"
+      --session-id "$SESSION"
       --user-input-auto-resolve --no-foreign-personal-context)
 
 if [[ "$WRITE" -eq 1 ]]; then
@@ -84,8 +99,20 @@ fi
 [[ -n "$SCHEMA" ]]    && ARGS+=(--output-schema "$SCHEMA")
 [[ -n "$MAX_STEPS" ]] && ARGS+=(--max-model-steps "$MAX_STEPS")
 
-EVENTS="$(mktemp -t muse_ask)"
+# `mktemp -t NAME` is BSD-only; GNU coreutils rejects a template with no trailing X's and
+# prints nothing, which would leave EVENTS empty and break every run on Linux. Same bug
+# validate.sh had.
+EVENTS="$(mktemp "${TMPDIR:-/tmp}/muse_ask.XXXXXX")"
+if [[ -z "$EVENTS" || ! -f "$EVENTS" ]]; then
+  echo "could not create a temp file for muse output" >&2
+  exit 1
+fi
 trap 'rm -f "$EVENTS"' EXIT
+
+# Printed so a follow-up is possible: pass it back with --session to continue this
+# conversation instead of re-explaining the context. stderr, so it never pollutes the
+# answer on stdout that callers capture with $(...).
+echo "muse_ask: session $SESSION" >&2
 
 ( cd "$REPO" && muse "${ARGS[@]}" "$PROMPT" ) > "$EVENTS" 2>/dev/null &
 PID=$!

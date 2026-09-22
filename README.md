@@ -97,6 +97,13 @@ refactors across many files, tests for a list of modules, one migration pattern 
 **No command applies a patch.** They stop at a verdict and a patch path, because an accepted
 patch is still a patch you have not read.
 
+**Follow-ups keep their context.** A task's rounds share one muse session, so a revision is
+a genuine follow-up — the worker still has the brief, the files it read and its own
+reasoning, and your feedback can say "the assertion on line 12 is wrong" without restating
+the task. `/muse:ask` does the same via `--session`. When a session cannot be resumed the
+round re-sends the brief and reports `resumed: false` rather than quietly losing the
+context.
+
 ## The three rules that decide whether this works
 
 **Partition by file.** Worktrees isolate agents from each other's *process*, not from each

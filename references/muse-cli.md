@@ -334,7 +334,15 @@ usually relevant in a way your personal skills are not.
 ## Sessions and cross-session messaging
 
 - `muse resume --last` or `muse resume <uuid|name>` continues a session.
-- `muse exec --session-id <UUID>` fixes the id ahead of time.
+- `muse exec --session-id <UUID>` fixes the id ahead of time, and **reusing that id on a
+  later `muse exec` continues the same conversation.** Measured: a codeword planted in one
+  invocation is recalled in the next; a fresh id and no id both answer "NONE". This is what
+  `muse_task.py revise` uses so a revision is a follow-up rather than a re-brief.
+- An unknown `--session-id` is **not** an error. Muse starts a new conversation under that
+  id silently, so anything depending on continuity must verify the session exists first —
+  `muse_core.session_exists()` checks `<data-dir>/sessions/.msp-view-v1/<uuid>` and the
+  dated `sessions/YYYY/MM/DD/<uuid>` tree.
+- `--no-session-log` disables session persistence, which also disables resume.
 - Session state: `~/.local/share/muse/sessions/`, index at `session-index.db`.
 - `muse session-message list [--json]` and
   `muse session-message send --target <uuid-or-name> [--in-reply-to <token>] < body`

@@ -224,9 +224,10 @@ agents deleted your changes.
 
 ## Writing prompts that come back correct
 
-A muse instance has no memory of your conversation and cannot ask you a question — a
-headless run with `--user-input-auto-resolve` cancels prompts rather than blocking. So
-ambiguity does not surface as a question; it surfaces as confidently wrong work.
+A muse instance has no memory of *your* conversation with the user, and cannot ask a
+question — a headless run with `--user-input-auto-resolve` cancels prompts rather than
+blocking. So ambiguity does not surface as a question; it surfaces as confidently wrong
+work. (It does remember its own earlier rounds; see revisions below.)
 
 - **Name the files.** "Add tests for auth" invites a rewrite of `auth.py`; "Create
   `tests/test_auth.py`, do not modify `auth.py`" does not.
@@ -235,9 +236,17 @@ ambiguity does not surface as a question; it surfaces as confidently wrong work.
   prompt, and what the supervisor will run.
 - **Keep scope to one sitting.** If a prompt needs three paragraphs, it is probably two tasks.
 
-Muse has no memory *between rounds* either, which is why `revise` re-sends the original
-brief alongside the feedback and tells the worker its previous attempt is already in the
-tree. Feedback should quote the failing output and name the line — vague feedback produces
+Between rounds is different: **rounds share a muse session**, so a revision is a genuine
+follow-up. `run` mints a session id, every later round passes the same `--session-id`, and
+the worker still has the brief, the files it read and its own reasoning in context. So
+feedback can say "the assertion on line 12 is wrong" without restating the task.
+
+`revise` verifies the session exists on disk before relying on it, because muse does not
+error on an unknown session id — it silently starts a fresh conversation. When the session
+is gone the round re-sends the full brief and says so in `session_warning`, and the emitted
+`resumed: false` is your signal that the worker knows only what that prompt carried.
+
+Feedback should still quote the failing output and name the line — vague feedback produces
 a vague fix.
 
 ## Supervising — what the Opus agent is actually for

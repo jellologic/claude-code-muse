@@ -12,7 +12,8 @@ explanation, or one small contained edit — anything where the orchestration of
 `/muse:delegate` would cost more than the task.
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/scripts/muse_ask.sh" [--effort <e>] [--write] [--schema <file>] "<prompt>"
+"${CLAUDE_PLUGIN_ROOT}/scripts/muse_ask.sh" [--effort <e>] [--write] [--schema <file>] \
+  [--session <id>] "<prompt>"
 ```
 
 Read-only by default: writes are disabled and the sandbox stays on, so it is safe to point
@@ -31,6 +32,22 @@ reason to stderr. The model is resolved to the newest contributor tier at run ti
   undo the change with `git checkout`, and say that is what you are about to do.
 - For a task that deserves isolation, verification and revision rounds, stop and use
   `/muse:delegate` instead. The boundary is whether a wrong answer costs anything.
+
+## Following up
+
+Every run prints `muse_ask: session <uuid>` on stderr. Passing that back with `--session`
+continues the same conversation, so a follow-up needs only the new question:
+
+```bash
+"${CLAUDE_PLUGIN_ROOT}/scripts/muse_ask.sh" "Summarise what retry.py does"
+# stderr: muse_ask: session 7f3a...
+"${CLAUDE_PLUGIN_ROOT}/scripts/muse_ask.sh" --session 7f3a... "Now list everything that calls it"
+```
+
+Capture the session id from stderr on the first call and reuse it for the rest of the
+user's follow-ups on that topic, rather than re-explaining the context each time. Start a
+new session when the subject changes — a long session carries irrelevant context and costs
+tokens to re-read.
 
 ## Reporting
 

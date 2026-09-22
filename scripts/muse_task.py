@@ -17,7 +17,13 @@ hands them to a human afterwards. Here a supervisor reads the patch, runs the ch
 itself, and sends muse back with specific defects until the work is right -- so the
 task completes already reviewed, or completes explicitly marked as not good enough.
 
-Why rounds share one worktree: muse has no memory between `muse exec` invocations, so
+Rounds share one worktree AND one muse session. Reusing --session-id across `muse exec`
+invocations continues the conversation -- measured: a fact planted in one call is recalled
+in the next, while a fresh id or no id is not -- so a revision arrives as a follow-up rather
+than a re-brief. When the session cannot be found on disk the round falls back to resending
+the full brief, because muse starts a fresh conversation silently rather than erroring.
+
+The worktree matters independently of the session:
 a revision would otherwise start from a clean checkout and redo the work. Reusing the
 worktree means round 2 edits round 1's output, and the harvested patch is always the
 cumulative diff against base -- i.e. the thing you would actually merge.
@@ -71,7 +77,8 @@ def task_dir(args) -> Path:
     return Path(args.out).resolve() / args.id
 
 
-def do_round(st: dict, tdir: Path, prompt: str, args, kind: str) -> dict:
+def do_round(st: dict, tdir: Path, prompt: str, args, kind: str,
+             resumed: bool | None = None) -> dict:
     """Run one muse round into the existing worktree and harvest the cumulative patch."""
     repo = Path(st["repo"])
     wt = Path(st["worktree"])
@@ -84,15 +91,19 @@ def do_round(st: dict, tdir: Path, prompt: str, args, kind: str) -> dict:
         st["model"], st.get("effort", core.DEFAULT_EFFORT), wt,
         schema=st.get("schema"), max_steps=st.get("max_steps") or 0,
         inherit_skills=st.get("inherit_skills", False),
+        session_id=st.get("session_id"),
     )
-    print("muse_task[{}]: round {} ({}) model={} effort={}".format(
-        st["id"], n, kind, st["model"], st.get("effort")), file=sys.stderr)
+    print("muse_task[{}]: round {} ({}) model={} effort={} session={}".format(
+        st["id"], n, kind, st["model"], st.get("effort"),
+        "resumed" if resumed else ("new" if resumed is None else "NOT RESUMED")),
+        file=sys.stderr)
 
     res = core.run_muse(cmd, prompt, repo, rdir / "events.jsonl",
                         rdir / "stderr.log", int(st.get("timeout") or core.DEFAULT_TIMEOUT))
 
     rnd = {
         "n": n, "kind": kind, "status": res["status"], "reason": res["reason"],
+        "session_id": st.get("session_id"), "resumed": bool(resumed),
         "elapsed_s": res["elapsed_s"], "model_actual": res["model_actual"],
         "events": str(rdir / "events.jsonl"),
         "stderr": str(rdir / "stderr.log"),
@@ -121,6 +132,10 @@ def do_round(st: dict, tdir: Path, prompt: str, args, kind: str) -> dict:
     out = {
         "id": st["id"], "round": n, "kind": kind,
         "status": res["status"], "reason": res["reason"],
+        # The supervisor needs to know whether this round continued the conversation or
+        # started a fresh one: a revision that did NOT resume only knows what its prompt
+        # carried, which changes how its output should be read.
+        "session_id": st.get("session_id"), "resumed": bool(resumed),
         "worktree": st["worktree"], "branch": st["branch"], "base": st["base"],
         "patch": str(tdir / "patch.diff"),
         "patch_lines": h["patch_lines"],
@@ -185,6 +200,8 @@ def cmd_run(args) -> int:
         "warn_patch_lines": args.warn_patch_lines,
         "max_rounds": args.max_rounds,
         "brief": args.prompt,
+        # One session for the whole task, so every later round continues this conversation.
+        "session_id": core.new_session_id(),
         "seeded": seeded, "absent_locals": absent,
         "rounds": [], "verifications": [], "done": False,
     }
@@ -202,6 +219,23 @@ def cmd_run(args) -> int:
 
 # ------------------------------------------------------------------- revise
 
+# Used when the muse session resumed: the worker still has the brief, the files it read
+# and its own reasoning in context, so restating all of it wastes tokens and invites it to
+# re-litigate settled decisions.
+REVISION_RESUMED_TEMPLATE = """REVISION ROUND {n}, continuing our session. Your previous
+attempt is already in this working tree.
+
+A reviewer inspected your work and requires these specific changes:
+
+{feedback}
+
+Fix exactly these points. Do NOT revert or rewrite unrelated work already in the tree that
+the reviewer did not object to, and do not start over from scratch.
+"""
+
+# Used when the session could not be found. muse does not error on an unknown --session-id,
+# it silently starts fresh -- so this round must carry the whole brief or the worker gets
+# bare feedback with nothing behind it.
 REVISION_TEMPLATE = """REVISION ROUND {n}. Your previous attempt is ALREADY PRESENT in this working tree.
 
 A reviewer inspected your work and requires these specific changes:
@@ -247,9 +281,19 @@ def cmd_revise(args) -> int:
     feedback = args.feedback
     if args.feedback_file:
         feedback = Path(args.feedback_file).read_text()
-    prompt = REVISION_TEMPLATE.format(n=used + 1, feedback=feedback, brief=st["brief"])
+    resumed = core.session_exists(st.get("session_id") or "")
+    if resumed:
+        prompt = REVISION_RESUMED_TEMPLATE.format(n=used + 1, feedback=feedback)
+    else:
+        prompt = REVISION_TEMPLATE.format(n=used + 1, feedback=feedback, brief=st["brief"])
 
-    out = do_round(st, tdir, prompt, args, "revision")
+    out = do_round(st, tdir, prompt, args, "revision", resumed=resumed)
+    if not resumed:
+        out["session_warning"] = (
+            "muse session {} was not found on disk, so this round re-sent the full brief "
+            "instead of continuing the conversation. The worker does not remember its "
+            "previous reasoning.".format(st.get("session_id"))
+        )
     out["next"] = ("Re-run `verify`, then `finish` with a verdict. "
                    "{} round(s) left.".format(out["rounds_left"]))
     emit(out)

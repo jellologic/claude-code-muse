@@ -168,6 +168,66 @@ sys.exit(0 if m.resolve_model(m.LATEST)[0].endswith('-contributor') else 1)" \
   && ok "muse_ask's resolve_model import path works" || bad "muse_ask resolve import"
 
 # ------------------------------------------------------------ 3. guardrails
+# ------------------------------------------------- 2b. session plumbing (no muse spawned)
+head_ "2b. Session resume plumbing"
+
+# Reusing --session-id across `muse exec` calls continues the conversation, which is what
+# lets a revision be a follow-up instead of a re-brief. These check the wiring; the live
+# section checks that muse actually remembers.
+SESSDATA="$LAB/v_sessdata"
+mkdir -p "$SESSDATA/sessions/.msp-view-v1/11111111-1111-1111-1111-111111111111"
+mkdir -p "$SESSDATA/sessions/2026/09/22/22222222-2222-2222-2222-222222222222"
+MUSE_DATA_DIR="$SESSDATA" python3 - <<'PY' && ok "session_exists finds both storage layouts and rejects the rest" || bad "session_exists"
+import importlib.util, os, sys, pathlib
+spec = importlib.util.spec_from_file_location("mc", os.path.join(os.environ["PLUGIN_ROOT"], "scripts/muse_core.py"))
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+checks = [
+    ("view-index layout",  m.session_exists("11111111-1111-1111-1111-111111111111"), True),
+    ("dated layout",       m.session_exists("22222222-2222-2222-2222-222222222222"), True),
+    ("unknown id",         m.session_exists("33333333-3333-3333-3333-333333333333"), False),
+    ("empty id",           m.session_exists(""),                                     False),
+]
+bad = [n for n, got, want in checks if got != want]
+if bad:
+    print("        wrong:", bad)
+sys.exit(1 if bad else 0)
+PY
+
+python3 - <<'PY' && ok "muse_cmd carries --session-id only when given one" || bad "muse_cmd session wiring"
+import importlib.util, os, sys, pathlib
+spec = importlib.util.spec_from_file_location("mc", os.path.join(os.environ["PLUGIN_ROOT"], "scripts/muse_core.py"))
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+with_id = m.muse_cmd("mdl", "low", pathlib.Path("/tmp/wt"), session_id="abc-123")
+without  = m.muse_cmd("mdl", "low", pathlib.Path("/tmp/wt"))
+ok1 = "--session-id" in with_id and with_id[with_id.index("--session-id") + 1] == "abc-123"
+ok2 = "--session-id" not in without
+# A generated id must be a real uuid, not a placeholder that collides across tasks.
+import uuid
+try:
+    uuid.UUID(m.new_session_id()); ok3 = m.new_session_id() != m.new_session_id()
+except Exception:
+    ok3 = False
+sys.exit(0 if (ok1 and ok2 and ok3) else 1)
+PY
+
+# The fallback is the safety property: muse does not error on an unknown --session-id, it
+# silently starts fresh, so a revision that assumed continuity would send bare feedback
+# with no brief behind it.
+grep -q 'REVISION_RESUMED_TEMPLATE' "$SKILL/scripts/muse_task.py" \
+  && grep -q 'core.session_exists' "$SKILL/scripts/muse_task.py" \
+  && ok "revise selects its prompt from a verified session, not an assumed one" \
+  || bad "revise does not check session_exists"
+
+python3 - <<'PY' && ok "the resumed prompt omits the brief and the fallback keeps it" || bad "revision templates"
+import importlib.util, os, sys
+spec = importlib.util.spec_from_file_location("mt", os.path.join(os.environ["PLUGIN_ROOT"], "scripts/muse_task.py"))
+mt = importlib.util.module_from_spec(spec); spec.loader.exec_module(mt)
+resumed  = mt.REVISION_RESUMED_TEMPLATE.format(n=2, feedback="FB")
+fallback = mt.REVISION_TEMPLATE.format(n=2, feedback="FB", brief="THEBRIEF")
+sys.exit(0 if ("THEBRIEF" not in resumed and "{brief}" not in resumed
+               and "THEBRIEF" in fallback) else 1)
+PY
+
 head_ "3. Preflight guardrails (no muse spawned)"
 
 # core.preflight() checks `shutil.which("muse")` before it checks anything about the repo,
@@ -548,6 +608,52 @@ echo "$FIN2" | python3 -c "
 import json,sys; d=json.load(sys.stdin)
 sys.exit(0 if d['verified_by_supervisor'] is False else 1)" \
   && ok "unverified accept is flagged, not hidden" || bad "unverified accept looked verified" "$FIN2"
+
+head_ "9. Session resume (live)"
+# The offline section proves the flag is wired. This proves muse actually remembers:
+# the codeword exists ONLY in round 1's brief, never on disk, and the revision prompt
+# does not restate it. If it lands in the patch, the conversation was continued.
+SSLAB="$LAB/v_sess"; SSOUT="$SSLAB/.muse-fleet/tasks"
+mkrepo "$SSLAB"
+python3 "$TASK" run --id resume --out "$SSOUT" --repo "$SSLAB" --worktree-root "$LAB/v_sess_wt" \
+  --prompt "Add a function named alpha_v1() to calc.py that returns the integer 7. Change nothing else. Also note this codeword for later: TIGERMOTH-9." \
+  > /tmp/v_sess1.json 2>/dev/null
+SID=$(python3 -c "import json;print(json.load(open('/tmp/v_sess1.json')).get('session_id') or '')" 2>/dev/null)
+[ -n "$SID" ] && ok "run mints a session id and reports it" || bad "no session id on run"
+
+python3 "$TASK" revise --id resume --out "$SSOUT" \
+  --feedback "Add a Python comment line directly above alpha_v1 containing the codeword I gave you earlier. Nothing else." \
+  > /tmp/v_sess2.json 2>/dev/null
+python3 -c "
+import json,sys
+d=json.load(open('/tmp/v_sess2.json'))
+sys.exit(0 if d.get('resumed') is True else 1)" \
+  && ok "revise reports the session resumed" || bad "revise did not resume"
+
+grep -q 'TIGERMOTH' "$SSOUT/resume/round-2/prompt.txt" \
+  && bad "the revision prompt restated the brief (resume saved nothing)" \
+  || ok "the revision prompt omits the brief"
+
+grep -q 'TIGERMOTH' "$SSOUT/resume/patch.diff" \
+  && ok "worker recalled a codeword that exists nowhere on disk" \
+  || bad "codeword absent from patch — the session did not carry context"
+
+# The safety path: muse does not error on an unknown session id, it silently starts fresh.
+python3 -c "
+import json
+p='$SSOUT/resume/state.json'; st=json.load(open(p))
+st['session_id']='00000000-dead-beef-0000-000000000000'
+json.dump(st, open(p,'w'), indent=2)"
+python3 "$TASK" revise --id resume --out "$SSOUT" \
+  --feedback "Change the returned integer from 7 to 8." > /tmp/v_sess3.json 2>/dev/null
+python3 -c "
+import json,sys
+d=json.load(open('/tmp/v_sess3.json'))
+sys.exit(0 if d.get('resumed') is False and d.get('session_warning') else 1)" \
+  && ok "an unresumable session is reported, not assumed" || bad "missing session went unreported"
+grep -q 'TIGERMOTH' "$SSOUT/resume/round-3/prompt.txt" \
+  && ok "fallback re-sends the full brief" || bad "fallback lost the brief"
+
 
 printf '\n\033[1mRESULT: %d passed, %d failed\033[0m\n' "$PASS" "$FAIL"
 exit $([ "$FAIL" -eq 0 ] && echo 0 || echo 1)

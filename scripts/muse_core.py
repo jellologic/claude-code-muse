@@ -21,6 +21,7 @@ import json
 import os
 import shutil
 import subprocess
+import uuid
 import sys
 from pathlib import Path
 
@@ -34,6 +35,7 @@ FALLBACK_MODEL = "muse-spark-1.3-contributor"
 # happens to be on the host, which makes the result environment-dependent.
 CATALOG_GLOB = os.environ.get(
     "MUSE_CATALOG_GLOB", "~/.local/share/muse/model-catalog/*.json")
+MUSE_DATA_DIR = os.environ.get("MUSE_DATA_DIR", "~/.local/share/muse")
 DEFAULT_EFFORT = "low"
 DEFAULT_TIMEOUT = 900
 EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
@@ -246,7 +248,28 @@ def absent_locals(repo: Path, named):
 
 # ------------------------------------------------------------- running muse
 
-def muse_cmd(model, effort, wt: Path, schema=None, max_steps=0, inherit_skills=False):
+def session_exists(session_id: str) -> bool:
+    """Has muse actually persisted this session?
+
+    Passing --session-id for a session muse cannot find is not an error: it silently
+    starts a fresh conversation. A revision that assumed continuity would then arrive as
+    bare feedback with no brief behind it, which is the confidently-wrong-work failure
+    this plugin exists to avoid. So check before relying on it."""
+    if not session_id:
+        return False
+    base = Path(os.path.expanduser(MUSE_DATA_DIR)) / "sessions"
+    if (base / ".msp-view-v1" / session_id).is_dir():
+        return True
+    # The dated tree is the durable copy; the view index above is derived from it.
+    return any(base.glob("*/*/*/" + session_id))
+
+
+def new_session_id() -> str:
+    return str(uuid.uuid4())
+
+
+def muse_cmd(model, effort, wt: Path, schema=None, max_steps=0, inherit_skills=False,
+             session_id=None):
     """The muse invocation both entry points use.
 
     --yolo is defensible only because the blast radius is a throwaway worktree; keep
@@ -259,6 +282,10 @@ def muse_cmd(model, effort, wt: Path, schema=None, max_steps=0, inherit_skills=F
         "--user-input-auto-resolve",   # never block on an interactive prompt
         "--yolo",                      # safe *because* the blast radius is this worktree
     ]
+    if session_id:
+        # Reusing the id across invocations continues the conversation, so a later round
+        # still has the brief, the files it read and its own reasoning in context.
+        cmd += ["--session-id", session_id]
     if not inherit_skills:
         # Muse imports Claude Code personal skills by default, which means a run can
         # load the very skill that launched it. Keep workers on the task in front of
