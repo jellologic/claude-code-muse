@@ -97,6 +97,12 @@ said "does NOT close" followed by an issue number closed that issue. The follow-
 documenting the trap quoted itself, and closed the same issue a second time. If you need
 to write about this, spell the number in words or refer to "the issue" instead.
 
+**Filing issues or comments with `gh`:** always use `--body-file`, never `--body "..."`.
+A double-quoted body containing backticks — which any markdown body does — gets
+command-substituted by the shell before `gh` ever sees it, and the text silently arrives
+with holes in it. The same applies to `git commit -m`; use `-F` and a file. Both traps
+were hit while writing this repo's own issues.
+
 If you are unsure whether something is a bug, **file an issue rather than a PR**, and
 include the exact command, its output, your OS, `python3 --version`, and
 `bash scripts/validate.sh --offline 2>&1 | tail -1`. A precise report is worth more than
