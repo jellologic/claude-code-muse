@@ -1,6 +1,6 @@
 # muse
 
-Offload bulk coding work to [Muse Code](https://muse.ai) instances running in isolated git
+Offload bulk coding work to Muse Code (`muse exec`) instances running in isolated git
 worktrees, each supervised by an Opus agent that reads the patch, runs the acceptance check
 itself, and sends muse back for revisions until the work is right.
 
@@ -33,7 +33,7 @@ to type.
 
 ## Install
 
-Requires [Muse Code](https://muse.ai) on `PATH`, `git`, `python3` and Claude Code.
+Requires the Muse Code CLI (`muse`) on `PATH`, plus `git`, `python3` and Claude Code.
 
 ```
 /plugin marketplace add jellologic/muse-code
