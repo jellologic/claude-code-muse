@@ -88,6 +88,12 @@ Open a PR against `main`. The template asks what you measured; answer it literal
 concern per PR — a rename and a behaviour change are two PRs. Comments explain *why
 something would break*, not what the line does.
 
+**Referencing issues:** write `Closes #N` only when the change genuinely finishes the
+issue. Otherwise write `Refs #N` — and keep the words *close/closes/fixes/resolves* away
+from the issue number entirely, including in negative sentences. A commit here that said
+"Does NOT close #3" closed #3: GitHub's parser matched `close #3` and ignored the
+negation.
+
 If you are unsure whether something is a bug, **file an issue rather than a PR**, and
 include the exact command, its output, your OS, `python3 --version`, and
 `bash scripts/validate.sh --offline 2>&1 | tail -1`. A precise report is worth more than

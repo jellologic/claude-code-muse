@@ -135,6 +135,9 @@ CI only runs `--offline`, because CI has no muse credentials and should not have
 ## Pull requests
 
 - One concern per PR. A rename and a behaviour change in the same diff are two PRs.
+- `Closes #N` only when the change finishes the issue; otherwise `Refs #N`. Keep
+  close/closes/fixes/resolves away from an issue number even in a negative sentence —
+  "Does NOT close #3" closed #3.
 - Say what you **measured**, not what you expect. Paste the suite's RESULT line and name
   what went red when you broke the thing your new guard watches — that is worth more than
   "tested and working".
