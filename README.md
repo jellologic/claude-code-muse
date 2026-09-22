@@ -139,14 +139,18 @@ instead of making the one edit it was asked for.
 ## Validating
 
 ```bash
-bash scripts/validate.sh
+bash scripts/validate.sh --offline   # free, seconds — spawns no muse
+bash scripts/validate.sh             # everything, including live runs
 ```
 
-Static checks, unit tests, preflight guardrails, live runs of both paths, the supervisor
-loop, re-run safety, seeding, and `muse_ask`. It builds throwaway repos in a temp dir and
-touches nothing of yours. It makes real muse calls, so it costs a little and takes several
-minutes. Run it after changing the scripts, or when muse ships a new version and you want to
-know whether any behaviour this plugin depends on has moved.
+`--offline` runs the static checks, the unit tests, the preflight guardrails and the
+status/cleanup suite against real git worktrees. It spawns no muse, costs nothing and takes
+seconds, so it can run on every change.
+
+The full run adds live runs of both drivers, the supervisor loop, re-run safety, seeding and
+`muse_ask`. It builds throwaway repos in a temp dir and touches nothing of yours, but it
+makes real muse calls, so it costs a little and takes several minutes. Run it when muse ships
+a new version and you want to know whether any behaviour this plugin depends on has moved.
 
 ## License
 
