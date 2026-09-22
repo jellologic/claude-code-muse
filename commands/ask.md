@@ -1,6 +1,6 @@
 ---
 description: Ask Muse Code one question, or have it make one contained edit — no worktree, answer on stdout
-argument-hint: [--write] [--effort low|medium|xhigh] <question or edit>
+argument-hint: "[--write] [--effort low|medium|xhigh] <question or edit>"
 disable-model-invocation: true
 allowed-tools: Bash, Read
 ---

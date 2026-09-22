@@ -1,6 +1,6 @@
 ---
 description: Delegate one coding task to Muse Code under an Opus supervisor that runs the acceptance check and revises until the patch is right
-argument-hint: <task> — name the target files and say what must not change
+argument-hint: "<task> — name the target files and say what must not change"
 disable-model-invocation: true
 allowed-tools: Bash, Read, Grep, Glob, Agent, AskUserQuestion
 ---

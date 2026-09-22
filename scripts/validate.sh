@@ -160,6 +160,72 @@ if problems:
     sys.exit(1)
 PY
 
+# Frontmatter that does not parse is not an error at load time -- it is SILENCE. The
+# validator's own words: "At runtime this command loads with empty metadata (all
+# frontmatter fields silently dropped)." Three commands shipped that way, because
+# `argument-hint: [--scan] [--repo <path>]` is not valid YAML, and four more shipped a
+# hint that parsed as a LIST rather than a string. Nothing noticed for as long as the
+# plugin has existed.
+#
+# PyYAML is not in the stdlib and the offline suite promises to need only git, python3
+# and bash, so the real parse runs only where PyYAML happens to exist. The quoting rule
+# below runs everywhere and is what actually catches this class.
+python3 - <<'PY' && ok "every component's frontmatter parses, and its scalars are scalars" || bad "frontmatter would load as empty metadata"
+import os, pathlib, re, sys
+ROOT = pathlib.Path(os.environ["PLUGIN_ROOT"])
+files = sorted((ROOT / "commands").glob("*.md")) + \
+        sorted((ROOT / "agents").glob("*.md")) + \
+        sorted((ROOT / "skills").glob("*/SKILL.md"))
+if not files:
+    print("        no component files found -- this guard is measuring nothing")
+    sys.exit(1)
+
+try:
+    import yaml
+except ImportError:
+    yaml = None
+
+SCALAR_KEYS = {"description", "argument-hint", "allowed-tools", "name", "model",
+               "color", "effort"}
+
+problems = []
+for f in files:
+    rel = f.relative_to(ROOT)
+    t = f.read_text(encoding="utf-8")
+    m = re.match(r"---\n(.*?)\n---\n", t, re.S)
+    if not m:
+        problems.append("%s has no frontmatter block" % rel)
+        continue
+    head = m.group(1)
+    # The portable floor, applied only to the keys whose value must be a STRING --
+    # `tools:` is legitimately a sequence and this rule fired on it, which is the first
+    # thing this guard caught. A scalar value opening with one of these characters is
+    # YAML syntax, not text: `[` and `{` are flow collections, `*` an alias, `&` an
+    # anchor, `!` a tag, `%` a directive. Each either fails to parse -- dropping EVERY
+    # field in the block -- or silently yields the wrong type.
+    for line in head.splitlines():
+        km = re.match(r"^([A-Za-z-]+):[ \t]+(\S.*)$", line)
+        if km and km.group(1) in SCALAR_KEYS and km.group(2)[0] in "[{*&!%@`":
+            problems.append("%s: %s must be quoted -- %r is YAML syntax, not a string"
+                            % (rel, km.group(1), km.group(2)))
+    if yaml is not None:
+        try:
+            d = yaml.safe_load(head)
+        except Exception as e:
+            problems.append("%s: frontmatter does not parse (%s)"
+                            % (rel, str(e).splitlines()[0]))
+            continue
+        for k in SCALAR_KEYS:
+            if k in d and not isinstance(d[k], str):
+                problems.append("%s: %s parsed as %s, not a string"
+                                % (rel, k, type(d[k]).__name__))
+print("        (parsed with PyYAML)" if yaml is not None
+      else "        (PyYAML absent -- quoting rule only)")
+if problems:
+    for p in problems: print("        " + p)
+    sys.exit(1)
+PY
+
 # Component frontmatter. `claude plugin validate <dir> --strict` parses these files but
 # does NOT reject an unknown frontmatter key -- measured, by putting one in and watching
 # it pass -- so the manifest validator in CI is not a guard for any of this.

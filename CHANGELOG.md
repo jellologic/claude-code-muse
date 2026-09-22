@@ -98,6 +98,14 @@ All notable changes to this plugin are documented here. Format follows
 
 ### Fixed
 
+- **Three commands shipped with frontmatter that does not parse** (#31), so `/muse:ask`,
+  `/muse:cleanup` and `/muse:doctor` have been loading with **no** description, no
+  `allowed-tools` and no `argument-hint` for as long as they have existed. An unquoted
+  `argument-hint: [--scan] [--repo <path>]` is a YAML flow sequence with trailing content
+  after the bracket; the block fails to parse and every field in it is silently dropped.
+  The other four parsed as a one-element *list* rather than a string, which is the same
+  bug wearing a quieter hat. Found by the `--strict` CI step on its first run — the older
+  CLI on the development machine reported `✔ Validation passed` on the same files.
 - **A relative `--out` moved with the current directory** (#17). An agent's Bash cwd
   resets between tool calls, `commands/delegate.md` prescribed the relative
   `.muse-fleet/tasks`, and `references/workflow.md` said the opposite and called it
