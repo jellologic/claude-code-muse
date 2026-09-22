@@ -283,6 +283,34 @@ def cmd_run(args) -> int:
         return 1
 
     seeded = core.seed_worktree(repo, wt, args.seed or [], args.link or [])
+
+    # Scan the worktree AFTER seeding and BEFORE spawning muse -- seeding is the step
+    # that deliberately copies untracked secrets (`--seed .env`) into the tree a worker
+    # can read. Refusing on a `certain` hit is the safe default because the exposure is
+    # not undoable: contributor-tier models state that content may be used for product
+    # improvement. `possible` hits only warn; blocking on those would make the plugin
+    # unusable on any repo with test fixtures.
+    scan = {"certain": [], "possible": [], "files_scanned": 0, "truncated": False}
+    if not args.no_secret_scan:
+        scan = core.scan_secrets(wt)
+        if scan["certain"] and not args.allow_secrets:
+            core.drop_worktree(repo, wt, branch)
+            emit({
+                "id": args.id, "status": "refused",
+                "reason": "{} credential(s) found in the tree this worker would be able "
+                          "to read. Sending them to a contributor-tier model is not "
+                          "undoable. Remove them, add them to .gitignore and stop "
+                          "--seed-ing them, or pass --allow-secrets if they are fake."
+                          .format(len(scan["certain"])),
+                "secrets": scan["certain"][:20],
+                "possible_secrets": len(scan["possible"]),
+                "files_scanned": scan["files_scanned"],
+            })
+            return 1
+        if scan["certain"] or scan["possible"]:
+            print("muse_task[{}]: secret scan — {} certain, {} possible across {} files"
+                  .format(args.id, len(scan["certain"]), len(scan["possible"]),
+                          scan["files_scanned"]), file=sys.stderr)
     absent = core.absent_locals(repo, (args.seed or []) + (args.link or []))
     if absent:
         print("muse_task[{}]: note — {} exist in the repo but NOT in the worktree; "
@@ -302,6 +330,11 @@ def cmd_run(args) -> int:
         # One session for the whole task, so every later round continues this conversation.
         "session_id": core.new_session_id(),
         "seeded": seeded, "absent_locals": absent,
+        "secret_scan": {"certain": len(scan["certain"]),
+                        "possible": len(scan["possible"]),
+                        "files_scanned": scan["files_scanned"],
+                        "truncated": scan["truncated"],
+                        "skipped": bool(args.no_secret_scan)},
         "rounds": [], "verifications": [], "done": False,
     }
     save_state(tdir, st)
@@ -577,6 +610,10 @@ def main() -> int:
     p.add_argument("--inherit-skills", action="store_true")
     p.add_argument("--force", action="store_true",
                    help="re-run over an existing task, discarding its patch and worktree")
+    p.add_argument("--no-secret-scan", action="store_true",
+                   help="skip the pre-delegation credential scan")
+    p.add_argument("--allow-secrets", action="store_true",
+                   help="scan, report, but do not refuse on a confirmed credential")
     p.set_defaults(fn=cmd_run)
 
     p = sub.add_parser("revise", help="run muse again in the same worktree with feedback")

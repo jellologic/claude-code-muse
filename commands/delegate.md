@@ -23,7 +23,13 @@ the agent deleted your changes. If the tree is dirty, say so and stop — offer 
 stash, do not pass `--allow-dirty` on the user's behalf.
 
 If the SessionStart preflight reported a missing binary or missing credentials, surface that
-now rather than letting the worker die on it.
+now rather than letting the worker die on it. `/muse:doctor` gives the full picture when the
+cause is not obvious.
+
+`run` also scans the worktree for credentials before spawning anything and refuses on a
+confirmed one — contributor-tier content may be used for training, and that is not
+undoable. If it refuses, report which file and line, and do not reach for `--allow-secrets`
+on the user's behalf; that is their call to make about their own repository.
 
 ## 2. Turn the request into a brief
 

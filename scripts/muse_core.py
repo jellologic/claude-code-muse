@@ -376,6 +376,78 @@ def muse_cmd(model, effort, wt: Path, schema=None, max_steps=0, inherit_skills=F
     return cmd
 
 
+# ---------------------------------------------------------------- secret scanning
+
+# Two tiers on purpose. CERTAIN patterns are structurally unmistakable -- a provider's
+# own key format, or a PEM header -- so a hit is worth stopping for. POSSIBLE patterns
+# are assignments that merely look credential-shaped; they matter for a human to glance
+# at, but blocking on them would make the plugin unusable on any repo with test
+# fixtures. Reporting them as one undifferentiated pile would train people to ignore all
+# of it, which is worse than not scanning.
+CERTAIN_PATTERNS = [
+    ("private key block", re.compile(r"-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----")),
+    ("AWS access key id", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
+    ("GitHub token", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{30,}\b")),
+    ("Slack token", re.compile(r"\bxox[baprs]-[0-9A-Za-z-]{10,}\b")),
+    ("Google API key", re.compile(r"\bAIza[0-9A-Za-z_\-]{35}\b")),
+    ("Stripe live key", re.compile(r"\bsk_live_[0-9a-zA-Z]{20,}\b")),
+    ("Anthropic API key", re.compile(r"\bsk-ant-[A-Za-z0-9_\-]{20,}")),
+    ("OpenAI-style API key", re.compile(r"\bsk-[A-Za-z0-9]{32,}\b")),
+]
+
+POSSIBLE_PATTERNS = [
+    ("credential-shaped assignment", re.compile(
+        r"(?i)\b(?:api[_-]?key|secret|passwd|password|access[_-]?token|auth[_-]?token)\b"
+        r"\s*[:=]\s*['\"][^'\"\s]{12,}['\"]")),
+]
+
+SCAN_SKIP_DIRS = set(DEFAULT_EXCLUDES) | {".git"}
+SCAN_MAX_BYTES = 1_000_000     # a file larger than this is not hand-written config
+SCAN_MAX_FILES = 5000          # bound the walk; a fan-out runs this per task
+
+
+def scan_secrets(root: Path, max_files: int = SCAN_MAX_FILES):
+    """Look for credentials in the tree a worker is about to be able to read.
+
+    This exists because contributor-tier models state that content "may be used for
+    product improvement", and that is not undoable once sent. The plugin documented that
+    risk and gave no way to act on it.
+
+    Returns {"certain": [...], "possible": [...], "files_scanned": n, "truncated": bool}.
+    Each finding is {file, line, kind} -- never the matched text, which would copy the
+    secret into an artifact that then gets read and shared.
+    """
+    certain, possible, scanned, truncated = [], [], 0, False
+    root = Path(root)
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in SCAN_SKIP_DIRS]
+        for name in filenames:
+            if scanned >= max_files:
+                truncated = True
+                return {"certain": certain, "possible": possible,
+                        "files_scanned": scanned, "truncated": truncated}
+            f = Path(dirpath) / name
+            try:
+                if f.is_symlink() or not f.is_file() or f.stat().st_size > SCAN_MAX_BYTES:
+                    continue
+                text = f.read_text(errors="strict")
+            except (OSError, ValueError, UnicodeDecodeError):
+                continue    # binary or unreadable: not hand-written config
+            scanned += 1
+            rel = str(f.relative_to(root))
+            for i, line in enumerate(text.splitlines(), 1):
+                if len(line) > 4000:
+                    continue    # minified bundle; not where a human puts a key
+                for kind, rx in CERTAIN_PATTERNS:
+                    if rx.search(line):
+                        certain.append({"file": rel, "line": i, "kind": kind})
+                for kind, rx in POSSIBLE_PATTERNS:
+                    if rx.search(line):
+                        possible.append({"file": rel, "line": i, "kind": kind})
+    return {"certain": certain, "possible": possible,
+            "files_scanned": scanned, "truncated": truncated}
+
+
 def kill_process_tree(p) -> None:
     """SIGKILL a child and everything it spawned.
 

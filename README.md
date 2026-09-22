@@ -93,6 +93,7 @@ git apply --3way  .muse-fleet/tasks/<id>/patch.diff   # apply it
 | `/muse:status` | What every task did, and whether a check actually ran |
 | `/muse:model` | Which contributor model delegation will use, and the interactive pin |
 | `/muse:cleanup` | Reap worktrees, branches and artifacts a run left behind |
+| `/muse:doctor` | Whether this machine can delegate, what model it would use, what would break |
 
 The `muse-fleet` skill triggers on its own when a job obviously wants fan-out — repetitive
 refactors across many files, tests for a list of modules, one migration pattern repo-wide.
@@ -106,6 +107,11 @@ workflow" in [`references/workflow.md`](references/workflow.md) for a copy-paste
 and the four rules that are not obvious from the API (a workflow script has no filesystem,
 so muse is always invoked by an agent; `pluginRoot` and `stamp` must be threaded through
 `args`; `--out` must be absolute; task ids are validated).
+
+**It refuses to send your credentials.** Before spawning a worker, `run` scans the
+worktree and stops if it finds an unmistakable credential — a private-key block, an AWS
+key id, a provider-format token. Contributor-tier content may be used for training, and
+that is not undoable. `/muse:doctor --scan` runs the same check on demand.
 
 **Follow-ups keep their context.** A task's rounds share one muse session, so a revision is
 a genuine follow-up — the worker still has the brief, the files it read and its own

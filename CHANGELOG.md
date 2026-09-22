@@ -54,6 +54,19 @@ All notable changes to this plugin are documented here. Format follows
 
 ### Added
 
+- **`/muse:doctor`** — reports whether this machine can delegate and what it would use:
+  muse version, credentials (existence only), catalog freshness, the model that actually
+  resolves, the interactive pin, Python/git, the plugin's own scripts, repo git state and
+  worktree-root writability. Three severities, each FAIL carrying its own fix, non-zero
+  exit when blocking. The SessionStart hook answers "would this fail right now?"; this
+  answers "what exactly is my setup?".
+- **Pre-delegation credential scan.** `run` scans the worktree after seeding — so it sees
+  a `--seed`-ed `.env` — and refuses on a structurally unmistakable credential (PEM
+  private-key block, AWS key id, GitHub/Slack/Stripe/Anthropic token formats).
+  Credential-shaped assignments warn only. `--allow-secrets` overrides,
+  `--no-secret-scan` skips, `/muse:doctor --scan` runs it on demand. Findings record
+  file, line and kind and never the matched text. `SECURITY.md` documented this exposure
+  and offered no tooling for it.
 - **Guidance for embedding muse in your own Claude Code workflow** — muse as one stage of
   a workflow you are writing, rather than only the shipped fan-out. Verified by running a
   real workflow that delegated a task and got back an independently-checked `accept`.

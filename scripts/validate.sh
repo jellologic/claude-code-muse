@@ -625,6 +625,66 @@ grep -q '"state.json"' "$SKILL/scripts/muse_fleet.py" && grep -q '"task.json"' "
   && ok "the fleet writes the artifacts status and cleanup key on" \
   || bad "fleet worktrees remain invisible to status/cleanup"
 
+head_ "3d. Doctor and credential scan"
+# A diagnostic that only works on a healthy machine is not a diagnostic.
+DOC="$SKILL/scripts/muse_doctor.py"
+python3 "$DOC" --repo "$SKILL" >/dev/null 2>&1 \
+  && ok "doctor exits 0 on a working machine" || bad "doctor failed on a healthy machine"
+
+DLAB="$LAB/v_doctor"; mkdir -p "$DLAB/empty"
+env PATH="/usr/bin:/bin" MUSE_CONFIG_DIR="$DLAB/nocfg" python3 "$DOC" --repo "$DLAB/empty" >/dev/null 2>&1
+[ $? -ne 0 ] && ok "doctor exits non-zero when something is blocking" || bad "doctor reported a broken machine as ready"
+
+DJSON=$(python3 "$DOC" --repo "$SKILL" --json 2>/dev/null)
+echo "$DJSON" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert isinstance(d.get('checks'), list) and d['checks']
+assert {'severity','name','value','fix'} <= set(d['checks'][0])
+assert isinstance(d.get('ready'), bool)
+" 2>/dev/null && ok "doctor --json is well-formed" || bad "doctor --json shape" "$DJSON"
+
+# The credential scan is the one that must not leak what it found into an artifact.
+SCANDIR="$LAB/v_scan"; mkdir -p "$SCANDIR/sub" "$SCANDIR/node_modules"
+printf 'AKIAIOSFODNN7EXAMPLE\n' > "$SCANDIR/sub/creds.txt"
+printf -- '-----BEGIN RSA PRIVATE KEY-----\n' > "$SCANDIR/k.pem"
+printf 'password = "averylongplaceholder"\n' > "$SCANDIR/sub/maybe.py"
+printf 'AKIAIOSFODNN7EXAMPLE\n' > "$SCANDIR/node_modules/vendor.txt"
+printf 'def f():\n    return 1\n' > "$SCANDIR/sub/clean.py"
+python3 - "$SCANDIR" <<'PY' && ok "secret scan separates certain from possible and leaks neither" || bad "secret scan"
+import importlib.util, json, os, sys
+spec = importlib.util.spec_from_file_location("mc", os.path.join(os.environ["PLUGIN_ROOT"], "scripts/muse_core.py"))
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+r = m.scan_secrets(sys.argv[1])
+kinds = {f["kind"] for f in r["certain"]}
+blob = json.dumps(r)
+problems = []
+if "AWS access key id" not in kinds: problems.append("missed AWS key")
+if "private key block" not in kinds: problems.append("missed PEM header")
+if not r["possible"]: problems.append("missed credential-shaped assignment")
+if any("node_modules" in f["file"] for f in r["certain"]): problems.append("scanned node_modules")
+if "AKIAIOSFODNN7EXAMPLE" in blob: problems.append("LEAKED the secret into its own findings")
+if any("clean.py" in f["file"] for f in r["certain"]): problems.append("false positive on clean code")
+if problems: print("        ", problems)
+sys.exit(1 if problems else 0)
+PY
+
+# Refusing before spawning is the point: once sent, it is not undoable.
+SECR="$LAB/v_secret"; mkrepo "$SECR"
+printf '.muse-fleet/\n' >> "$SECR/.git/info/exclude"
+printf 'AKIAIOSFODNN7EXAMPLE\n' > "$SECR/leaked.txt"
+git -C "$SECR" add -A && git -C "$SECR" -c user.email=t@l -c user.name=t commit -qm creds >/dev/null 2>&1
+SECOUT=$(cd "$SECR" && python3 "$TASK" run --id secret --repo "$SECR" --prompt noop 2>/dev/null)
+echo "$SECOUT" | python3 -c "
+import json,sys
+try: d=json.load(sys.stdin)
+except Exception: sys.exit(1)
+sys.exit(0 if d.get('status')=='refused' and d.get('secrets') else 1)" \
+  && ok "run refuses to delegate a tree containing a confirmed credential" \
+  || bad "run would have sent a credential" "$SECOUT"
+[ "$(git -C "$SECR" worktree list | wc -l)" -eq 1 ] \
+  && ok "the refused run left no worktree behind" || bad "refused run leaked a worktree"
+
 # ------------------------------------------------------------ 4. live runs
 if [ "$OFFLINE" = "1" ]; then
   printf '\n\033[33mSKIP\033[0m  sections 4+ (live muse runs) — --offline\n'

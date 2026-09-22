@@ -49,7 +49,8 @@ itself.
 ## The plugin surface
 
 Six commands you type — `/muse:delegate`, `/muse:ask`, `/muse:fleet`, `/muse:status`,
-`/muse:model`, `/muse:cleanup` — one agent the fan-out spawns, and the scripts under both.
+`/muse:model`, `/muse:cleanup`, `/muse:doctor` — one agent the fan-out spawns, and the
+scripts under both.
 "Running it" below says which to reach for.
 
 The `muse-supervisor` agent is what `/muse:delegate` and the fleet workflow spawn: one

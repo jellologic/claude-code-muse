@@ -55,8 +55,17 @@ to slow down on. After a run they are also recorded in `<out>/<id>/state.json` u
   under whichever model you selected.
 - **Contributor-tier models state that your content "may be used for product improvement."**
   For proprietary or client-confidential code, either pass `--model muse-spark-1.3` and pay
-  full rate, or do not delegate that code at all. This is a licensing and confidentiality
-  decision, not a technical control, and the plugin cannot make it for you.
+  full rate, or do not delegate that code at all. That judgment is yours; the plugin cannot
+  make it for you.
+- **It does make one part of it mechanical.** Before spawning a worker, `run` scans the
+  worktree — after seeding, so it sees the `.env` you asked it to copy — and **refuses** if
+  it finds a structurally unmistakable credential: a PEM private-key block, an AWS key id,
+  a GitHub/Slack/Stripe/Anthropic-format token. Credential-shaped assignments only warn,
+  because blocking those would make the plugin unusable on any repo with test fixtures.
+  `--allow-secrets` proceeds anyway, `--no-secret-scan` skips the check, and
+  `/muse:doctor --scan` runs it on demand. Findings record the file, line and kind and
+  never the matched text — copying a secret into an artifact that then gets read and
+  shared would defeat the point.
 - Nothing is sent anywhere else. There is no telemetry, no analytics, and no network call
   in this plugin outside the `muse` CLI itself.
 
