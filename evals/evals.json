@@ -4,7 +4,7 @@
     {
       "id": 1,
       "name": "bulk-tests-fanout",
-      "prompt": "This repo has four modules with no test coverage at all: parser.py, validator.py, cache.py and retry.py. I need a pytest file for each one covering the public functions. It's a lot of grunt work and I don't want to burn my Claude limits on it — can you farm it out?",
+      "prompt": "This repo has four modules with no test coverage at all: parser.py, validator.py, cache.py and retry.py. I need a pytest file for each one covering the public functions. It's a lot of grunt work and I don't want to burn my Claude limits on it \u2014 can you farm it out?",
       "expected_output": "Uses muse-fleet's supervised path: plans 4 disjoint tasks (one per module, each creating its own tests/test_<mod>.py, each with a runnable pytest acceptance check), then runs the workflow from references/workflow.md so one Opus supervisor per task spawns muse, reads the patch, runs the check itself and revises if needed. Reports per-task verdicts rather than raw statuses, and does not apply patches without the user's say-so.",
       "files": []
     },
@@ -12,13 +12,13 @@
       "id": 2,
       "name": "overlap-trap",
       "prompt": "Can you parallelise this across a bunch of muse instances: (a) add type hints to utils.py, (b) add docstrings to utils.py, and (c) rename the helper function in utils.py to _helper everywhere it's used.",
-      "expected_output": "Recognises all three tasks target utils.py and that (c) spans multiple files, so fan-out would produce conflicting patches. Either merges them into one task or runs sequential waves, and explains why rather than silently fanning out 3 colliding tasks. Worktree isolation must not be offered as a fix — it isolates processes, not intentions.",
+      "expected_output": "Recognises all three tasks target utils.py and that (c) spans multiple files, so fan-out would produce conflicting patches. Either merges them into one task or runs sequential waves, and explains why rather than silently fanning out 3 colliding tasks. Worktree isolation must not be offered as a fix \u2014 it isolates processes, not intentions.",
       "files": []
     },
     {
       "id": 3,
       "name": "single-coherent-change",
-      "prompt": "Our auth flow is broken — login() returns None for users whose session expired mid-request, and it's cascading into the refresh path. Can you get a few muse agents on this in parallel to speed it up?",
+      "prompt": "Our auth flow is broken \u2014 login() returns None for users whose session expired mid-request, and it's cascading into the refresh path. Can you get a few muse agents on this in parallel to speed it up?",
       "expected_output": "Pushes back: debugging one causally-linked bug is not fan-out work, since it needs whole-picture context and the tasks aren't independent. Offers to investigate directly, or to use muse only for a mechanical follow-up once the fix is understood.",
       "files": []
     },
@@ -26,7 +26,7 @@
       "id": 4,
       "name": "no-acceptance-check",
       "prompt": "Fan these out to muse for me: rewrite the README intro so it's friendlier, rename the `mgr` variable to `manager` in scheduler.py, and reword the error strings in errors.py to be less shouty.",
-      "expected_output": "Notices that the README rewrite and the error-string rewording have no executable acceptance check — only the rename does (it can be checked by the test suite or an import). Says so explicitly and plans to review those two patches by hand rather than inventing a check that always passes. Does not claim a task is verified when nothing was run.",
+      "expected_output": "Notices that the README rewrite and the error-string rewording have no executable acceptance check \u2014 only the rename does (it can be checked by the test suite or an import). Says so explicitly and plans to review those two patches by hand rather than inventing a check that always passes. Does not claim a task is verified when nothing was run.",
       "files": []
     },
     {
@@ -34,6 +34,34 @@
       "name": "trust-the-self-report",
       "prompt": "The muse run came back with status completed and its result.json says confidence: high and tests passing. Can we merge all four patches now?",
       "expected_output": "Refuses to treat the worker's self-report as evidence: `completed` means the agent stopped, and result.json is written by the same cheap model that did the work. Checks whether a supervisor actually ran the acceptance check (verified_by_supervisor in task.json), inspects the patches, and flags anything accepted without an executed check as unproven before merging one at a time.",
+      "files": []
+    },
+    {
+      "id": 6,
+      "name": "negative-human-worktree",
+      "prompt": "I'm juggling three branches at once and it's a mess. Can you set me up a git worktree for each so I can switch between them without stashing?",
+      "expected_output": "Must NOT trigger muse-fleet. This is a human asking for ordinary git worktree hygiene on their own branches; nothing is being delegated and no coding agent is involved. The skill's description names worktree isolation, which is exactly the overlap this case exists to catch. Correct behaviour is to run `git worktree add` for each branch and explain the layout.",
+      "files": []
+    },
+    {
+      "id": 7,
+      "name": "negative-task-tool-parallelism",
+      "prompt": "Can you fan this out across several subagents in parallel so it finishes faster? I want each one looking at a different part of the codebase.",
+      "expected_output": "Must NOT trigger muse-fleet. The user is asking for parallel Task-tool subagents, not for work to be delegated to Muse Code. 'fan out' and 'in parallel' appear in the skill description, so this is the highest-risk false positive. Correct behaviour is to spawn ordinary subagents; muse should not be mentioned unless the user raises cost or names it.",
+      "files": []
+    },
+    {
+      "id": 8,
+      "name": "negative-context-budget",
+      "prompt": "This repo is huge and I keep blowing through my context window. How do I stop burning tokens on files I don't need?",
+      "expected_output": "Must NOT trigger muse-fleet. This is a context-management question. The description mentions conserving usage limits and 'don't burn my tokens on this', so the vocabulary overlaps, but nothing here is a delegable coding task. Correct behaviour is to advise on scoping reads and searching narrowly.",
+      "files": []
+    },
+    {
+      "id": 9,
+      "name": "negative-single-file-edit",
+      "prompt": "Add a docstring to the parse() function in parser.py explaining the return value.",
+      "expected_output": "Must NOT trigger the fan-out path. One trivial edit to one file is cheaper done directly than delegated: a worktree, a supervisor and a verification round cost far more than the edit. At most this is /muse:ask --write territory, and doing it inline is also correct. Spinning up a supervised task here is the failure.",
       "files": []
     }
   ]
