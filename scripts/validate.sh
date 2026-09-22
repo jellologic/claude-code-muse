@@ -1637,6 +1637,61 @@ mkdir -p "$SC/not-artifacts" && echo precious > "$SC/not-artifacts/data.txt"
 [ -f "$SC/not-artifacts/data.txt" ] \
   && ok "cleanup refuses to delete a root with no task markers" || bad "DELETED a non-artifact dir"
 
+# `--continue` without having to copy a uuid off stderr. The id is remembered under
+# ${CLAUDE_PLUGIN_DATA}, which is shared across every repo you work in -- so the thing
+# most worth asserting is that it is KEYED by repo. An unkeyed "last session" hands one
+# project's conversation to another, which is a confidentiality bug, not an ergonomics
+# one. Driven through the script with a stub muse: no muse call, no cost.
+ASKD="$LAB/v_askdata"; ASKR1="$LAB/v_ask_repo1"; ASKR2="$LAB/v_ask_repo2"
+mkdir -p "$ASKD" "$ASKR1" "$ASKR2"
+ASKBIN="$LAB/v_ask_bin"; mkdir -p "$ASKBIN"
+# A muse that records the session id it was handed and produces a valid terminal event.
+cat > "$ASKBIN/muse" <<'STUB'
+#!/usr/bin/env bash
+sid=""
+prev=""
+for a in "$@"; do
+  [ "$prev" = "--session-id" ] && sid="$a"
+  prev="$a"
+done
+echo "$sid" >> "$MUSE_STUB_LOG"
+printf '{"payload":{"kind":"run_terminal","terminal":"completed","text":"ok"}}\n'
+STUB
+chmod +x "$ASKBIN/muse"
+export MUSE_STUB_LOG="$LAB/v_ask_sessions.log"
+: > "$MUSE_STUB_LOG"
+
+ask() {  # ask <repo> [extra flags...]
+  local r="$1"; shift
+  ( cd "$r" && PATH="$(shell_path "$ASKBIN"):$PATH" CLAUDE_PLUGIN_DATA="$ASKD" \
+      bash "$SKILL/scripts/muse_ask.sh" --model stub-model "$@" "a question" ) >/dev/null 2>&1
+}
+
+ask "$ASKR1"
+S1=$(sed -n '1p' "$MUSE_STUB_LOG")
+ask "$ASKR1" --continue
+S2=$(sed -n '2p' "$MUSE_STUB_LOG")
+[ -n "$S1" ] && [ "$S1" = "$S2" ] \
+  && ok "--continue resumes the last session without the user copying an id" \
+  || bad "--continue started a new conversation" "first=$S1 second=$S2"
+
+# A different repo must not inherit it.
+ask "$ASKR2" --continue
+S3=$(sed -n '3p' "$MUSE_STUB_LOG")
+[ -n "$S3" ] && [ "$S3" != "$S1" ] \
+  && ok "the remembered session is keyed by repo, not global" \
+  || bad "one repo's conversation leaked into another" "repo1=$S1 repo2=$S3"
+
+# And with nothing recorded, --continue is a fresh conversation rather than an error.
+rm -rf "$ASKD/last-session"
+ask "$ASKR1" --continue
+RC=$?
+S4=$(sed -n '4p' "$MUSE_STUB_LOG")
+[ "$RC" -eq 0 ] && [ -n "$S4" ] && [ "$S4" != "$S1" ] \
+  && ok "--continue with nothing to continue starts fresh instead of failing" \
+  || bad "--continue is unsafe to put in a script" "rc=$RC sid=$S4"
+unset MUSE_STUB_LOG
+
 # --help must not spill source: the old fixed line range printed `set -uo pipefail`.
 bash "$SKILL/scripts/muse_ask.sh" --help 2>/dev/null | grep -q 'set -uo pipefail' \
   && bad "muse_ask.sh --help leaks source lines" || ok "muse_ask.sh --help prints only the header"

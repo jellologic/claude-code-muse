@@ -8,11 +8,17 @@
 #   muse_ask.sh --schema s.json --effort low "List every file importing requests"
 #   muse_ask.sh --write --effort medium "Add a docstring to add() in calc.py"
 #
-# Follow-ups: every run prints its session id on stderr. Pass it back with --session to
-# continue the same conversation instead of re-explaining the context:
+# Follow-ups: every run prints its session id on stderr and remembers the last one per
+# repo, so the usual case needs no copying:
 #
-#   muse_ask.sh "Summarise retry.py"                    # prints: session <uuid>
-#   muse_ask.sh --session <uuid> "Now list its callers"  # remembers the summary
+#   muse_ask.sh "Summarise retry.py"                     # prints: session <uuid>
+#   muse_ask.sh --continue "Now list its callers"        # resumes that conversation
+#   muse_ask.sh --session <uuid> "..."                   # or name one explicitly
+#
+# The remembered id lives under ${CLAUDE_PLUGIN_DATA} (or ~/.claude/plugins/data/muse),
+# keyed by the absolute repo path -- that directory is shared across every repo you work
+# in, so an unkeyed "last session" would hand one project's context to another. It holds
+# nothing but session ids.
 #
 # Read-only by default: writes are disabled and the sandbox stays on, so this is safe to
 # point at a dirty working copy. --write opts into editing (and disables the sandbox),
@@ -25,6 +31,7 @@ set -uo pipefail
 SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 EFFORT="low"
 SESSION=""
+CONTINUE=0
 MODEL="latest-contributor"
 SCHEMA=""
 REPO="."
@@ -47,6 +54,7 @@ while [[ $# -gt 0 ]]; do
     --max-steps) MAX_STEPS="$2"; shift 2 ;;
     --write)     WRITE=1; shift ;;
     --session)   SESSION="$2"; shift 2 ;;
+    --continue)  CONTINUE=1; shift ;;
     -h|--help)   usage 0 ;;
     --)          shift; break ;;
     -*)          echo "unknown flag: $1" >&2; usage 1 ;;
@@ -78,10 +86,38 @@ sys.stdout.write(m.resolve_model(m.LATEST)[0])
   fi
 fi
 
+# Where the last session id per repo is remembered. ${CLAUDE_PLUGIN_DATA} is the
+# per-plugin directory that survives plugin updates; it is not set outside a Claude Code
+# session, so fall back to the path the runtime allocates.
+DATA_DIR="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/muse}"
+REPO_ABS="$(cd "$REPO" 2>/dev/null && pwd || echo "$REPO")"
+# Keyed by a hash of the absolute repo path. The directory is shared across every repo,
+# and a filename built from the path itself would need escaping on three platforms.
+SESSION_KEY="$(printf '%s' "$REPO_ABS" | python3 -c 'import hashlib,sys;print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest()[:16])' 2>/dev/null)"
+SESSION_FILE="$DATA_DIR/last-session/$SESSION_KEY"
+
+if [[ "$CONTINUE" -eq 1 && -z "$SESSION" ]]; then
+  if [[ -s "$SESSION_FILE" ]]; then
+    SESSION="$(head -c 100 "$SESSION_FILE" | tr -d '[:space:]')"
+    echo "muse_ask: continuing session $SESSION" >&2
+  else
+    # Not an error. --continue with nothing to continue is a fresh conversation, and
+    # failing here would make the flag unsafe to put in a script.
+    echo "muse_ask: no previous session recorded for $REPO_ABS — starting a new one" >&2
+  fi
+fi
+
 # Reusing a session id across invocations continues that conversation; an id muse has
 # never seen simply starts a new one under that id, so this is safe either way.
 if [[ -z "$SESSION" ]]; then
   SESSION="$(python3 -c 'import uuid;print(uuid.uuid4())')"
+fi
+
+# Recorded BEFORE the run, not after: a run that times out or crashes has still created
+# the session on muse's side, and that is exactly the one a user wants to resume.
+if [[ -n "$SESSION_KEY" ]]; then
+  mkdir -p "$DATA_DIR/last-session" 2>/dev/null \
+    && printf '%s\n' "$SESSION" > "$SESSION_FILE" 2>/dev/null || true
 fi
 
 ARGS=(exec --json --model "$MODEL" --reasoning-effort "$EFFORT"

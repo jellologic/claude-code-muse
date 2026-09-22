@@ -143,8 +143,8 @@ Your working tree must be **clean**: worktrees branch from a committed ref, so
 uncommitted work is invisible to the worker and its absence looks like the agent deleted
 it.
 
-For a quick question, `/muse:ask` needs none of that — and it prints a session id you can
-pass back with `--session <id>` to ask a follow-up without re-explaining the context.
+For a quick question, `/muse:ask` needs none of that — and `--continue` resumes the last
+conversation from that repo, so a follow-up costs one sentence instead of a re-explanation.
 
 **No command applies a patch.** They stop at a verdict and a patch path, because an
 accepted patch is still a patch you have not read.

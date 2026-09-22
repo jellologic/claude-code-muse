@@ -14,7 +14,7 @@ explanation, or one small contained edit — anything where the orchestration of
 
 ```bash
 "${CLAUDE_PLUGIN_ROOT}/scripts/muse_ask.sh" [--effort <e>] [--write] [--schema <file>] \
-  [--session <id>] "<prompt>"
+  [--continue | --session <id>] "<prompt>"
 ```
 
 Read-only by default: workspace writes are disabled and the sandbox stays on, which makes
@@ -37,19 +37,23 @@ reason to stderr. The model is resolved to the newest contributor tier at run ti
 
 ## Following up
 
-Every run prints `muse_ask: session <uuid>` on stderr. Passing that back with `--session`
-continues the same conversation, so a follow-up needs only the new question:
+`--continue` resumes the last conversation from this repo, so a follow-up needs only the
+new question:
 
 ```bash
 "${CLAUDE_PLUGIN_ROOT}/scripts/muse_ask.sh" "Summarise what retry.py does"
 # stderr: muse_ask: session 7f3a...
-"${CLAUDE_PLUGIN_ROOT}/scripts/muse_ask.sh" --session 7f3a... "Now list everything that calls it"
+"${CLAUDE_PLUGIN_ROOT}/scripts/muse_ask.sh" --continue "Now list everything that calls it"
 ```
 
-Capture the session id from stderr on the first call and reuse it for the rest of the
-user's follow-ups on that topic, rather than re-explaining the context each time. Start a
-new session when the subject changes — a long session carries irrelevant context and costs
-tokens to re-read.
+The id is remembered per repo under `${CLAUDE_PLUGIN_DATA}` — that directory is shared
+across every repo, so it is keyed by path and one project's conversation never reaches
+another. `--session <uuid>` still names one explicitly, which is what you want for two
+threads in the same repo; every run prints its id on stderr for that.
+
+Use `--continue` for the user's follow-ups on the same topic rather than re-explaining the
+context. Drop it when the subject changes — a long session carries irrelevant context and
+costs tokens to re-read.
 
 ## Reporting
 

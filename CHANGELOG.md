@@ -46,6 +46,14 @@ All notable changes to this plugin are documented here. Format follows
   it counted source files and a mid-size repo passed it; it is now 20000 and
   `MUSE_SCAN_MAX_FILES` overrides it.
 
+- **`/muse:ask --continue`** (#23). The session id was printed to stderr and the user had
+  to copy it, so the follow-up path that session resume exists to enable was one manual
+  step away from unusable. The last id per repo now lives in `${CLAUDE_PLUGIN_DATA}` — the
+  per-plugin directory that survives updates, previously allocated and unused. It is keyed
+  by absolute repo path, because that directory is shared across every repo and an unkeyed
+  "last session" would hand one project's conversation to another. Written *before* the
+  run, not after: a run that times out has still created the session, and that is exactly
+  the one worth resuming.
 - **The fleet workflow is registered, not transcribed** (#26). It shipped as 200 lines of
   JavaScript inside a markdown code fence, so every fan-out began with a model copying it
   into the Workflow tool — the most fragile step on the plugin's headline path, and
