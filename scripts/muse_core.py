@@ -39,6 +39,28 @@ FALLBACK_MODEL = "muse-spark-1.3-contributor"
 CATALOG_GLOB = os.environ.get(
     "MUSE_CATALOG_GLOB", "~/.local/share/muse/model-catalog/*.json")
 MUSE_DATA_DIR = os.environ.get("MUSE_DATA_DIR", "~/.local/share/muse")
+
+# ---------------------------------------------------------------- muse coupling
+#
+# Everything this plugin assumes about the muse CLI, in one place, because the coupling
+# is real and was previously undeclared -- spread across an event parser, ten exec
+# flags, a catalog row shape, a session directory layout and a raw-text regex. Most of
+# those fail closed (a renamed key produces `no_terminal`, which is at least loud). The
+# point of naming them together is that a version bump has one list to re-check.
+#
+# Verified against this version. A mismatch is a WARN, never a refusal: muse ships
+# faster than this plugin does, and refusing to run on an untested version would be
+# wrong far more often than it was right.
+MUSE_TESTED_VERSION = "1.3.0"
+
+# Event stream (`muse exec --json`): one JSON object per line, the interesting part
+# nested under "payload", discriminated by "kind".
+EV_PAYLOAD = "payload"
+EV_KIND = "kind"
+EV_TERMINAL = "run_terminal"          # the single authoritative record of a round
+EV_MODEL_CONFIGURED = "run_model_configured"
+EV_MODEL_ID = "model_id"
+
 DEFAULT_EFFORT = "low"
 DEFAULT_TIMEOUT = 900
 EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
@@ -347,12 +369,24 @@ def session_exists(session_id: str, workspace=None) -> bool:
         return False
     base = Path(os.path.expanduser(MUSE_DATA_DIR)) / "sessions"
     # The dated tree is the durable copy; the view index is derived from it.
-    if not (base / ".msp-view-v1" / session_id).is_dir() \
-            and not any(base.glob("*/*/*/" + session_id)):
+    have_view = (base / ".msp-view-v1" / session_id).is_dir()
+    if not have_view and not any(base.glob("*/*/*/" + session_id)):
         return False
     if workspace:
         recorded = session_workspace(session_id)
-        if recorded and os.path.realpath(recorded) != os.path.realpath(str(workspace)):
+        if recorded is None:
+            # Fail CLOSED, and only here. `if recorded and ...` used to fall through to
+            # True: a view directory that survives a schema change with `workspaceRoot`
+            # renamed reads as "no constraint" rather than "cannot tell". Muse then
+            # refuses the cross-workspace resume, the round dies with no run_terminal
+            # record, and a round is spent producing nothing -- verbatim the failure the
+            # docstring above says this routes around. The fallback re-sends the brief,
+            # which costs context and never costs a round.
+            #
+            # A session known ONLY from the dated tree has no snapshot to read, so this
+            # is not the same question and it is not treated as one.
+            return not have_view
+        if os.path.realpath(recorded) != os.path.realpath(str(workspace)):
             return False
     return True
 
@@ -418,7 +452,12 @@ POSSIBLE_PATTERNS = [
 
 SCAN_SKIP_DIRS = set(DEFAULT_EXCLUDES) | {".git"}
 SCAN_MAX_BYTES = 1_000_000     # a file larger than this is not hand-written config
-SCAN_MAX_FILES = 5000          # bound the walk; a fan-out runs this per task
+# Bound the walk -- a fan-out runs this per task -- but 5000 was too low to be honest
+# about: `scanned` counts successfully decoded TEXT files, so it is a count of source
+# files, and a mid-size repo passes it. Truncation is now stated wherever the result is
+# reported, which matters more than the number. Overridable so the truncation path can
+# be exercised without synthesising 20k files.
+SCAN_MAX_FILES = int(os.environ.get("MUSE_SCAN_MAX_FILES", "20000"))
 
 
 def scan_secrets(root: Path, max_files: int = SCAN_MAX_FILES):
@@ -471,6 +510,38 @@ HAVE_PROCESS_GROUPS = (hasattr(os, "killpg") and hasattr(os, "getpgid")
                        and hasattr(signal, "SIGKILL"))
 
 
+def muse_version():
+    """The version string `muse --version` reports, or None if it cannot be obtained.
+
+    Parsed out rather than compared whole: the line carries more than the number, and
+    the number is the only part with a stable meaning."""
+    try:
+        r = subprocess.run(["muse", "--version"], capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if r.returncode != 0:
+        return None
+    m = re.search(r"(\d+)\.(\d+)\.(\d+)", (r.stdout or r.stderr or ""))
+    return m.group(0) if m else None
+
+
+def version_mismatch(found):
+    """A one-line note if `found` is a different muse line than the tested one, else None.
+
+    Major.minor only. A patch bump that renames an event key would be a bug in muse, and
+    warning on every patch release would train the reader to ignore the warning."""
+    if not found:
+        return None
+    a = found.split(".")[:2]
+    b = MUSE_TESTED_VERSION.split(".")[:2]
+    if a == b:
+        return None
+    return ("this plugin is verified against muse {}; you have {}. The event schema, the "
+            "`exec` flags and the session layout are all coupled, and a rename in any of "
+            "them shows up as every round failing identically."
+            .format(MUSE_TESTED_VERSION, found))
+
+
 def kill_process_tree(p) -> None:
     """Kill a child and everything it spawned, as far as the platform allows.
 
@@ -509,7 +580,7 @@ def run_muse(cmd, prompt: str, repo: Path, events: Path, stderr: Path, timeout: 
     import time as _time
     started = _time.time()
     out = {"status": "completed", "reason": None, "model_actual": None,
-           "text": "", "elapsed_s": 0.0}
+           "text": "", "elapsed_s": 0.0, "exit_code": None, "stderr_tail": ""}
 
     events.parent.mkdir(parents=True, exist_ok=True)
     with events.open("w", encoding="utf-8") as fo, stderr.open("w", encoding="utf-8") as fe:
@@ -520,11 +591,22 @@ def run_muse(cmd, prompt: str, repo: Path, events: Path, stderr: Path, timeout: 
                              text=True, start_new_session=True)
         try:
             p.wait(timeout=timeout)
+            out["exit_code"] = p.returncode
         except subprocess.TimeoutExpired:
             kill_process_tree(p)
             out["status"] = "timeout"
             out["reason"] = "exceeded {}s".format(timeout)
     out["elapsed_s"] = round(_time.time() - started, 1)
+
+    # muse's exit code and stderr are the only things that distinguish an unknown flag
+    # from a bad model id from an expired credential -- and every one of those used to
+    # come back as the same sentence, leaving a supervisor nothing to do but retry
+    # blind, which this plugin's own guidance tells it not to do.
+    try:
+        tail = stderr.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        tail = ""
+    out["stderr_tail"] = tail[-2000:].strip()
 
     if out["status"] == "timeout":
         return out
@@ -535,19 +617,30 @@ def run_muse(cmd, prompt: str, repo: Path, events: Path, stderr: Path, timeout: 
         with events.open(encoding="utf-8") as f:
             for line in f:
                 try:
-                    pl = json.loads(line).get("payload", {})
+                    pl = json.loads(line).get(EV_PAYLOAD, {})
                 except ValueError:
                     continue
-                if pl.get("kind") == "run_terminal":
+                if pl.get(EV_KIND) == EV_TERMINAL:
                     term = pl
-                elif pl.get("kind") == "run_model_configured":
-                    out["model_actual"] = pl.get("model_id")
+                elif pl.get(EV_KIND) == EV_MODEL_CONFIGURED:
+                    out["model_actual"] = pl.get(EV_MODEL_ID)
     except OSError:
         pass
 
     if term is None:
         out["status"] = "no_terminal"
-        out["reason"] = "muse produced no run_terminal record (crash or kill?)"
+        if out["exit_code"]:
+            out["reason"] = ("muse exited {} without a run_terminal record: {}".format(
+                out["exit_code"],
+                out["stderr_tail"].splitlines()[-1][:200] if out["stderr_tail"]
+                else "nothing on stderr either"))
+        elif out["stderr_tail"]:
+            out["reason"] = ("muse exited 0 but produced no run_terminal record; stderr "
+                             "says: {}".format(out["stderr_tail"].splitlines()[-1][:200]))
+        else:
+            out["reason"] = ("muse exited 0, wrote no run_terminal record and said "
+                             "nothing on stderr -- most likely not Muse Code, or a "
+                             "version whose event schema this plugin does not know")
     else:
         out["status"] = "completed" if term.get("terminal") == "completed" else "failed"
         out["reason"] = term.get("reason")

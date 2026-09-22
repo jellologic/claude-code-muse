@@ -39,6 +39,7 @@ import datetime as dt
 import importlib.util
 import json
 import os
+import secrets
 import subprocess
 import sys
 from pathlib import Path
@@ -151,6 +152,9 @@ def do_round(st: dict, tdir: Path, prompt: str, args, kind: str,
         "n": n, "kind": kind, "status": res["status"], "reason": res["reason"],
         "session_id": st.get("session_id"), "resumed": bool(resumed),
         "elapsed_s": res["elapsed_s"], "model_actual": res["model_actual"],
+        # What muse itself said, so a failed round is diagnosable from the record
+        # instead of only from a log file nothing tells the supervisor to open.
+        "exit_code": res.get("exit_code"), "stderr_tail": res.get("stderr_tail", "")[-800:],
         "events": str(rdir / "events.jsonl"),
         "stderr": str(rdir / "stderr.log"),
     }
@@ -182,6 +186,8 @@ def do_round(st: dict, tdir: Path, prompt: str, args, kind: str,
     out = {
         "id": st["id"], "round": n, "kind": kind,
         "status": res["status"], "reason": res["reason"],
+        "exit_code": res.get("exit_code"),
+        "stderr_tail": res.get("stderr_tail", "")[-800:],
         # The supervisor needs to know whether this round continued the conversation or
         # started a fresh one: a revision that did NOT resume only knows what its prompt
         # carried, which changes how its output should be read.
@@ -266,7 +272,14 @@ def cmd_run(args) -> int:
             print("muse_task[{}]: could not drop the previous worktree ({}); "
                   "it may need `git worktree prune`".format(args.id, e), file=sys.stderr)
 
-    stamp = args.stamp or dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+    # Entropy in the stamp, for the reason muse_fleet.py already carries it: a bare
+    # second-resolution timestamp means two runs started in the same second compute the
+    # same branch and the same worktree path, and `drop_worktree` below opens with
+    # `git worktree remove --force`. This is the documented single-task path and it was
+    # the only one without the defence. 4 bytes, not 2 -- the birthday bound on 2 bytes
+    # is ~1.9% across 50 runs, which a probabilistic test in the suite duly hit.
+    stamp = args.stamp or "{}-{}".format(
+        dt.datetime.now().strftime("%Y%m%d-%H%M%S"), secrets.token_hex(4))
     branch = "{}/{}/{}".format(args.branch_prefix, stamp, args.id)
     wt_root = Path(args.worktree_root) if args.worktree_root \
         else repo.parent / ".muse-fleet-wt-{}".format(repo.name)
@@ -298,6 +311,20 @@ def cmd_run(args) -> int:
                         .format(branch),
               "branch": branch})
         return 1
+    # The branch check above catches a name collision, and it is not the same question.
+    # A live worktree can sit at this path under a DIFFERENT branch -- another run with
+    # --branch-prefix, a branch someone renamed, a stamp passed in explicitly -- and
+    # drop_worktree would force-remove it along with whatever was in flight there.
+    # Refuse instead; with an entropic stamp reaching this means two runs really are
+    # sharing a namespace.
+    if wt.exists() and any(wt.iterdir()) and not args.force:
+        emit({"id": args.id, "status": "refused",
+              "reason": "worktree {} already exists and is not empty. Something else is "
+                        "probably using this --worktree-root; removing it would destroy "
+                        "that run's in-flight work. Use a different --id or "
+                        "--worktree-root, or pass --force.".format(wt),
+              "worktree": str(wt)})
+        return 1
     core.drop_worktree(repo, wt, branch)
     try:
         core.git(repo, "worktree", "add", "-q", "-b", branch, str(wt), base)
@@ -316,6 +343,15 @@ def cmd_run(args) -> int:
     scan = {"certain": [], "possible": [], "files_scanned": 0, "truncated": False}
     if not args.no_secret_scan:
         scan = core.scan_secrets(wt)
+        # A partial scan and a clean scan produced identical output, which is the exact
+        # failure this project negative-controls everything else against. The cap is a
+        # count of successfully decoded TEXT files, so it is reachable in any mid-size
+        # repo -- and the one control standing between a private key and a tier whose own
+        # catalog says content "may be used for product improvement" would quietly
+        # degrade to partial coverage while `run` carried on.
+        partial = (" The scan stopped at {} files and did NOT cover the whole tree, so "
+                   "this count is a floor, not a total.".format(scan["files_scanned"])
+                   if scan["truncated"] else "")
         if scan["certain"] and not args.allow_secrets:
             core.drop_worktree(repo, wt, branch)
             emit({
@@ -323,17 +359,20 @@ def cmd_run(args) -> int:
                 "reason": "{} credential(s) found in the tree this worker would be able "
                           "to read. Sending them to a contributor-tier model is not "
                           "undoable. Remove them, add them to .gitignore and stop "
-                          "--seed-ing them, or pass --allow-secrets if they are fake."
-                          .format(len(scan["certain"])),
+                          "--seed-ing them, or pass --allow-secrets if they are fake.{}"
+                          .format(len(scan["certain"]), partial),
                 "secrets": scan["certain"][:20],
                 "possible_secrets": len(scan["possible"]),
                 "files_scanned": scan["files_scanned"],
+                "truncated": scan["truncated"],
             })
             return 1
-        if scan["certain"] or scan["possible"]:
-            print("muse_task[{}]: secret scan — {} certain, {} possible across {} files"
+        if scan["certain"] or scan["possible"] or scan["truncated"]:
+            print("muse_task[{}]: secret scan — {} certain, {} possible across {} files{}"
                   .format(args.id, len(scan["certain"]), len(scan["possible"]),
-                          scan["files_scanned"]), file=sys.stderr)
+                          scan["files_scanned"],
+                          " (PARTIAL — hit the file cap, the rest of the tree was not "
+                          "scanned)" if scan["truncated"] else ""), file=sys.stderr)
     absent = core.absent_locals(repo, (args.seed or []) + (args.link or []))
     if absent:
         print("muse_task[{}]: note — {} exist in the repo but NOT in the worktree; "

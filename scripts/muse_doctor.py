@@ -52,7 +52,7 @@ def run(cmd, timeout=10):
         return 1, str(e)
 
 
-def check_muse(out):
+def check_muse(out, core):
     if shutil.which("muse") is None:
         out.append(("FAIL", "muse binary", "not on PATH",
                     "Install Muse Code, or add its install dir (often ~/.local/bin) to PATH."))
@@ -70,7 +70,15 @@ def check_muse(out):
         out.append(("WARN", "muse binary", "on PATH but `muse --version` printed nothing",
                     "That is probably not Muse Code. Check `which muse`."))
         return True
-    out.append(("OK", "muse binary", first[:60], ""))
+    # The version was reported and never compared to anything. Every coupling point --
+    # the event schema, the exec flags, the catalog row shape, the session layout -- is
+    # to a version this plugin has actually been run against, and a rename in any of
+    # them surfaces as every round failing identically with nothing naming the cause.
+    note = core.version_mismatch(core.muse_version())
+    out.append(("WARN" if note else "OK", "muse binary",
+                "{}{}".format(first[:60],
+                              "" if note else " (verified against %s)" % core.MUSE_TESTED_VERSION),
+                note or ""))
     return True
 
 
@@ -205,6 +213,15 @@ def check_scripts(out):
 
 def check_secrets(out, core, repo: Path):
     scan = core.scan_secrets(repo)
+    # Stated first and separately, because a partial scan that found nothing is not a
+    # clean scan and the two used to print the same line.
+    if scan["truncated"]:
+        out.append(("WARN", "credential scan",
+                    "PARTIAL — stopped at %d files, the rest of the tree was not scanned"
+                    % scan["files_scanned"],
+                    "The cap counts decoded text files and is reachable in a mid-size "
+                    "repo. Anything below is a floor, not a total. Scan the areas you "
+                    "are about to --seed by hand, or narrow the delegation."))
     if scan["certain"]:
         where = ", ".join(sorted({f["file"] for f in scan["certain"]})[:3])
         out.append(("FAIL", "credential scan",
@@ -243,7 +260,7 @@ def main() -> int:
                         "This is a bug in muse_doctor.py — please report it."))
             return False
 
-    have_muse = guarded("muse binary", check_muse, out)
+    have_muse = guarded("muse binary", check_muse, out, core)
     guarded("credentials", check_credentials, out, core)
     guarded("model catalog", check_catalog, out, core)
     guarded("model resolution", check_resolution, out, core)

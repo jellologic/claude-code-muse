@@ -285,6 +285,57 @@ if wrong: print("        wrong:", wrong)
 sys.exit(1 if wrong else 0)
 PY
 
+# The one coupling point that failed OPEN. `if recorded and ...` treated "cannot tell
+# which workspace" as "no constraint": a view directory that survives a muse schema
+# change with `workspaceRoot` renamed came back resumable, muse refused the cross-
+# workspace resume, and the round died producing nothing -- verbatim the failure the
+# code documents and claims to route around.
+UNK="$LAB/v_wsunknown"
+UNKID="ffffffff-0000-1111-2222-333333333333"
+mkdir -p "$UNK/sessions/.msp-view-v1/$UNKID"
+# A snapshot muse 1.4 might plausibly write: same file, same directory, renamed key.
+printf '{"x":{"viewCursor":"v:1","workspacePath":"%s/the-right-place"}}\n' "$LAB" \
+  > "$UNK/sessions/.msp-view-v1/$UNKID/snapshot-1.json"
+# A session known only from the dated tree has no snapshot to read, which is a different
+# question and must not be answered the same way.
+DATEDID="ffffffff-0000-1111-2222-444444444444"
+mkdir -p "$UNK/sessions/2026/09/22/$DATEDID"
+MUSE_DATA_DIR="$UNK" python3 - "$LAB" "$UNKID" "$DATEDID" <<'PY' && ok "an unreadable workspace fails closed, and only where a snapshot exists" || bad "session_exists still fails open on an unknown schema"
+import importlib.util, os, sys
+lab, unk, dated = sys.argv[1], sys.argv[2], sys.argv[3]
+spec = importlib.util.spec_from_file_location("mc", os.path.join(os.environ["PLUGIN_ROOT"], "scripts/muse_core.py"))
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+checks = [
+    ("snapshot present, workspace unreadable", m.session_exists(unk, lab + "/the-right-place"), False),
+    ("no workspace asked for",                 m.session_exists(unk),                            True),
+    ("dated-tree only, nothing to read",       m.session_exists(dated, lab + "/the-right-place"), True),
+]
+wrong = [n for n, got, want in checks if got != want]
+if wrong: print("        wrong:", wrong)
+sys.exit(1 if wrong else 0)
+PY
+
+# The coupling to muse was real and undeclared. A version bump that renames an event key
+# surfaces as every round failing identically, and doctor reported the version it found
+# without ever comparing it to anything.
+python3 - <<'PY' && ok "a muse version mismatch is named, and a match is not" || bad "version coupling is unchecked"
+import importlib.util, os, sys
+spec = importlib.util.spec_from_file_location("mc", os.path.join(os.environ["PLUGIN_ROOT"], "scripts/muse_core.py"))
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+tested = m.MUSE_TESTED_VERSION
+major, minor = tested.split(".")[:2]
+checks = [
+    ("exact match",        m.version_mismatch(tested) is None,                       True),
+    ("patch bump is fine", m.version_mismatch("%s.%s.99" % (major, minor)) is None,  True),
+    ("minor bump warns",   m.version_mismatch("%s.%d.0" % (major, int(minor) + 1)) is not None, True),
+    ("major bump warns",   m.version_mismatch("%d.0.0" % (int(major) + 1)) is not None,         True),
+    ("unknown stays quiet", m.version_mismatch(None) is None,                        True),
+]
+wrong = [n for n, got, want in checks if got != want]
+if wrong: print("        wrong:", wrong)
+sys.exit(1 if wrong else 0)
+PY
+
 # Muse rotates these snapshots. A stat() inside a sort key raises if one vanishes
 # between the glob and the sort, and that FileNotFoundError came straight out of
 # cmd_revise as a traceback -- exactly where a supervisor expects one JSON object.
@@ -454,6 +505,49 @@ if [x[:15] for x in s] != sorted(x[:15] for x in s):
     print("        no longer chronological"); sys.exit(1)
 PY
 
+# Every muse-side failure used to come back as the same sentence -- "muse produced no
+# run_terminal record (crash or kill?)" -- whether the flag was unknown, the model id was
+# wrong, the credential had expired or the binary on PATH was not Muse Code at all. The
+# exit code was never read and stderr.log was listed as an artifact nothing told the
+# supervisor to open, so the only available move was to retry blind.
+#
+# Driven through run_muse with a fake binary, so no muse is spawned and no money is
+# spent. sys.executable rather than `sh -c`: the Windows leg runs a native Python that
+# has no sh on its PATH.
+python3 - <<'PY' && ok "a failed round is diagnosable: exit code, stderr, and a reason that differs" || bad "every muse failure still reports the same reason"
+import importlib.util, os, pathlib, sys, tempfile
+spec = importlib.util.spec_from_file_location(
+    "mc", os.path.join(os.environ["PLUGIN_ROOT"], "scripts/muse_core.py"))
+mc = importlib.util.module_from_spec(spec); spec.loader.exec_module(mc)
+
+def run(script):
+    d = pathlib.Path(tempfile.mkdtemp())
+    return mc.run_muse([sys.executable, "-c", script], "brief", d,
+                       d / "events.jsonl", d / "stderr.log", 30)
+
+crashed = run("import sys; sys.stderr.write('error: unknown flag --nope\\n'); sys.exit(7)")
+silent  = run("pass")
+noisy   = run("import sys; sys.stderr.write('warning: model deprecated\\n')")
+
+problems = []
+if crashed.get("exit_code") != 7:
+    problems.append("exit code not recorded: %r" % (crashed.get("exit_code"),))
+if "unknown flag" not in (crashed.get("stderr_tail") or ""):
+    problems.append("stderr not carried into the record: %r" % (crashed.get("stderr_tail"),))
+if "7" not in (crashed.get("reason") or "") or "unknown flag" not in (crashed.get("reason") or ""):
+    problems.append("reason does not name what happened: %r" % (crashed.get("reason"),))
+reasons = {crashed.get("reason"), silent.get("reason"), noisy.get("reason")}
+if len(reasons) != 3:
+    problems.append("three different failures produced %d distinct reasons: %r"
+                    % (len(reasons), sorted(str(r) for r in reasons)))
+if not all(r.get("status") == "no_terminal" for r in (crashed, silent, noisy)):
+    problems.append("status is no longer no_terminal, so this guard is measuring "
+                    "something other than the path it claims")
+if problems:
+    for p in problems: print("        " + p)
+    sys.exit(1)
+PY
+
 # Entropy handles the common case. This is the one it cannot: two runs handed the same
 # explicit --out collide however unique the stamp is.
 COL="$LAB/v_collide"; mkrepo "$COL"
@@ -480,6 +574,50 @@ t=d['tasks'][0]
 sys.exit(0 if t['status']=='setup_failed' and 'already exists' in (t.get('reason') or '') else 1)
 " 2>/dev/null && ok "the collision is reported as setup_failed, not silently skipped" \
   || bad "collision not reported in the fleet report"
+
+# The same hazard on the documented single-task path, which had neither defence. The
+# branch guard above it does not answer this question: the live worktree is checked out
+# on a DIFFERENT branch, so the name does not collide and drop_worktree's
+# `git worktree remove --force` would have taken it.
+TCOL="$LAB/v_tcollide"; mkrepo "$TCOL"
+printf '.muse-fleet/\n' >> "$TCOL/.git/info/exclude"
+TCOLWT="$LAB/v_tcollide_wt"; mkdir -p "$TCOLWT"
+git -C "$TCOL" worktree add -q -b "someone-elses/branch" "$TCOLWT/FIXED-t1" HEAD
+echo "another run's in-flight work" > "$TCOLWT/FIXED-t1/PRECIOUS.txt"
+TCOLOUT=$(cd "$TCOL" && python3 "$TASK" run --id t1 --repo "$TCOL" --stamp FIXED \
+  --worktree-root "$TCOLWT" --out "$TCOL/.muse-fleet/tasks" --prompt noop 2>/dev/null)
+[ -f "$TCOLWT/FIXED-t1/PRECIOUS.txt" ] \
+  && ok "muse_task refuses a live worktree instead of force-removing it" \
+  || bad "muse_task destroyed a live worktree checked out on another branch"
+echo "$TCOLOUT" | python3 -c "
+import json,sys
+try: d=json.load(sys.stdin)
+except Exception: sys.exit(1)
+sys.exit(0 if d.get('status')=='refused' and 'already exists' in (d.get('reason') or '') else 1)" \
+  && ok "the single-task collision is refused in JSON, not a traceback" \
+  || bad "collision not reported by muse_task" "$TCOLOUT"
+
+# Both drivers need entropy in the stamp, and greping either source for `token_hex` is a
+# guard that cannot fail -- the import and the constant can both survive while the stamp
+# expression stops using them. Parse instead, and look at the expression actually
+# assigned to `stamp`.
+python3 - <<'PY' && ok "both drivers put entropy in the stamp expression itself" || bad "a stamp collision is still possible"
+import ast, os, sys
+problems = []
+for name in ("muse_task.py", "muse_fleet.py"):
+    src = open(os.path.join(os.environ["PLUGIN_ROOT"], "scripts", name)).read()
+    exprs = [ast.dump(n.value) for n in ast.walk(ast.parse(src))
+             if isinstance(n, ast.Assign)
+             and any(isinstance(t, ast.Name) and t.id == "stamp" for t in n.targets)]
+    if not exprs:
+        problems.append("%s: nothing is assigned to `stamp`" % name)
+    elif not any("token_hex" in e for e in exprs):
+        problems.append("%s: the stamp expression has no entropy, so two runs in the "
+                        "same second compute the same worktree path" % name)
+if problems:
+    for p in problems: print("        " + p)
+    sys.exit(1)
+PY
 
 # harvest used to diff against the ref NAME. A branch that moves mid-task then pulls
 # other people's commits into this task's patch -- and `git apply --3way`, the command
@@ -1318,6 +1456,45 @@ sys.exit(0 if d.get('status')=='refused' and d.get('secrets') else 1)" \
   || bad "run would have sent a credential" "$SECOUT"
 [ "$(git -C "$SECR" worktree list | wc -l)" -eq 1 ] \
   && ok "the refused run left no worktree behind" || bad "refused run leaked a worktree"
+
+# A partial scan and a clean scan used to be indistinguishable in every output: the flag
+# was written into state.json and printed nowhere, the refusal quoted a count without
+# saying the count was a floor, and doctor ignored it entirely. That is the exact failure
+# mode this suite negative-controls everything else against, sitting on the one control
+# between a private key and a tier whose own catalog says content may be used for
+# training. Driven through the real cap, lowered by env rather than by synthesising 20k
+# files -- the same seam the catalog tests use.
+TRUNC="$LAB/v_truncated"; mkrepo "$TRUNC"
+printf '.muse-fleet/\n' >> "$TRUNC/.git/info/exclude"
+for i in 1 2 3 4 5 6; do printf 'harmless %s\n' "$i" > "$TRUNC/file$i.txt"; done
+printf 'AKIAIOSFODNN7EXAMPLE\n' > "$TRUNC/zz-leaked.txt"
+git -C "$TRUNC" add -A
+git -C "$TRUNC" -c user.email=t@l -c user.name=t commit -qm many >/dev/null 2>&1
+TROUT=$(cd "$TRUNC" && MUSE_SCAN_MAX_FILES=2 python3 "$TASK" run --id trunc --repo "$TRUNC" \
+  --allow-secrets --prompt noop 2>&1 >/dev/null)
+echo "$TROUT" | grep -q 'PARTIAL' \
+  && ok "a truncated scan says so instead of reading as a clean one" \
+  || bad "a partial scan is indistinguishable from a complete one" "$TROUT"
+# And the same fact has to reach the machine-readable path, not only a human note.
+# Captured rather than piped: doctor exits non-zero whenever anything FAILs, and under
+# pipefail that status would be read as the assertion failing.
+DOC_CAPPED=$(MUSE_SCAN_MAX_FILES=2 python3 "$SKILL/scripts/muse_doctor.py" \
+  --repo "$TRUNC" --scan --json 2>/dev/null)
+DOC_FULL=$(MUSE_SCAN_MAX_FILES=5000 python3 "$SKILL/scripts/muse_doctor.py" \
+  --repo "$TRUNC" --scan --json 2>/dev/null)
+echo "$DOC_CAPPED" | python3 -c "
+import json,sys
+c=[x for x in json.load(sys.stdin)['checks'] if x['name']=='credential scan']
+sys.exit(0 if any(x['severity']=='WARN' and 'PARTIAL' in x['value'] for x in c) else 1)" \
+  && ok "doctor reports a partial scan as a warning, not an OK" \
+  || bad "doctor treats a truncated scan as a clean one" "$DOC_CAPPED"
+# The control: the same repo, an uncapped scan, must NOT claim to be partial.
+echo "$DOC_FULL" | python3 -c "
+import json,sys
+c=[x for x in json.load(sys.stdin)['checks'] if x['name']=='credential scan']
+sys.exit(0 if c and not any('PARTIAL' in x['value'] for x in c) else 1)" \
+  && ok "a scan that covered the tree is not labelled partial" \
+  || bad "the partial label fires unconditionally" "$DOC_FULL"
 
 # ------------------------------------------------------------ 4. live runs
 if [ "$OFFLINE" = "1" ]; then

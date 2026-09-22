@@ -1,6 +1,6 @@
 # Muse Code CLI — verified reference
 
-Everything here was confirmed empirically against **Muse Code 1.3.0 (1.3.0-R3401.1)** on macOS.
+Everything here was confirmed empirically against **Muse Code 1.3.0 (1.3.0-R3401.1)** on macOS. That version is declared in code as `MUSE_TESTED_VERSION` in `scripts/muse_core.py`, and `/muse:doctor` and the SessionStart preflight warn on a major/minor mismatch — the event schema, the `exec` flags, the catalog row shape and the session directory layout are all coupled to it, and a rename in any of them surfaces as every round failing identically. Bumping that constant means re-checking this file.
 Where a claim is inferred rather than tested, it says so.
 
 ## Contents

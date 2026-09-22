@@ -30,8 +30,46 @@ All notable changes to this plugin are documented here. Format follows
   `/muse:status` prints it on the row. The claims are reworded to describe the real
   mechanism: the toolset is a strong default, the measurement is the enforcement.
 
+- **The muse coupling is declared** (#16). `MUSE_TESTED_VERSION` names the version every
+  assumption was verified against, the event-stream keys live in one documented block
+  rather than scattered through a parser, and both `/muse:doctor` and the SessionStart
+  preflight warn on a major/minor mismatch — doctor reported the version it found and
+  never compared it to anything. A mismatch is never a refusal: muse ships faster than
+  this plugin does.
+- **The credential scan says when it was partial** (#14). `scan_secrets` stopped at 5000
+  files and returned `truncated: True`, which was written into `state.json` and printed
+  nowhere — the refusal quoted a count without saying it was a floor, and doctor ignored
+  the flag. A truncated scan and a clean scan were indistinguishable in every output,
+  which is exactly the failure this project negative-controls everything else against,
+  sitting on the one control between a private key and a tier whose own catalog says
+  content may be used for product improvement. The cap counts *decoded text* files, so
+  it counted source files and a mid-size repo passed it; it is now 20000 and
+  `MUSE_SCAN_MAX_FILES` overrides it.
+
 ### Fixed
 
+- **`session_exists` failed OPEN on an unknown session schema** (#16). `if recorded and
+  ...` read "cannot tell which workspace" as "no constraint", so a view directory that
+  survived a muse schema change with `workspaceRoot` renamed came back resumable. Muse
+  then refuses the cross-workspace resume and the round dies producing nothing — verbatim
+  the failure the code documents and claims to route around. It now fails closed, and
+  only where a snapshot exists to be read: a session known solely from the dated tree is
+  a different question and is not answered the same way.
+- **Every muse-side failure reported the same sentence** (#15). `run_muse` never read
+  `returncode` and `stderr.log` was an artifact nothing told the supervisor to open, so
+  an unknown flag, a bad model id, an expired credential and a binary that is not Muse
+  Code all came back as "muse produced no run_terminal record (crash or kill?)". The
+  exit code and a stderr tail are now in the round record and the emitted JSON, and the
+  reason branches on them — leaving something to do other than retry blind, which this
+  plugin's own guidance says not to do.
+- **`muse_task` had neither worktree-collision defence `muse_fleet` was given** (#19),
+  despite being the documented default path. Its stamp was a bare second-resolution
+  timestamp, so two runs started in the same second computed the same branch and the
+  same worktree path — and `cmd_run` calls `drop_worktree`, which is `git worktree remove
+  --force` plus `git branch -D`. It also force-removed a live worktree sitting at that
+  path under a *different* branch, which the branch-name guard cannot see. Both defences
+  are ported, and the entropy guard now parses the `stamp` expression instead of greping
+  for `token_hex`, which survives the expression that used it.
 - **A timed-out acceptance check left its grandchildren running** (#13). `cmd_verify`
   carried a comment saying `start_new_session` let a hung check be killed as a group, and
   then called `subprocess.run(timeout=...)`, which signals only the direct child —

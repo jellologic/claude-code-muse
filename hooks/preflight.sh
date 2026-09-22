@@ -26,7 +26,19 @@ else
     problems+=("muse has no stored credentials at $MUSE_CONFIG/auth.json — run \`muse login\` (or \`muse auth set --api-key-stdin\`) before delegating, or every worker will fail identically.")
   fi
 
-  # 3. The model catalog. Its absence is not fatal: resolve_model falls back to a known-good
+  # 3. The version. The event schema, the ten `exec` flags and the session directory
+  #    layout are all coupled to a muse this plugin has actually been run against, and a
+  #    rename in any of them shows up as every worker in a fan-out failing identically --
+  #    which is precisely the class of failure this hook exists to get ahead of. One
+  #    extra exec of a binary we have already located.
+  TESTED=$(grep -m1 '^MUSE_TESTED_VERSION' "${CLAUDE_PLUGIN_ROOT:-.}/scripts/muse_core.py" 2>/dev/null | sed 's/.*"\(.*\)".*/\1/')
+  FOUND=$(muse --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+  if [ -n "$TESTED" ] && [ -n "$FOUND" ] \
+     && [ "${TESTED%.*}" != "${FOUND%.*}" ]; then
+    problems+=("this plugin is verified against Muse Code $TESTED and you have $FOUND — the event schema, the \`exec\` flags and the session layout are all coupled, so a rename in any of them shows up as every worker failing identically. Delegation may still work; \`/muse:doctor\` reports what resolves.")
+  fi
+
+  # 4. The model catalog. Its absence is not fatal: resolve_model falls back to a known-good
   #    id rather than refusing to run. But the fallback is pinned and goes stale, which is
   #    exactly the silent generation-drift the resolve-at-runtime design exists to avoid.
   if ! grep -qs -- '-contributor' "$MUSE_DATA"/model-catalog/*.json 2>/dev/null; then

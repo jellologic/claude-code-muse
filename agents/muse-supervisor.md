@@ -72,6 +72,11 @@ and is not what that stops.
 `verify --timeout <s>` kills the whole process group, not just the shell it started, so a
 hung build leaves nothing behind writing into a worktree you are about to reap.
 
+A round that comes back `status: no_terminal` failed on muse's side, not on the work. The
+round carries `exit_code` and `stderr_tail` — read them before doing anything else. An
+unknown flag, a bad model id and an expired credential are three different problems and
+only one of them is worth retrying; `round-<n>/stderr.log` has the full text.
+
 Rounds share one worktree **and one muse session**, so `revise` edits the previous round's
 work rather than starting over, and the worker still has its brief and its own reasoning in
 context. Write feedback as a follow-up — name the defect, do not restate the task.
