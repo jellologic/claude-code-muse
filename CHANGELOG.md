@@ -6,6 +6,10 @@ All notable changes to this plugin are documented here. Format follows
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [1.1.0] - 2026-09-22
+
 ### Added
 
 - **Session resume.** A task's rounds now share one muse session (`muse exec --session-id`),
@@ -20,13 +24,20 @@ All notable changes to this plugin are documented here. Format follows
 - `/muse:status` now flags a revision round that could not resume its session — the worker
   had feedback and a re-sent brief but no memory of its own attempt, which is closer to a
   fresh try than a correction.
-- `scripts/validate.sh --offline`: 62 checks that spawn no muse, cost nothing and run in
+- `scripts/validate.sh --offline`: 65 checks that spawn no muse, cost nothing and run in
   seconds. CI runs these on Python 3.9, 3.11 and 3.13.
 - `muse_status.py` and `muse_cleanup.py`, plus the `/muse:status`, `/muse:model` and
   `/muse:cleanup` commands.
 
 ### Fixed
 
+- **`accept` now requires the FINAL check to pass, not any check that ever passed.** Found
+  by running `/muse:delegate` end to end: the supervisor ran a cheap gate
+  (`pytest --collect-only`, exit 0) then the real acceptance check (`pytest -q`, exit 1),
+  and the task recorded `verified_by_supervisor: true` with its acceptance check red — the
+  plugin's central guarantee inverted. `/muse:status` now computes from the exit codes it
+  can see rather than a stored flag, and distinguishes "accepted while the final check
+  FAILED" from "accepted with no executed check".
 - **A session bound to another workspace is no longer treated as resumable.** Muse records
   a `workspaceRoot` per session and refuses to resume elsewhere — and it *fails the run*
   rather than starting fresh, so the round died with no output, burned a round budget, and
@@ -72,4 +83,5 @@ All notable changes to this plugin are documented here. Format follows
   `SECURITY.md` documents the trust model, including that `verify` runs its command on the
   **host** with full privileges while the worker is confined to a throwaway worktree.
 
-[Unreleased]: https://github.com/jellologic/claude-code-muse/commits/main
+[Unreleased]: https://github.com/jellologic/claude-code-muse/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/jellologic/claude-code-muse/releases/tag/v1.1.0
