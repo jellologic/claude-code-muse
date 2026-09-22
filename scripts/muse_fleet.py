@@ -88,6 +88,12 @@ def run_task(task: dict, repo: Path, out: Path, args) -> dict:
     tdir.mkdir(parents=True, exist_ok=True)
 
     base = task.get("base", args.base)
+    # Pin to a sha for the same reason muse_task does: a ref that moves mid-run makes the
+    # harvested patch carry -- and on apply, delete -- commits this task never touched.
+    try:
+        base = git(repo, "rev-parse", "--verify", base).strip() or base
+    except Exception:
+        pass    # unresolvable ref: worktree add below will fail with a clearer message
     model, _ = resolve_model(task.get("model", args.model))
     effort = task.get("effort", args.effort)
     timeout = int(task.get("timeout", args.timeout))

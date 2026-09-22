@@ -101,6 +101,16 @@ def task_dir(args) -> Path:
     return Path(args.out).resolve() / args.id
 
 
+def harvest_base(st: dict) -> str:
+    """What to diff the worktree against.
+
+    The pinned sha, always, when we have one. Diffing against the ref NAME means a branch
+    that moves mid-task silently pulls other people's commits into this task's patch --
+    and `git apply` then deletes their work. State written before base_sha was recorded
+    falls back to the ref so old tasks still harvest."""
+    return st.get("base_sha") or st["base"]
+
+
 def round_exit_code(out: dict) -> int:
     """0 only when the round actually produced something.
 
@@ -157,7 +167,7 @@ def do_round(st: dict, tdir: Path, prompt: str, args, kind: str,
     if result is None and res["text"]:
         rnd["text"] = res["text"][:2000]
 
-    h = core.harvest(wt, st["base"], st["excludes"], tdir / "patch.diff")
+    h = core.harvest(wt, harvest_base(st), st["excludes"], tdir / "patch.diff")
     rnd.update({"patch_lines": h["patch_lines"], "files_changed": h["files_changed"]})
     if h["harvest_error"]:
         rnd["harvest_error"] = h["harvest_error"]
@@ -260,6 +270,15 @@ def cmd_run(args) -> int:
     wt = wt_root / "{}-{}".format(stamp, args.id)
 
     base = args.base
+    # Pin the base to a SHA now. harvest used to diff against the ref NAME, so a branch
+    # that moved mid-task made the patch include -- and on `git apply` delete -- whatever
+    # landed on it meanwhile. The ref is kept for display; the sha is what we diff.
+    try:
+        base_sha = core.git(repo, "rev-parse", "--verify", base).strip()
+    except Exception:
+        emit({"id": args.id, "status": "refused",
+              "reason": "--base {!r} does not resolve to a commit".format(base)})
+        return 1
     # A re-run of the same id must not inherit the previous attempt's tree. But dropping
     # unconditionally ends in `git branch -D`, which discards unmerged commits without
     # asking -- and this branch name can collide with one that is not ours (same --id and
@@ -319,7 +338,7 @@ def cmd_run(args) -> int:
 
     st = {
         "id": args.id, "repo": str(repo), "worktree": str(wt), "branch": branch,
-        "base": base, "base_sha": head, "model": model, "model_choice": how,
+        "base": base, "base_sha": base_sha, "model": model, "model_choice": how,
         "effort": args.effort, "timeout": args.timeout, "max_steps": args.max_steps,
         "schema": str(Path(args.schema).resolve()) if args.schema else None,
         "excludes": args.exclude if args.exclude is not None else core.DEFAULT_EXCLUDES,
@@ -520,7 +539,7 @@ def cmd_finish(args) -> int:
     # that means: a supervisor that edited the worktree by hand would have its edit folded
     # into this patch and misattributed to muse. That is why the supervisor has no Write or
     # Edit tool -- the architecture is enforced by the toolset, not by this comment.
-    h = core.harvest(Path(st["worktree"]), st["base"], st["excludes"], tdir / "patch.diff") \
+    h = core.harvest(Path(st["worktree"]), harvest_base(st), st["excludes"], tdir / "patch.diff") \
         if Path(st["worktree"]).exists() else {"patch_lines": 0, "files_changed": [],
                                                "harvest_error": "worktree missing"}
     if args.commit and h["patch_lines"]:

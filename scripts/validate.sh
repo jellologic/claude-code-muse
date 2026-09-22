@@ -481,6 +481,70 @@ sys.exit(0 if t['status']=='setup_failed' and 'already exists' in (t.get('reason
 " 2>/dev/null && ok "the collision is reported as setup_failed, not silently skipped" \
   || bad "collision not reported in the fleet report"
 
+# harvest used to diff against the ref NAME. A branch that moves mid-task then pulls
+# other people's commits into this task's patch -- and `git apply --3way`, the command
+# the README tells users to run, DELETES their work. Reproduced end to end here because
+# it is the worst outcome this plugin can produce: a silent revert inside a green accept.
+MOV="$LAB/v_movingbase"; mkrepo "$MOV"
+printf '.muse-fleet/\n' >> "$MOV/.git/info/exclude"
+MOVWT="$LAB/v_movingbase_wt"
+BASESHA=$(git -C "$MOV" rev-parse --verify HEAD)
+git -C "$MOV" worktree add -q -b task/work "$MOVWT" "$BASESHA"
+printf 'def added():\n    return 1\n' > "$MOVWT/task_work.py"
+
+# Meanwhile, someone lands an unrelated commit on the branch the task named.
+printf 'important\n' > "$MOV/UNRELATED.txt"
+git -C "$MOV" add -A
+git -C "$MOV" -c user.email=t@l -c user.name=t commit -qm "unrelated work"
+
+python3 - "$MOV" "$MOVWT" "$BASESHA" <<'PY' && ok "a base ref that moves mid-task cannot pull unrelated commits into the patch" || bad "moving base contaminated the patch"
+import importlib.util, os, pathlib, sys
+spec = importlib.util.spec_from_file_location("mc", os.path.join(os.environ["PLUGIN_ROOT"], "scripts/muse_core.py"))
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+repo, wt, sha = sys.argv[1], pathlib.Path(sys.argv[2]), sys.argv[3]
+out = pathlib.Path(repo) / "harvested.diff"
+
+# Against the pinned sha: only this task's file.
+rec = m.harvest(wt, sha, m.DEFAULT_EXCLUDES, out)
+pinned = out.read_text(encoding="utf-8")
+# Against the ref name, the way it used to work: the unrelated commit shows up as a
+# deletion. Kept as a live control so the guard cannot pass by checking nothing.
+m.harvest(wt, "main", m.DEFAULT_EXCLUDES, pathlib.Path(repo) / "byref.diff")
+byref = (pathlib.Path(repo) / "byref.diff").read_text(encoding="utf-8")
+
+problems = []
+if "task_work.py" not in pinned:
+    problems.append("pinned harvest lost the task's own work")
+if "UNRELATED.txt" in pinned:
+    problems.append("pinned harvest contaminated by the moving branch")
+if "UNRELATED.txt" not in byref:
+    problems.append("control failed: diffing by ref name no longer reproduces the bug, "
+                    "so this guard is not testing what it claims")
+if problems:
+    for p in problems: print("        " + p)
+    sys.exit(1)
+PY
+
+# Exercise the driver's own choice of base, not just muse_core.harvest. Greping for a
+# function NAME passed while the function body was reverted -- a guard that could not
+# fail, which is the one thing this suite refuses to ship.
+python3 - <<'PY' && ok "muse_task selects the pinned sha over the ref name" || bad "muse_task still selects the ref name"
+import importlib.util, os, sys
+spec = importlib.util.spec_from_file_location(
+    "mt", os.path.join(os.environ["PLUGIN_ROOT"], "scripts/muse_task.py"))
+mt = importlib.util.module_from_spec(spec); spec.loader.exec_module(mt)
+pinned = mt.harvest_base({"base": "main", "base_sha": "deadbeefcafe"})
+legacy = mt.harvest_base({"base": "main"})          # state written before base_sha existed
+problems = []
+if pinned != "deadbeefcafe":
+    problems.append("chose %r over the pinned sha" % pinned)
+if legacy != "main":
+    problems.append("old state without base_sha should fall back to the ref, got %r" % legacy)
+if problems:
+    for p in problems: print("        " + p)
+    sys.exit(1)
+PY
+
 # ------------------------------------------- 3b. status + cleanup (no muse spawned)
 head_ "3b. Status and cleanup"
 
