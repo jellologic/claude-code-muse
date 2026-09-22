@@ -30,6 +30,8 @@ description: |
   </commentary>
   </example>
 model: opus
+effort: high
+maxTurns: 60
 color: magenta
 tools: ["Bash", "Read", "Grep", "Glob"]
 ---

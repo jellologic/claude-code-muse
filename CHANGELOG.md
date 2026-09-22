@@ -46,6 +46,29 @@ All notable changes to this plugin are documented here. Format follows
   it counted source files and a mid-size repo passed it; it is now 20000 and
   `MUSE_SCAN_MAX_FILES` overrides it.
 
+- **The supervisor has a turn ceiling** (#25). Every other runaway path was bounded —
+  `--max-rounds` on the task, `--max-steps` on muse, a round budget — and the supervisor's
+  own agent loop had none, which was the most consistent gap with the project's own stated
+  guardrails. `maxTurns: 60` and an explicit `effort: high`, so the contract no longer
+  depends on whatever spawns it.
+- **The marketplace entry declares its relevance** (#27). This plugin's whole premise is a
+  third-party CLI literally called `muse`, so `signals: { cli: ["muse"] }` surfaces it to
+  anyone who types `muse login` in any session. Deliberately one token: a generic signal
+  like `git` would surface it to people it cannot help, and the suite refuses those.
+- **`claude plugin validate --strict` runs in CI** (#24), on both manifests and all three
+  component directories — the path argument matters, because this repo is both a plugin
+  and a single-plugin marketplace, so `validate .` checks `marketplace.json` and says
+  nothing about `plugin.json`. The step breaks the manifest on purpose in a copy and
+  confirms the validator goes red, because a validation step that cannot fail is worth
+  nothing. `$schema`, `displayName` and `defaultEnabled` are declared.
+- **The reporting commands run on a cheap model** (#29). `/muse:status`, `/muse:doctor`,
+  `/muse:model` and `/muse:cleanup` run one Python script and relay what it printed.
+  Running those on the session model, in a plugin whose entire thesis is *push mechanical
+  work down to a cheaper model*, was the plugin failing to take its own advice. Their Bash
+  grant is narrowed to `Bash(python3:*)` where that is provably all they run, the
+  duplicate legacy `Task` tool is dropped from `delegate` and `fleet`, and the
+  auto-triggering skill declares an `allowed-tools` list for the first time — without
+  `Write` or `Edit`, for the same reason the supervisor has neither.
 - **The fleet workflow's artifact root is stamped** (#18). Branches and worktrees carried
   the run stamp and `--out` did not, and `const STAMP = args.stamp || 'run'` defaulted the
   stamp to a literal despite the skill insisting a real one be passed. A second run of the

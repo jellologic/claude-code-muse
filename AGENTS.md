@@ -66,6 +66,9 @@ In rough order of usefulness:
    type. Note what the restriction is and is not — `Bash` remains, so it is a strong
    default rather than a boundary, and the enforcement is `finish` measuring the delta
    and reporting `out_of_band_edit`. Do not restore the stronger claim; it was false.
+   The suite now asserts the tool list and the `maxTurns` ceiling directly — note that
+   `claude plugin validate --strict` does **not** check component frontmatter, measured,
+   so the manifest validator in CI is not a substitute.
 4. **Never blur `completed` into `accept`.** `completed` means the worker stopped.
    `accept` means a supervisor ran a check, the **final** one passed, and it ran against
    the tree that was harvested. `finish` enforces all three and refuses otherwise;

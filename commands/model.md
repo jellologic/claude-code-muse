@@ -2,6 +2,7 @@
 description: Show which Muse Code model delegation will use, and optionally update the interactive pin
 argument-hint: [--write]
 allowed-tools: Bash, Read
+model: haiku
 ---
 
 # Which muse model is in play

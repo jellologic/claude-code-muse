@@ -1,7 +1,7 @@
 ---
 description: Delegate one coding task to Muse Code under an Opus supervisor that runs the acceptance check and revises until the patch is right
 argument-hint: <task> — name the target files and say what must not change
-allowed-tools: Bash, Read, Grep, Glob, Agent, Task, AskUserQuestion
+allowed-tools: Bash, Read, Grep, Glob, Agent, AskUserQuestion
 ---
 
 # Delegate one task to muse

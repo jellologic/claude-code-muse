@@ -24,7 +24,15 @@
         "parallel-agents",
         "git-worktree",
         "coding-agent"
-      ]
+      ],
+      "relevance": {
+        "topic": "Muse Code",
+        "signals": {
+          "cli": [
+            "muse"
+          ]
+        }
+      }
     }
   ]
 }

@@ -13,6 +13,7 @@ description: >-
   many files, for debugging, for work needing a design decision, or for parallelism that
   has nothing to do with muse — git worktrees on a human branch, Task-tool subagents, or
   background jobs.
+allowed-tools: Bash, Read, Grep, Glob, Agent, Workflow, AskUserQuestion
 ---
 
 # Muse Fleet
@@ -20,6 +21,10 @@ description: >-
 Run many Muse Code instances at once, each sealed in its own git worktree and each **owned
 by an Opus supervisor** that spawns it, reads what came back, runs the acceptance check,
 and sends it back for revisions until the work is right.
+
+Note what the tool grant above does not include: `Write` and `Edit`. This skill decides
+what to delegate and to whom; it never writes the code, for the same reason the supervisor
+cannot — see [rule 3](../../AGENTS.md).
 
 The economic case is the whole point. `muse-spark-1.3-contributor` is Meta's discounted
 tier — for the 1.2 generation that was 0.10/0.20 USD per M tokens against 1.25/4.25 USD for the

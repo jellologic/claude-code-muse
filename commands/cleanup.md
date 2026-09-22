@@ -1,7 +1,8 @@
 ---
 description: Reap the worktrees, branches and artifacts left behind by delegated muse runs
 argument-hint: [--yes] [--all] [--artifacts]
-allowed-tools: Bash, Read
+allowed-tools: Bash(python3:*), Read
+model: haiku
 ---
 
 # Reap delegation leftovers

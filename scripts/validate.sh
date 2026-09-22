@@ -117,6 +117,82 @@ for f in routing.md workflow.md muse-cli.md field-notes.md; do
 done
 grep -q 'references/routing.md' "$SKILL_MD" && ok "SKILL.md points at routing.md" || bad "routing.md unreferenced"
 
+# Component frontmatter. `claude plugin validate <dir> --strict` parses these files but
+# does NOT reject an unknown frontmatter key -- measured, by putting one in and watching
+# it pass -- so the manifest validator in CI is not a guard for any of this.
+python3 - <<'PY' && ok "component frontmatter holds the contract the docs claim for it" || bad "component frontmatter has drifted from the documented contract"
+import json, os, pathlib, re, sys
+
+ROOT = pathlib.Path(os.environ["PLUGIN_ROOT"])
+
+def front(path):
+    t = (ROOT / path).read_text(encoding="utf-8")
+    m = re.match(r"---\n(.*?)\n---\n", t, re.S)
+    if not m:
+        return None
+    # Only top-level `key:` lines; the multi-line description block is indented.
+    return dict(re.findall(r"^([A-Za-z-]+):[ \t]*(.*)$", m.group(1), re.M))
+
+problems = []
+
+sup = front("agents/muse-supervisor.md")
+if sup is None:
+    problems.append("the supervisor agent has no frontmatter at all")
+else:
+    # Rule 3 in AGENTS.md calls this load-bearing and nothing checked it until now.
+    try:
+        tools = json.loads(sup.get("tools", "null"))
+    except ValueError:
+        tools = None
+    if tools != ["Bash", "Read", "Grep", "Glob"]:
+        problems.append("supervisor tools are %r, not exactly [Bash, Read, Grep, Glob]" % (tools,))
+    # Every other runaway path has a ceiling -- --max-rounds on the task, --max-steps on
+    # muse, a round budget -- and the supervisor's own agent loop had none.
+    try:
+        turns = int(sup.get("maxTurns", ""))
+    except ValueError:
+        turns = None
+    if turns is None or not (1 <= turns <= 200):
+        problems.append("supervisor maxTurns is %r; it needs a declared, sane ceiling"
+                        % (sup.get("maxTurns"),))
+
+skill = front("skills/muse-fleet/SKILL.md")
+if skill is None or "allowed-tools" not in skill:
+    problems.append("the auto-triggering skill declares no allowed-tools")
+elif re.search(r"\b(Write|Edit)\b", skill["allowed-tools"]):
+    problems.append("the skill grants Write or Edit: %r" % skill["allowed-tools"])
+
+CHEAP = {"commands/status.md", "commands/doctor.md", "commands/model.md",
+         "commands/cleanup.md"}
+for f in sorted(p.name for p in (ROOT / "commands").glob("*.md")):
+    rel = "commands/" + f
+    fm = front(rel) or {}
+    tools = fm.get("allowed-tools", "")
+    # Agent and Task are the new and legacy names for one tool.
+    if re.search(r"\bAgent\b", tools) and re.search(r"\bTask\b", tools):
+        problems.append("%s lists both Agent and Task" % rel)
+    # A plugin whose thesis is "push mechanical work down to a cheaper model" should not
+    # run its own script-relaying commands on the session model.
+    if rel in CHEAP and not fm.get("model"):
+        problems.append("%s relays a script and declares no cheap model" % rel)
+
+mk = json.loads((ROOT / ".claude-plugin/marketplace.json").read_text(encoding="utf-8"))
+rel = (mk["plugins"][0].get("relevance") or {})
+cli = ((rel.get("signals") or {}).get("cli") or [])
+if "muse" not in cli:
+    problems.append("the marketplace entry declares no cli relevance signal for `muse`")
+# A signal that fires on everything is worse than none: it surfaces the plugin to people
+# it cannot help.
+generic = {"git", "npm", "pnpm", "python", "python3", "pytest", "node", "cargo", "make"}
+if generic & set(cli):
+    problems.append("generic cli signals would surface this to the wrong people: %r"
+                    % sorted(generic & set(cli)))
+
+if problems:
+    for p in problems: print("        " + p)
+    sys.exit(1)
+PY
+
 # The workflow script in references/workflow.md is the skill's primary path and is copied
 # out verbatim to be run. Nothing else would notice a typo in it until someone spent real
 # money discovering it mid-run.

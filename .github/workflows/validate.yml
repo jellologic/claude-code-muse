@@ -75,6 +75,52 @@ jobs:
           fi
           echo "no hardcoded absolute paths"
 
+  # The official validator, which had never run here. Both manifests pass today -- which
+  # is exactly when to add the guard, before something drifts. The path argument matters:
+  # this repo is both a plugin and a single-plugin marketplace, so `validate .` checks
+  # marketplace.json and says nothing about plugin.json. Name both.
+  manifests:
+    name: claude plugin validate --strict
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install the Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Validate both manifests and every component
+        run: |
+          set -euo pipefail
+          for target in .claude-plugin/plugin.json .claude-plugin/marketplace.json \
+                        agents commands skills; do
+            echo "::group::$target"
+            claude plugin validate "$target" --strict
+            echo "::endgroup::"
+          done
+
+      # A validation step that cannot fail is worth nothing, and this one runs against a
+      # tree that is green by construction. Break it on purpose, in a copy, and confirm
+      # it goes red -- the same rule the offline suite applies to its own guards.
+      - name: The validator can still fail
+        run: |
+          set -uo pipefail
+          cp -r .claude-plugin /tmp/manifest-control
+          python3 - <<'PY'
+          import json
+          p = "/tmp/manifest-control/plugin.json"
+          d = json.load(open(p))
+          d["thisFieldDoesNotExist"] = True
+          json.dump(d, open(p, "w"), indent=2)
+          PY
+          if claude plugin validate /tmp/manifest-control/plugin.json --strict; then
+            echo "::error::--strict accepted an unknown manifest field, so the step above proves nothing"
+            exit 1
+          fi
+          echo "control confirmed: --strict rejects an unknown field"
+
   # Windows was a known gap (#3). It is green, so this leg is now BLOCKING: the point of
   # measuring it was to be able to keep it. It runs the same free offline suite under Git
   # Bash. Note what it does NOT cover -- muse itself is never invoked here, so live
