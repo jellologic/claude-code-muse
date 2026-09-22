@@ -97,32 +97,68 @@ def artifact_index(root: Path):
     return idx
 
 
+# A task directory sits at most two levels below the artifact root: <out>/<id>/ for
+# muse_task, <out>/<stamp>/<id>/ for a fleet. Anything deeper is not this root's task.
+MARKER_GLOBS = (
+    "state.json", "task.json",
+    "*/state.json", "*/task.json",
+    "*/*/state.json", "*/*/task.json",
+)
+
+
 def looks_like_artifact_root(root: Path) -> bool:
     """Does this directory actually hold delegated-task artifacts?
 
-    --out is free-form, and --artifacts deletes the whole tree. A typo must not take a
-    directory with it, so require the marker files a task always writes before removing
-    anything.
+    Bounded on purpose. An unbounded os.walk answered "yes" for $HOME -- it descends
+    until it meets any stray state.json anywhere beneath, which made
+    `--yes --artifacts --out ~` a whole-home-directory rmtree.
     """
     if not root.is_dir():
         return False
-    for _dirpath, _dirs, files in os.walk(root):
-        if "state.json" in files or "task.json" in files:
-            return True
-    return False
+    return any(next(root.glob(pat), None) is not None for pat in MARKER_GLOBS)
 
 
-def remove_artifact_root(out: str) -> None:
+def refuse_dangerous_root(root: Path, repo: Path):
+    """Why this path must never be handed to rmtree, or None if it is fine.
+
+    The marker check says "this looks like an artifact root". This says "and it is not
+    also something catastrophic". Both have to pass: a directory can contain task
+    markers and still be your home directory or a repository.
+    """
+    rp = root.resolve()
+    home = Path(os.path.expanduser("~")).resolve()
+    cwd = Path.cwd().resolve()
+    if rp == Path(rp.anchor):
+        return "it is a filesystem root"
+    if rp == home:
+        return "it is your home directory"
+    if rp == repo.resolve():
+        return "it is the repository root"
+    if (rp / ".git").exists():
+        return "it contains .git, so it is a repository root"
+    if rp == cwd or rp in cwd.parents:
+        return "it is the current directory or an ancestor of it"
+    return None
+
+
+def remove_artifact_root(out: str, repo: Path) -> bool:
+    """Remove the artifact root, or explain why not. Returns True if it was removed."""
     root = Path(out)
     if not root.exists():
-        return
+        return False
+    danger = refuse_dangerous_root(root, repo)
+    if danger is not None:
+        print("REFUSING to delete {}: {}. Point --out at the artifact directory itself."
+              .format(root, danger))
+        return False
     if not looks_like_artifact_root(root):
-        print("refusing to delete {}: no state.json or task.json anywhere under it, so "
+        print("refusing to delete {}: no state.json or task.json within two levels, so "
               "this does not look like a muse artifact root".format(root))
-        return
+        return False
     # No ignore_errors: a partial delete must be visible, not swallowed.
     shutil.rmtree(root)
     print("removed artifact root {}".format(root))
+    return True
 
 
 def main() -> int:
@@ -171,7 +207,7 @@ def main() -> int:
     if not targets:
         print("nothing to remove under {}".format(repo))
         if args.artifacts and args.yes:
-            remove_artifact_root(args.out)
+            return 0 if remove_artifact_root(args.out, repo) else 1
         return 0
 
     print("{} worktree(s) to remove:".format(len(targets)))
@@ -200,11 +236,12 @@ def main() -> int:
         wt_root.rmdir()
         print("removed empty {}".format(wt_root))
 
+    refused_artifacts = False
     if args.artifacts:
-        remove_artifact_root(args.out)
+        refused_artifacts = not remove_artifact_root(args.out, repo)
 
     print("\n{} worktree(s) removed.".format(removed))
-    return 0
+    return 1 if refused_artifacts else 0
 
 
 if __name__ == "__main__":

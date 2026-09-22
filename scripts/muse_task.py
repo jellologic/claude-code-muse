@@ -56,16 +56,40 @@ def state_path(tdir: Path) -> Path:
 
 
 def load_state(tdir: Path) -> dict:
+    """Read task state, or emit a JSON refusal and exit.
+
+    Every subcommand is documented as printing one JSON object on stdout, and a
+    supervisor parses that stream -- a bare exit or a JSONDecodeError traceback tells it
+    nothing it can act on."""
     p = state_path(tdir)
     if not p.exists():
-        sys.exit(
-            "no state at {}\nRun `muse_task.py run --id <id> --out <dir> ...` first."
-            .format(p))
-    return json.loads(p.read_text())
+        emit({"id": tdir.name, "status": "no_such_task",
+              "reason": "no state at {}. Run `muse_task.py run --id <id> --out <dir> ...` "
+                        "first.".format(p)})
+        sys.exit(1)
+    try:
+        st = json.loads(p.read_text())
+    except (ValueError, OSError) as e:
+        emit({"id": tdir.name, "status": "state_corrupt",
+              "reason": "{} is not readable task state ({}). It may be a crash mid-write; "
+                        "inspect it, or re-run `run --force` to start over.".format(p, e)})
+        sys.exit(1)
+    if not isinstance(st, dict):
+        emit({"id": tdir.name, "status": "state_corrupt",
+              "reason": "{} does not contain a task object".format(p)})
+        sys.exit(1)
+    return st
 
 
 def save_state(tdir: Path, st: dict) -> None:
-    state_path(tdir).write_text(json.dumps(st, indent=2))
+    """Write state atomically.
+
+    A plain write truncates first, so a crash or ENOSPC mid-write leaves unparseable
+    JSON -- and every later subcommand on that task then fails on it."""
+    p = state_path(tdir)
+    tmp = p.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(st, indent=2))
+    os.replace(str(tmp), str(p))
 
 
 def emit(obj: dict) -> None:
@@ -75,6 +99,18 @@ def emit(obj: dict) -> None:
 
 def task_dir(args) -> Path:
     return Path(args.out).resolve() / args.id
+
+
+def round_exit_code(out: dict) -> int:
+    """0 only when the round actually produced something.
+
+    A timed-out or crashed round still emits a full record, and returning 0 for it tells
+    any caller branching on $? that the work succeeded."""
+    if out.get("status") != "completed":
+        return 1
+    if out.get("harvest_error"):
+        return 1
+    return 0
 
 
 def do_round(st: dict, tdir: Path, prompt: str, args, kind: str,
@@ -162,13 +198,13 @@ def cmd_run(args) -> int:
     try:
         core.validate_task_id(args.id)
         head = core.preflight(repo, require_clean=not args.allow_dirty)
+        if args.schema:
+            core.check_schema(args.schema)
     except core.PreflightError as e:
         # One JSON object on stdout, even on refusal: a supervisor parses this stream and
         # an empty one tells it nothing.
         emit({"id": args.id, "status": "refused", "reason": str(e)})
         return 1
-    if args.schema:
-        core.check_schema(args.schema)
 
     model, how = core.resolve_model(args.model)
     tdir = task_dir(args)
@@ -178,12 +214,23 @@ def cmd_run(args) -> int:
     # overwrites patch.diff, and replacing state.json orphans the previous worktree and
     # branch -- `cleanup` then has no record of them and skips them as unfinished. Both
     # happen silently, and the lost patch may be work nobody applied yet.
-    prior = None
+    prior, unreadable = None, False
     if state_path(tdir).exists():
         try:
             prior = json.loads(state_path(tdir).read_text())
-        except ValueError:
-            prior = None
+        except (ValueError, OSError):
+            unreadable = True
+        if prior is not None and not isinstance(prior, dict):
+            prior, unreadable = None, True
+    if unreadable and not args.force:
+        # "Exists but unreadable" is not "absent". Treating it as absent is how a crash
+        # mid-write silently defeats this very guard and overwrites the patch.
+        emit({"id": args.id, "status": "refused",
+              "reason": "{} exists but is not readable task state. It may be a crash "
+                        "mid-write. Inspect or remove it, or pass --force to start over "
+                        "(which discards any patch already harvested there)."
+                        .format(state_path(tdir))})
+        return 1
     if prior is not None and not args.force:
         emit({
             "id": args.id, "status": "refused",
@@ -213,7 +260,21 @@ def cmd_run(args) -> int:
     wt = wt_root / "{}-{}".format(stamp, args.id)
 
     base = args.base
-    # A re-run of the same id must not inherit the previous attempt's tree.
+    # A re-run of the same id must not inherit the previous attempt's tree. But dropping
+    # unconditionally ends in `git branch -D`, which discards unmerged commits without
+    # asking -- and this branch name can collide with one that is not ours (same --id and
+    # --stamp under a different --out, or any pre-existing branch of that name).
+    collides = core.git(repo, "rev-parse", "--verify", "--quiet", branch,
+                        check=False).strip()
+    ours = bool(prior) and prior.get("branch") == branch
+    if collides and not ours and not args.force:
+        emit({"id": args.id, "status": "refused",
+              "reason": "branch {} already exists and was not created by this task. "
+                        "Removing it would discard any unmerged commits on it. Use a "
+                        "different --id or --branch-prefix, or pass --force."
+                        .format(branch),
+              "branch": branch})
+        return 1
     core.drop_worktree(repo, wt, branch)
     try:
         core.git(repo, "worktree", "add", "-q", "-b", branch, str(wt), base)
@@ -252,7 +313,7 @@ def cmd_run(args) -> int:
     out["next"] = ("Read the patch. Run your acceptance check with `verify`. "
                    "Then `revise --feedback ...` or `finish --verdict accept`.")
     emit(out)
-    return 0
+    return round_exit_code(out)
 
 
 # ------------------------------------------------------------------- revise
@@ -293,7 +354,8 @@ def cmd_revise(args) -> int:
     st = load_state(tdir)
     if st.get("done"):
         emit({"id": st["id"], "status": "refused",
-              "reason": "task already finished; re-run `run` to start a new attempt"})
+              "reason": "task already finished. Start a fresh attempt with a new --id, or "
+                        "`run --force` on this one (which discards its patch and worktree)."})
         return 1
 
     used = len(st["rounds"])
@@ -338,7 +400,7 @@ def cmd_revise(args) -> int:
     out["next"] = ("Re-run `verify`, then `finish` with a verdict. "
                    "{} round(s) left.".format(out["rounds_left"]))
     emit(out)
-    return 0
+    return round_exit_code(out)
 
 
 # ------------------------------------------------------------------- verify
@@ -366,8 +428,12 @@ def cmd_verify(args) -> int:
         "command": args.command,
     }
     try:
+        # start_new_session so a hung check can be killed as a group: the command is a
+        # shell line that may spawn a test runner or a build, and killing only the shell
+        # leaves those running against a worktree that is about to be removed.
         r = subprocess.run(args.command, cwd=str(wt), shell=True,
-                           capture_output=True, text=True, timeout=args.timeout)
+                           capture_output=True, text=True, timeout=args.timeout,
+                           start_new_session=True)
         rec.update({
             "exit_code": r.returncode,
             "passed": r.returncode == 0,

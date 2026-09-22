@@ -4,7 +4,7 @@
 
 ## What you measured
 
-<!-- Measured results, not expectations. "55/55 offline" beats "tested and working". -->
+<!-- Measured results, not expectations. Paste the RESULT line; it beats "tested and working". -->
 
 - [ ] `bash scripts/validate.sh --offline` passes (paste the RESULT line)
 - [ ] `bash scripts/validate.sh` (live, costs money) — ran it / not needed because:

@@ -107,22 +107,38 @@ if [[ -z "$EVENTS" || ! -f "$EVENTS" ]]; then
   echo "could not create a temp file for muse output" >&2
   exit 1
 fi
-trap 'rm -f "$EVENTS"' EXIT
+# Kill the watchdog's whole group, not just the subshell: killing the subshell alone
+# leaves its `sleep` running, and an orphaned watchdog would still fire later against a
+# PID the kernel has since recycled. INT/TERM matter as much as EXIT -- those are the
+# paths where the watchdog would otherwise outlive the script.
+cleanup() {
+  if [[ -n "${WATCHDOG:-}" ]]; then
+    kill -- -"$WATCHDOG" 2>/dev/null || kill "$WATCHDOG" 2>/dev/null
+  fi
+  rm -f "$EVENTS"
+}
+trap cleanup EXIT INT TERM
 
 # Printed so a follow-up is possible: pass it back with --session to continue this
 # conversation instead of re-explaining the context. stderr, so it never pollutes the
 # answer on stdout that callers capture with $(...).
 echo "muse_ask: session $SESSION" >&2
 
-( cd "$REPO" && muse "${ARGS[@]}" "$PROMPT" ) > "$EVENTS" 2>/dev/null &
+# Job control, so each background job leads its own process group and can be signalled
+# as a group. Without it the timeout below killed a bash subshell and left the real muse
+# process running unbounded -- writing into a deleted temp file and holding its session.
+set -m
+cd "$REPO" || { echo "cannot enter $REPO" >&2; exit 1; }
+muse "${ARGS[@]}" "$PROMPT" > "$EVENTS" 2>/dev/null &
 PID=$!
 # The watchdog MUST NOT inherit stdout. A background process holding the write end keeps
 # command substitution -- ANS=$(muse_ask.sh ...), which is how any caller uses this --
 # blocked until the sleep expires, long after muse itself has exited.
-( sleep "$TIMEOUT"; kill -0 "$PID" 2>/dev/null && kill -9 "$PID" 2>/dev/null ) >/dev/null 2>&1 &
+( sleep "$TIMEOUT"; kill -0 "$PID" 2>/dev/null && kill -9 -- -"$PID" 2>/dev/null ) >/dev/null 2>&1 &
 WATCHDOG=$!
+set +m
 wait "$PID" 2>/dev/null
-kill "$WATCHDOG" 2>/dev/null
+kill -- -"$WATCHDOG" 2>/dev/null || kill "$WATCHDOG" 2>/dev/null
 wait "$WATCHDOG" 2>/dev/null
 
 python3 - "$EVENTS" <<'PY'

@@ -6,7 +6,55 @@ All notable changes to this plugin are documented here. Format follows
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- **`cleanup --artifacts` could `rmtree` your home directory.** The marker check walked the
+  tree unbounded, so it answered "this is an artifact root" for `$HOME` — any stray
+  `state.json` anywhere beneath it. The check is now bounded to two levels, and a separate
+  guard refuses a home directory, a filesystem root, a repository root, or the current
+  directory or an ancestor of it outright.
+- **A failed harvest overwrote a good patch with an empty file.** `git add`/`git diff`
+  exit status was ignored, so a missing worktree or a held `index.lock` produced empty
+  stdout, replaced `patch.diff`, and reported a clean zero-line result — a failure
+  presented to the supervisor as "the worker decided nothing needed doing".
+- **`run` deleted a git branch it did not create.** The teardown before `worktree add` ran
+  unconditionally and ends in `git branch -D`, which discards unmerged commits without
+  asking. It now refuses a colliding branch that is not this task's.
+- **A corrupt `state.json` read as "no prior task"**, silently defeating the re-run guard.
+  "Exists but unreadable" is now a refusal, and `save_state` writes atomically.
+- **`--timeout` killed a shell, not muse.** `muse_ask.sh` backgrounded a subshell, so the
+  timeout killed the wrapper while muse ran on unbounded, writing into a deleted temp file.
+  Muse is now the direct child and is signalled as a process group.
+- **An orphaned watchdog could SIGKILL an unrelated process.** If the script died before
+  disarming it, the watchdog survived its parent and fired up to `--timeout` later against
+  a PID the kernel had recycled. It is now killed as a group from an `EXIT INT TERM` trap,
+  which also stops each run leaking a stray `sleep`.
+- **Timeouts killed only the direct child.** A `--yolo` run that spawned a build or test
+  runner left those running against a worktree about to be deleted. Both muse runs and
+  `verify` commands now run in their own session and are killed as a tree.
+- **`run` and `revise` exited 0 on a timed-out or crashed round**, so automation branching
+  on `$?` proceeded to `verify`/`finish` on nothing.
+- **A task id was never validated** though it names a directory and a git branch:
+  `--id ../../x` wrote outside the artifact root, where `status` cannot see it.
+- **A repo with no commits produced a traceback** instead of a JSON refusal. Unknown ids,
+  corrupt state and bad schemas now all honour the one-JSON-object-on-stdout contract.
+- **The unsupervised fleet wrote no `state.json`/`task.json`**, so `status` reported it as
+  having produced nothing and `cleanup` refused to reap its worktrees.
+- **Ctrl-C ran the entire remaining fleet** before propagating, then lost the report.
+- The fleet workflow now prints every planned acceptance check before the Build phase.
+  `SECURITY.md` claimed this existed; it did not. These are model-written commands that
+  `verify` executes on the host with your privileges.
+- Task ids in the fleet plan schema now carry the pattern the code enforces, so a plan
+  cannot pass planning and then have every task refused.
+
+### Documentation
+
+- The supervisor agent still said "muse has no memory between rounds" — the one file the
+  earlier correction missed.
+- `README`/`SKILL` said `accept` *requires* a passing check; nothing enforces the verdict,
+  the enforcement is `/muse:status` flagging it afterwards.
+- `/muse:ask` read-only mode is a strong default, not a guarantee — muse can still write
+  through the shell, as the script's own comment says.
 
 ## [1.1.0] - 2026-09-22
 

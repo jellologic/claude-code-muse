@@ -157,7 +157,7 @@ you want one delegated task without the orchestration. Each subcommand is one tu
 loop; every one prints a single JSON object on stdout.
 
 ```bash
-T=${CLAUDE_PLUGIN_ROOT}/scripts/muse_task.py
+T="${CLAUDE_PLUGIN_ROOT}/scripts/muse_task.py"
 
 # --out defaults to .muse-fleet/tasks; pass it only to override.
 python3 $T run    --id tests-auth --repo . --effort low \
@@ -166,6 +166,10 @@ python3 $T verify --id tests-auth --command "pytest tests/test_auth.py -q"
 python3 $T revise --id tests-auth --feedback-file /tmp/review.txt
 python3 $T finish --id tests-auth --verdict accept --summary "..."
 ```
+
+`run` refuses over an id that already has a task, because re-running would overwrite its
+`patch.diff` and orphan its worktree. Copy the patch first and pass `--force`, or use a new
+`--id`.
 
 Rounds share one worktree, so `revise` edits the previous round's output rather than
 starting over, and the harvested patch is always the cumulative diff against base — the
@@ -263,7 +267,8 @@ Watch for the failure shapes this setup produces:
 - a claimed verification that never ran
 - `status: completed` on a zero-line patch — the agent decided nothing needed doing,
   sometimes right, more often a misread prompt
-- `⚠ oversized` — nearly always build artifacts the excludes did not anticipate, such as a
+- `"oversized": true` in the round JSON (the fleet report renders it `⚠`) — nearly always
+  build artifacts the excludes did not anticipate, such as a
   `.venv` created to run a check. Read the file list before assuming the change is big.
 
 `result.json` / `self_report` is written by the same cheap model that did the work, so read
@@ -332,11 +337,12 @@ config or a script is correct only until the next release. The choice is printed
 recorded, so it is always visible rather than assumed:
 
 ```
-muse_task[tests-auth]: round 1 (initial) model=muse-spark-1.3-contributor effort=low
+muse_task[tests-auth]: round 1 (initial) model=muse-spark-1.3-contributor effort=low session=new
 ```
 
-This deliberately ignores the catalog's `is_default` flag — the newest *contributor* model
-is what you want, and the provider's default could move to a full-price tier.
+`is_default` does not drive the choice — the newest *contributor* model is what you want,
+and the provider's default could move to a full-price tier. It only breaks ties between
+models released on the same day.
 
 To pass something else, name it: `--model muse-spark-1.3`. Interactive `muse` sessions read
 `~/.config/muse/settings.json` instead, which muse maintains itself:
@@ -407,7 +413,7 @@ apart in what a patch contains.
 
 `${CLAUDE_PLUGIN_ROOT}/scripts/validate.sh` is the maintainer's suite — run it only if asked to
 verify the plugin itself. `--offline` is free and takes seconds; a bare run makes real muse
-calls. README.md covers it.
+calls. `${CLAUDE_PLUGIN_ROOT}/README.md` covers it.
 
 `${CLAUDE_PLUGIN_ROOT}/references/field-notes.md` collects what other teams learned running parallel coding agent
 fleets — decomposition failures, the verification bottleneck, agent-count limits, conflict

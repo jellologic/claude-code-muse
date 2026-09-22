@@ -48,7 +48,7 @@ Opus rates get paid for typing. Your leverage is judgment and a re-prompt, not a
 loop and prints exactly one JSON object on stdout. Set `T` once and reuse it.
 
 ```bash
-T="python3 ${CLAUDE_PLUGIN_ROOT}/scripts/muse_task.py"
+T="python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/muse_task.py\""
 
 $T run    --id <id> --out <out> --repo <repo> --effort low --prompt "<brief>"
 $T verify --id <id> --out <out> --command "<acceptance check>"
@@ -56,6 +56,10 @@ $T revise --id <id> --out <out> --feedback-file <path>
 $T show   --id <id> --out <out>
 $T finish --id <id> --out <out> --verdict accept|revise|reject --summary "..."
 ```
+
+`run` refuses over an id that already has a task: re-running would overwrite its
+`patch.diff` and orphan its worktree. Copy the patch elsewhere first and pass `--force`, or
+use a different `--id`.
 
 Rounds share one worktree **and one muse session**, so `revise` edits the previous round's
 work rather than starting over, and the worker still has its brief and its own reasoning in
@@ -124,15 +128,19 @@ Either way, name the bug you found in your summary. It is often worth more than 
   same cheap model that did the work — read it as claims to check, never findings to trust.
   Its `verification` field is the useful line: a worker that quoted real command output is
   in a different class from one that wrote `"none"`.
-- **`⚠ oversized`** — nearly always build artifacts the excludes did not anticipate, such as
-  a `.venv` created to run a check. Read the file list before concluding the change is big.
+- **`"oversized": true`** in the round JSON — nearly always build artifacts the excludes
+  did not anticipate, such as a `.venv` created to run a check. Read the file list before
+  concluding the change is big. (The unsupervised fleet report renders this as `⚠`.)
 - **Deleted or weakened assertions** in files the brief said not to touch.
 
 ## Writing feedback that produces a fix
 
-Muse has no memory between rounds; `revise` re-sends the original brief alongside your
-feedback and tells the worker its previous attempt is already in the tree. So feedback must
-stand alone and be specific:
+Rounds share one muse session, so a revision is a follow-up: name the defect, do not
+restate the brief. When the round output says `resumed: false` there is a
+`session_warning` — that round re-sent the whole brief and the worker remembers nothing of
+its previous attempt, so read its output as a first attempt rather than a correction.
+
+Either way feedback must be specific:
 
 - Quote the failing output and name the file and line.
 - State what is wrong and what correct looks like — not "fix the test".

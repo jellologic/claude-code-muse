@@ -21,6 +21,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import uuid
 import sys
@@ -235,11 +236,12 @@ def check_schema(path: str) -> None:
     try:
         sch = json.loads(Path(path).read_text())
     except Exception as e:
-        sys.exit("--schema {}: not readable/parseable JSON ({})".format(path, e))
+        raise PreflightError(
+            "--schema {}: not readable/parseable JSON ({})".format(path, e))
     props = set((sch.get("properties") or {}).keys())
     req = set(sch.get("required") or [])
     if props - req:
-        sys.exit(
+        raise PreflightError(
             "--schema {}: every property must also appear in \"required\"; "
             "missing {}.\n"
             "The Meta API rejects optional fields in structured output.".format(
@@ -374,6 +376,25 @@ def muse_cmd(model, effort, wt: Path, schema=None, max_steps=0, inherit_skills=F
     return cmd
 
 
+def kill_process_tree(p) -> None:
+    """SIGKILL a child and everything it spawned.
+
+    p.kill() signals only the direct child. Anything it started -- npm, pytest, a build
+    -- survives, keeps writing into the worktree and keeps costing money after the
+    timeout has been declared."""
+    try:
+        os.killpg(os.getpgid(p.pid), signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        try:
+            p.kill()
+        except OSError:
+            pass
+    try:
+        p.wait(timeout=10)
+    except Exception:
+        pass
+
+
 def run_muse(cmd, prompt: str, repo: Path, events: Path, stderr: Path, timeout: int):
     """Run one muse round to completion. Returns a dict of what the event stream said.
 
@@ -386,12 +407,15 @@ def run_muse(cmd, prompt: str, repo: Path, events: Path, stderr: Path, timeout: 
 
     events.parent.mkdir(parents=True, exist_ok=True)
     with events.open("w") as fo, stderr.open("w") as fe:
-        p = subprocess.Popen([*cmd, prompt], cwd=str(repo), stdout=fo, stderr=fe, text=True)
+        # Its own session, so a timeout can signal the whole tree. A --yolo muse run
+        # spawns builds and test runners; killing only the direct child leaves those
+        # writing into a worktree we are about to delete, and still spending.
+        p = subprocess.Popen([*cmd, prompt], cwd=str(repo), stdout=fo, stderr=fe,
+                             text=True, start_new_session=True)
         try:
             p.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
-            p.kill()
-            p.wait()
+            kill_process_tree(p)
             out["status"] = "timeout"
             out["reason"] = "exceeded {}s".format(timeout)
     out["elapsed_s"] = round(_time.time() - started, 1)
@@ -435,18 +459,29 @@ def harvest(wt: Path, base: str, excludes, patch_path: Path):
                   + [":(exclude,glob)**/{}".format(p) for p in excludes]
     rec = {"patch_lines": 0, "files_changed": [], "harvest_error": None}
     try:
-        subprocess.run(["git", "-C", str(wt), "add", "-A", *spec], capture_output=True)
-        patch = subprocess.run(
-            ["git", "-C", str(wt), "diff", "--cached", base, *spec],
-            capture_output=True, text=True,
-        ).stdout
+        # git's exit status matters here, and ignoring it is silent data loss: a missing
+        # worktree, a held index.lock or a bad base ref all return rc!=0 with empty
+        # stdout, which would overwrite a good patch.diff with an empty file and report
+        # a clean zero-line result. The supervisor then reads a failure as "the worker
+        # decided nothing needed doing".
+        add = subprocess.run(["git", "-C", str(wt), "add", "-A", *spec],
+                             capture_output=True, text=True)
+        if add.returncode != 0:
+            rec["harvest_error"] = "git add failed: {}".format(add.stderr.strip()[:300])
+            return rec
+        diff = subprocess.run(["git", "-C", str(wt), "diff", "--cached", base, *spec],
+                              capture_output=True, text=True)
+        if diff.returncode != 0:
+            rec["harvest_error"] = "git diff failed: {}".format(diff.stderr.strip()[:300])
+            return rec
+        # Only now is it safe to replace whatever patch.diff already held.
         patch_path.parent.mkdir(parents=True, exist_ok=True)
-        patch_path.write_text(patch)
-        rec["patch_lines"] = patch.count("\n")
-        rec["files_changed"] = subprocess.run(
+        patch_path.write_text(diff.stdout)
+        rec["patch_lines"] = diff.stdout.count("\n")
+        names = subprocess.run(
             ["git", "-C", str(wt), "diff", "--cached", base, "--name-only", *spec],
-            capture_output=True, text=True,
-        ).stdout.split()
+            capture_output=True, text=True)
+        rec["files_changed"] = names.stdout.split() if names.returncode == 0 else []
     except Exception as e:
         rec["harvest_error"] = str(e)
     return rec

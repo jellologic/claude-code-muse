@@ -28,7 +28,9 @@ hints across a package, bulk lint or dependency fixes.
 ```
 
 A task does not finish when muse stops. It finishes when its supervisor says `accept`,
-`revise` or `reject` — and `accept` requires a check the supervisor ran itself.
+`revise` or `reject` — and `accept` is only honest when a check the supervisor ran itself
+passed. `finish` records `verified_by_supervisor` from the **final** check, and
+`/muse:status` flags an accept without one; nothing blocks the verdict itself.
 
 ## Why supervision, not review
 
@@ -149,9 +151,9 @@ evals/evals.json               skill-triggering evals (see note below)
 
 ## A note on the evals
 
-`evals/evals.json` holds five skill-triggering cases — the overlap trap, the job with no
-acceptance check, the coherent single change that should not fan out, and trusting a
-worker's self-report. They encode the judgment calls this plugin exists to get right.
+`evals/evals.json` holds five skill-triggering cases — a bulk test fan-out, the overlap
+trap, the coherent single change that should not fan out, the job with no acceptance check,
+and trusting a worker's self-report. They encode the judgment calls this plugin exists to get right.
 
 They are **not** in the `claude plugin eval` format, which wants `evals/**/case.yaml` or
 `prompt.md` + `graders/*.md`. That runner is early access and was not enabled here, so the
@@ -204,7 +206,7 @@ bash scripts/validate.sh --offline     # seconds, free, spawns no muse
 
 The house rule is that a change must be **measured**, not asserted — and any guard you add
 has to be shown to fail when the thing it watches breaks. CI runs the offline suite on every
-push and pull request.
+pull request and on pushes to `main`, across Python 3.9, 3.11 and 3.13.
 
 See also [SECURITY.md](SECURITY.md) for the trust model (workers run `--yolo`; acceptance
 checks execute on the host), [CHANGELOG.md](CHANGELOG.md) for what has changed, and the

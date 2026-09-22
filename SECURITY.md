@@ -43,9 +43,11 @@ The worktree is only that command's working directory — it is not a security b
 in the fleet path, the check string is *written by a model*: `references/workflow.md` has
 the planner emit a `check` field per task, which is then handed to `verify`.
 
-Read a planned acceptance check the same way you would read a command you are about to type
-yourself. `/muse:fleet` surfaces the planned checks before the run for this reason. If you
-are reviewing a fleet plan quickly, that is the field to slow down on.
+Read a planned acceptance check the same way you would read a command you are about to
+type yourself. The fleet workflow prints every planned check after the Plan phase, under
+"acceptance checks that will run on the host", for exactly this reason — that is the field
+to slow down on. After a run they are also recorded in `<out>/<id>/state.json` under
+`verifications[].command`.
 
 ### What this plugin sends where
 
@@ -68,10 +70,20 @@ handled entirely by the `muse` CLI.
 ### Destructive operations
 
 `/muse:cleanup` deletes git worktrees, branches and, with `--artifacts`, patch files. It is
-a dry run unless you pass `--yes`; it refuses to remove a task that never reached a verdict
-unless you pass `--all`, because an unfinished task's work exists only in its worktree; and
-`--artifacts` refuses to delete any directory that does not contain a `state.json` or
-`task.json` marker, so a mistyped `--out` cannot take a real directory with it.
+a dry run unless you pass `--yes`, and it refuses to remove a task that never reached a
+verdict unless you pass `--all`, because an unfinished task's work exists only in its
+worktree.
+
+`--artifacts` is the blunt one, and worth understanding before you use it:
+
+- It removes the **whole artifact root**, including the harvested patches of tasks whose
+  worktrees were skipped as unfinished. After that their work really does exist only in
+  the worktree.
+- It refuses a directory with no `state.json`/`task.json` marker within two levels, so a
+  mistyped `--out` cannot take a real directory with it.
+- It refuses outright if the target is your home directory, a filesystem root, a
+  repository root, or the current directory or an ancestor of it — a marker can exist
+  somewhere beneath any of those, and the marker check alone is not a safety boundary.
 
 ## Out of scope
 

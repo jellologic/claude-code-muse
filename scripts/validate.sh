@@ -385,8 +385,9 @@ git -C "$SC" branch --format='%(refname:short)' | grep -q '^fleet/s/c$' \
 # Numbers in prose rot: README and CONTRIBUTING both claimed "55 checks" long after the
 # suite reached 65, and nothing noticed. The suite prints its own count, so the docs must
 # not restate it. CHANGELOG is exempt -- a released version's count is a historical fact.
-DRIFT=$(grep -rnE '[0-9]+ (free )?checks' "$SKILL/README.md" "$SKILL/CONTRIBUTING.md" \
-        "$SKILL/skills/muse-fleet/SKILL.md" 2>/dev/null)
+DRIFT=$(grep -rnE '[0-9]+ (free )?checks|[0-9]+/[0-9]+ offline' \
+        "$SKILL/README.md" "$SKILL/CONTRIBUTING.md" "$SKILL/skills/muse-fleet/SKILL.md" \
+        "$SKILL/.github/PULL_REQUEST_TEMPLATE.md" 2>/dev/null)
 [ -z "$DRIFT" ] \
   && ok "no doc restates the check count (it rots; the suite prints it)" \
   || bad "a doc hardcodes a check count" "$DRIFT"
@@ -520,6 +521,83 @@ mkdir -p "$SC/not-artifacts" && echo precious > "$SC/not-artifacts/data.txt"
 # --help must not spill source: the old fixed line range printed `set -uo pipefail`.
 bash "$SKILL/scripts/muse_ask.sh" --help 2>/dev/null | grep -q 'set -uo pipefail' \
   && bad "muse_ask.sh --help leaks source lines" || ok "muse_ask.sh --help prints only the header"
+
+head_ "3c. Data-loss and process guards"
+
+# harvest ignored git's exit status, so a missing worktree or a held index.lock
+# overwrote a good patch.diff with an empty file and reported "no changes".
+HVD="$LAB/v_harvest"; mkdir -p "$HVD"
+printf 'diff --git a/x b/x\n+real work\n' > "$HVD/patch.diff"
+python3 - "$HVD" <<'PY' && ok "a failed harvest reports an error and preserves the patch" || bad "harvest clobbered on failure"
+import importlib.util, os, pathlib, sys
+spec = importlib.util.spec_from_file_location("mc", os.path.join(os.environ["PLUGIN_ROOT"], "scripts/muse_core.py"))
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+d = pathlib.Path(sys.argv[1])
+rec = m.harvest(d / "does-not-exist", "HEAD", [], d / "patch.diff")
+kept = "real work" in (d / "patch.diff").read_text()
+sys.exit(0 if (rec["harvest_error"] and kept) else 1)
+PY
+
+# `git branch -D` discards unmerged commits without asking, and the branch name can
+# belong to something that is not this task.
+BRC="$LAB/v_branch"; mkrepo "$BRC"
+printf '.muse-fleet/\n' >> "$BRC/.git/info/exclude"
+git -C "$BRC" branch "muse/20260101-120000/taken" >/dev/null 2>&1
+BOUT=$(cd "$BRC" && python3 "$TASK" run --id taken --stamp 20260101-120000 --repo "$BRC" --prompt noop 2>/dev/null)
+echo "$BOUT" | python3 -c "
+import json,sys
+try: d=json.load(sys.stdin)
+except Exception: sys.exit(1)
+sys.exit(0 if d.get('status')=='refused' else 1)" \
+  && ok "run refuses a branch name it did not create" || bad "run would delete a foreign branch" "$BOUT"
+git -C "$BRC" branch --format='%(refname:short)' | grep -q 'taken' \
+  && ok "the foreign branch survived" || bad "foreign branch was deleted"
+
+# "exists but unreadable" is not "absent": treating it as absent silently defeated the
+# re-run guard and overwrote the patch.
+CRP="$LAB/v_corrupt"; mkrepo "$CRP"
+printf '.muse-fleet/\n' >> "$CRP/.git/info/exclude"
+mkdir -p "$CRP/.muse-fleet/tasks/c"; printf '{"broken' > "$CRP/.muse-fleet/tasks/c/state.json"
+COUT=$(cd "$CRP" && python3 "$TASK" run --id c --repo "$CRP" --prompt noop 2>/dev/null)
+echo "$COUT" | python3 -c "
+import json,sys
+try: d=json.load(sys.stdin)
+except Exception: sys.exit(1)
+sys.exit(0 if d.get('status')=='refused' else 1)" \
+  && ok "corrupt task state refuses rather than reading as absent" || bad "corrupt state bypassed the guard" "$COUT"
+SOUT=$(cd "$CRP" && python3 "$TASK" show --id c 2>/dev/null)
+echo "$SOUT" | python3 -c "
+import json,sys
+try: d=json.load(sys.stdin)
+except Exception: sys.exit(1)
+sys.exit(0 if d.get('status')=='state_corrupt' else 1)" \
+  && ok "corrupt state emits JSON on every subcommand, not a traceback" || bad "load_state broke the JSON contract" "$SOUT"
+
+python3 - <<'PY' && ok "a timed-out or unharvestable round exits non-zero" || bad "dead round reported success"
+import importlib.util, os, sys
+spec = importlib.util.spec_from_file_location("mt", os.path.join(os.environ["PLUGIN_ROOT"], "scripts/muse_task.py"))
+mt = importlib.util.module_from_spec(spec); spec.loader.exec_module(mt)
+cases = [({"status": "completed"}, 0), ({"status": "timeout"}, 1),
+         ({"status": "no_terminal"}, 1), ({"status": "completed", "harvest_error": "x"}, 1)]
+sys.exit(0 if all(mt.round_exit_code(o) == w for o, w in cases) else 1)
+PY
+
+# The marker check alone answered "yes" for $HOME -- an unbounded walk meets some stray
+# state.json eventually -- which made `--yes --artifacts --out ~` an rmtree of it.
+python3 - <<'PY' && ok "cleanup refuses \$HOME, / and a repo root as an artifact root" || bad "dangerous root not refused"
+import importlib.util, os, pathlib, sys
+spec = importlib.util.spec_from_file_location("mcl", os.path.join(os.environ["PLUGIN_ROOT"], "scripts/muse_cleanup.py"))
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+home = pathlib.Path(os.path.expanduser("~"))
+repo = pathlib.Path(os.environ["PLUGIN_ROOT"])
+checks = [m.refuse_dangerous_root(home, repo), m.refuse_dangerous_root(pathlib.Path("/"), repo),
+          m.refuse_dangerous_root(repo, repo)]
+sys.exit(0 if all(c is not None for c in checks) else 1)
+PY
+
+grep -q '"state.json"' "$SKILL/scripts/muse_fleet.py" && grep -q '"task.json"' "$SKILL/scripts/muse_fleet.py" \
+  && ok "the fleet writes the artifacts status and cleanup key on" \
+  || bad "fleet worktrees remain invisible to status/cleanup"
 
 # ------------------------------------------------------------ 4. live runs
 if [ "$OFFLINE" = "1" ]; then

@@ -135,8 +135,9 @@ CI only runs `--offline`, because CI has no muse credentials and should not have
 ## Pull requests
 
 - One concern per PR. A rename and a behaviour change in the same diff are two PRs.
-- Say what you **measured**, not what you expect. "55/55 offline, and the new check goes red
-  when I remove the marker-file guard" is worth more than "tested and working".
+- Say what you **measured**, not what you expect. Paste the suite's RESULT line and name
+  what went red when you broke the thing your new guard watches — that is worth more than
+  "tested and working".
 - If you could not verify something, say which part and why. That is genuinely more useful
   than a confident claim that turns out to be wrong.
 - Comments should explain *why something would break*, not what the line does.

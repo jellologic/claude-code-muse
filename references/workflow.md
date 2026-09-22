@@ -70,7 +70,7 @@ const PLAN_SCHEMA = {
         type: 'object',
         required: ['id', 'prompt', 'files', 'check', 'effort'],
         properties: {
-          id:     { type: 'string' },
+          id:     { type: 'string', pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$' },
           prompt: { type: 'string' },
           files:  { type: 'array', items: { type: 'string' } },
           check:  { type: 'string' },   // shell command; the supervisor runs this itself
@@ -98,6 +98,10 @@ const plan = await agent(
      nothing else, and cannot ask a question. Name its exact target files and say what
      must NOT change.
 
+   Each task id names a directory AND a git branch: start with a letter or digit and
+   use only letters, digits, dot, underscore or hyphen (max 64). "tests-parser" is fine,
+   "tests: parser.py" is refused before the task runs.
+
    Set effort per task: "low" for mechanical edits, "medium" where local design
    judgment is needed, "xhigh" only for genuinely hard fixes.`,
   { label: 'plan', phase: 'Plan', effort: 'medium', schema: PLAN_SCHEMA },
@@ -112,6 +116,13 @@ for (const t of plan.tasks) {
   }
 }
 log(`${plan.tasks.length} disjoint tasks over ${owner.size} files, ≤${ROUNDS} rounds each`)
+
+// Every acceptance check below was written by a model and will be executed by
+// `muse_task.py verify` ON THE HOST, with your privileges -- the worktree is only its
+// working directory, not a sandbox. Print them so they can be read like commands you are
+// about to type yourself, rather than discovered afterwards in state.json.
+log('acceptance checks that will run on the host:')
+for (const t of plan.tasks) log(`  ${t.id}: ${t.check}`)
 
 // ---- Build. One Opus supervisor per task, each owning its task to a verdict. -----
 const VERDICT_SCHEMA = {
@@ -274,7 +285,9 @@ const inventory = await agent(
 per-task supervision costs more than it saves, `muse_fleet.py` still does the old
 unsupervised fan-out. Use it knowing nothing checked the work.
 
-**Escalation** — give a `revise` verdict one more attempt at higher effort before handing
+**Escalation** — give a `revise` verdict one more attempt at higher effort. Use a fresh
+id (`${t.id}-retry`): `run` refuses an id that already has a task, since re-running would
+overwrite its patch and orphan its worktree before handing
 it to a human, by re-running that task's supervisor with `--effort xhigh` and the previous
 concerns appended to the brief.
 

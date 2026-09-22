@@ -23,7 +23,10 @@ The script separates two things that get conflated, and your summary must keep t
 - **`verified`** — a supervisor ran the acceptance command itself and the exit code was
   recorded. Evidence.
 
-Any task flagged `ACCEPTED WITHOUT AN EXECUTED CHECK` is the one worth naming first. It means
+Two flags matter most, and both mean the same thing for the reader — the patch is
+unproven. `ACCEPTED WITHOUT AN EXECUTED CHECK` means nothing ran.
+`ACCEPTED WITHOUT A PASSING FINAL CHECK` is worse: a check ran and went red, and the task
+was accepted anyway. Name either one first. It means
 somebody said the patch was fine and nothing ran to confirm it — treat that patch as unproven
 and say so in those words, whatever its verdict field claims.
 

@@ -16,8 +16,9 @@ explanation, or one small contained edit — anything where the orchestration of
   [--session <id>] "<prompt>"
 ```
 
-Read-only by default: writes are disabled and the sandbox stays on, so it is safe to point
-at a dirty working copy. It exits 0 and prints the final answer, or exits 1 and prints the
+Read-only by default: workspace writes are disabled and the sandbox stays on, which makes
+it a strong default against a dirty working copy rather than a guarantee — muse can still
+write through the shell. Point it at a worktree if that distinction matters. It exits 0 and prints the final answer, or exits 1 and prints the
 reason to stderr. The model is resolved to the newest contributor tier at run time.
 
 ## Reading the request

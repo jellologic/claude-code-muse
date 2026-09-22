@@ -153,6 +153,34 @@ def run_task(task: dict, repo: Path, out: Path, args) -> dict:
     if args.commit and rec["patch_lines"]:
         core.commit_worktree(wt, f"muse({tid}): {(rec['summary'] or tid)[:70]}")
 
+    # muse_status and muse_cleanup both key on state.json/task.json. Without them a
+    # fleet's worktrees are unreapable (cleanup sees no record and refuses as
+    # "unfinished") and status reports this path as having produced nothing at all.
+    # There is no supervisor here, so verified_by_supervisor is false by construction.
+    state = {
+        "id": tid, "repo": str(repo), "worktree": str(wt), "branch": branch,
+        "base": base, "model": model, "effort": effort,
+        "brief": task.get("prompt", ""),
+        "max_rounds": 1,
+        "rounds": [{"n": 1, "kind": "initial", "status": rec.get("status"),
+                    "resumed": False}],
+        "verifications": [],
+        "done": True,
+        "verdict": None,
+        "final_patch_lines": rec.get("patch_lines", 0),
+        "final_files_changed": rec.get("files_changed") or [],
+        "unsupervised": True,
+    }
+    (tdir / "state.json").write_text(json.dumps(state, indent=2))
+    (tdir / "task.json").write_text(json.dumps({
+        "id": tid, "verdict": None, "summary": rec.get("summary"), "concerns": [],
+        "patch": str(tdir / "patch.diff"), "patch_lines": rec.get("patch_lines", 0),
+        "files_changed": rec.get("files_changed") or [],
+        "rounds_used": 1, "worktree": str(wt), "branch": branch,
+        "verified_by_supervisor": False, "verifications": [],
+        "unsupervised": True,
+    }, indent=2))
+
     if args.cleanup:
         drop_worktree(repo, wt, branch)
     return rec
@@ -199,7 +227,10 @@ def main() -> int:
     args.model, how = resolve_model(args.model)
     repo = Path(args.repo).resolve()
     if args.schema:
-        check_schema(args.schema)
+        try:
+            check_schema(args.schema)
+        except core.PreflightError as e:
+            sys.exit(str(e))
     try:
         head = preflight(repo, require_clean=not args.allow_dirty)
     except core.PreflightError as e:
@@ -241,7 +272,12 @@ def main() -> int:
 
     t0 = time.time()
     results: list[dict] = []
-    with cf.ThreadPoolExecutor(max_workers=args.concurrency) as ex:
+    # Ctrl-C used to cost the whole remaining fleet: the executor's context manager
+    # waits for every queued task before the exception propagates, and the traceback then
+    # escaped before the report was written -- leaving harvested patches with no index.
+    interrupted = False
+    ex = cf.ThreadPoolExecutor(max_workers=args.concurrency)
+    try:
         futs = {ex.submit(run_task, t, repo, out, args): t["id"] for t in tasks}
         for fut in cf.as_completed(futs):
             tid = futs[fut]
@@ -252,6 +288,16 @@ def main() -> int:
             results.append(rec)
             print(f"  [{rec['status']:>9}] {tid}  {rec.get('elapsed_s','?')}s  "
                   f"{rec.get('patch_lines',0)} patch lines", file=sys.stderr)
+    except KeyboardInterrupt:
+        interrupted = True
+        print("\ninterrupted — cancelling queued tasks; already-started ones finish. "
+              "The report below covers what completed.", file=sys.stderr)
+        try:
+            ex.shutdown(wait=True, cancel_futures=True)
+        except TypeError:   # cancel_futures is 3.9+
+            ex.shutdown(wait=True)
+    finally:
+        ex.shutdown(wait=True)
 
     results.sort(key=lambda r: ids.index(r["id"]) if r["id"] in ids else 0)
     wall = round(time.time() - t0, 1)
@@ -265,13 +311,15 @@ def main() -> int:
         "concurrency": args.concurrency,
         "wall_clock_s": wall, "serial_equivalent_s": serial,
         "completed": ok, "total": len(results),
+        "interrupted": interrupted, "planned": len(tasks),
         "out_dir": str(out), "worktree_root": args.worktree_root,
         "tasks": results,
     }
     (out / "report.json").write_text(json.dumps(report, indent=2))
 
     lines = [
-        f"# muse-fleet report — {ok}/{len(results)} completed",
+        f"# muse-fleet report — {ok}/{len(results)} completed"
+        + (f" (INTERRUPTED — {len(tasks)} were planned)" if interrupted else ""),
         "",
         f"- base `{args.base}` @ `{head[:12]}`",
         f"- model `{args.model}`, effort `{args.effort}`, concurrency {args.concurrency}",
@@ -309,7 +357,8 @@ def main() -> int:
     print(f"\nfleet: {ok}/{len(results)} completed in {wall}s "
           f"(serial would be ~{serial}s)", file=sys.stderr)
     print(f"fleet: report -> {out}/report.md", file=sys.stderr)
-    return 0 if ok == len(results) else 1
+    # An interrupted run is not a success even if everything that ran succeeded.
+    return 0 if (ok == len(results) and not interrupted) else 1
 
 
 if __name__ == "__main__":
