@@ -45,6 +45,9 @@ claude plugin install muse@claude-code-muse
 
 # 4. confirm every component was discovered
 claude plugin details muse
+
+# 5. start a NEW session — commands, skills and agents register at session start,
+#    so the session you reinstalled from still has the old ones
 ```
 
 That last step matters more than it looks. `claude plugin details` prints a component

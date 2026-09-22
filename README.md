@@ -80,6 +80,10 @@ merely recommended.
 Requires the Muse Code CLI (`muse`) on `PATH`, plus `git`, Python 3.9+ and Claude Code.
 CI exercises Python 3.9, 3.11 and 3.13 on Linux; development is on macOS.
 
+**Then start a new session** (or `/clear`). Plugin commands, skills and agents register at
+session start, so `/muse:*` will not exist in the session you installed from. This is the
+first thing everyone hits.
+
 Then `muse login` once. Not sure it's set up right?
 
 ```
@@ -102,7 +106,29 @@ root is writable — with a fix on every failing line.
 | `/muse:model` | Which contributor model delegation will use |
 | `/muse:cleanup` | Reap worktrees, branches and artifacts a run left behind |
 
-The `muse-fleet` skill also triggers on its own when a job obviously wants fan-out.
+The `muse-fleet` skill also triggers on its own when a job obviously wants fan-out — a
+phrasing like *"this is a lot of grunt work"*, *"don't burn my tokens on this"*, *"farm
+this out"*, or naming Muse Code directly. The explicit commands are more reliable;
+natural language is the convenience path.
+
+### Writing a delegation that comes back right
+
+The worker sees your brief and the repo, and **cannot ask a question** — ambiguity does
+not come back as a question, it comes back as confidently wrong work. Three things decide
+the outcome:
+
+1. **Name the exact files.** "Add tests for auth" invites a rewrite of `auth.py`;
+   "create `tests/test_auth.py`, do not modify `auth.py`" does not.
+2. **Give a runnable acceptance check.** The highest-leverage part of the whole prompt —
+   it is what the supervisor executes itself instead of trusting the worker.
+3. **Say what must not change.** The boundary matters as much as the goal.
+
+Your working tree must be **clean**: worktrees branch from a committed ref, so
+uncommitted work is invisible to the worker and its absence looks like the agent deleted
+it.
+
+For a quick question, `/muse:ask` needs none of that — and it prints a session id you can
+pass back with `--session <id>` to ask a follow-up without re-explaining the context.
 
 **No command applies a patch.** They stop at a verdict and a patch path, because an
 accepted patch is still a patch you have not read.

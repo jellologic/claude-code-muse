@@ -63,6 +63,10 @@ architecture true rather than merely recommended.
 None of the commands apply a patch. They stop at a verdict and a patch path and hand the
 decision to you, because an accepted patch is still a patch you have not read.
 
+If a `/muse:*` command does not exist in the user's session, the plugin was installed
+after that session started — commands, skills and agents register at session start. Tell
+them to start a new session or `/clear`; reinstalling again will not help.
+
 ## Decide whether to fan out
 
 Fan-out pays when tasks are **independent** and **mechanical**. It costs more than it saves

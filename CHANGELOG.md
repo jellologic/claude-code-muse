@@ -6,6 +6,18 @@ All notable changes to this plugin are documented here. Format follows
 
 ## [Unreleased]
 
+### Documentation
+
+- **The session-restart requirement is documented.** Plugin commands, skills and agents
+  register at session start, so `/muse:*` does not exist in the session you installed
+  from. It was the first thing a new user hit and appeared nowhere — now in the README
+  install steps, the contributor dev loop, and the skill itself so it can diagnose the
+  symptom when someone reports a missing command.
+- A "writing a delegation that comes back right" section in the README: name the exact
+  files, give a runnable check, say what must not change, start from a clean tree.
+- The README names the phrasings that trigger the skill on its own, and points at
+  `/muse:ask --session` for follow-ups.
+
 ### Fixed
 
 - **A fleet no longer deletes a concurrent run's live worktrees** (#2). The run namespace
