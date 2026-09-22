@@ -25,6 +25,15 @@ All notable changes to this plugin are documented here. Format follows
 
 ### Changed
 
+- **Windows is now tested and green**, and its CI leg is blocking. Getting there fixed a
+  real shipped bug (see cp1252 below) and several harness faults. `muse` itself is never
+  invoked there, so live delegation on Windows remains unverified.
+- **All text I/O passes `encoding="utf-8"`.** Windows Python defaults to cp1252, four of
+  this repo's own files cannot be decoded that way, and muse's patches routinely contain
+  UTF-8 — so every unguarded `read_text()` was a crash waiting on a non-ASCII byte.
+- **Fleet stamp entropy raised from 2 bytes to 4.** 16 bits gives a ~1.9% collision across
+  50 runs by the birthday bound, and that namespace's collision deletes another run's live
+  worktrees.
 - The test suite writes no fixed scratch path; everything is under its own `mktemp` dir
   (#1). Fixed `/tmp` paths collide between users on a shared host and can be pre-created
   as symlinks. Also stops `--repo /tmp`, which would have had preflight write
