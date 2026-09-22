@@ -68,6 +68,12 @@ def summarise(tdir: Path) -> dict:
         except OSError:
             patch_lines = None
 
+    # A revision that could not resume its muse session is a silent quality problem: the
+    # worker got feedback plus a re-sent brief but no memory of its own previous attempt,
+    # so it is closer to a fresh try than a correction. Worth surfacing, not burying.
+    lost_context = [r.get("n") for r in (st.get("rounds") or [])
+                    if r.get("kind") == "revision" and not r.get("resumed")]
+
     # `finished` is about this script's bookkeeping; `verified` is about evidence.
     # Keep them separate — conflating them is how an unchecked patch reads as done.
     return {
@@ -90,6 +96,8 @@ def summarise(tdir: Path) -> dict:
         "worktree": st.get("worktree"),
         "worktree_exists": bool(st.get("worktree") and Path(st["worktree"]).exists()),
         "concerns": (task or {}).get("concerns") or st.get("concerns") or [],
+        "session_id": st.get("session_id"),
+        "revisions_without_context": lost_context,
         "brief": (st.get("brief") or "")[:160],
     }
 
@@ -109,6 +117,10 @@ def flags(r: dict) -> list:
         out.append("last check exited {}".format(r["last_exit"]))
     if r["concerns"]:
         out.append("{} residual concern(s)".format(len(r["concerns"])))
+    if r.get("revisions_without_context"):
+        out.append("revision round(s) {} could not resume the muse session — the worker "
+                   "had no memory of its previous attempt"
+                   .format(", ".join(str(n) for n in r["revisions_without_context"])))
     return out
 
 

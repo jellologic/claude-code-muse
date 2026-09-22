@@ -19,6 +19,7 @@ from __future__ import annotations
 import glob
 import json
 import os
+import re
 import shutil
 import subprocess
 import uuid
@@ -248,20 +249,53 @@ def absent_locals(repo: Path, named):
 
 # ------------------------------------------------------------- running muse
 
-def session_exists(session_id: str) -> bool:
-    """Has muse actually persisted this session?
+def session_workspace(session_id: str):
+    """The workspace root a session is bound to, or None if it cannot be determined.
 
-    Passing --session-id for a session muse cannot find is not an error: it silently
-    starts a fresh conversation. A revision that assumed continuity would then arrive as
-    bare feedback with no brief behind it, which is the confidently-wrong-work failure
-    this plugin exists to avoid. So check before relying on it."""
+    Muse records this per session and REFUSES to resume in a different workspace --
+    "session X was created in workspace A; refusing to resume in workspace B". Critically
+    it fails the whole run rather than starting fresh, so a resume that would be refused
+    costs a round and produces nothing. Read it from the newest snapshot; the key is
+    nested, so match the text rather than assuming a shape that may change."""
+    base = (Path(os.path.expanduser(MUSE_DATA_DIR)) / "sessions"
+            / ".msp-view-v1" / session_id)
+    snaps = sorted(base.glob("snapshot-*.json"), key=lambda f: f.stat().st_mtime,
+                   reverse=True) if base.is_dir() else []
+    for f in snaps:
+        try:
+            m = re.search(r'"workspaceRoot"\s*:\s*"([^"]+)"', f.read_text())
+        except OSError:
+            continue
+        if m:
+            return m.group(1)
+    return None
+
+
+def session_exists(session_id: str, workspace=None) -> bool:
+    """Can this session actually be resumed, here?
+
+    Two distinct ways a resume goes wrong, and neither surfaces as a clean error:
+
+    - The session is unknown. Muse silently starts a fresh conversation, so a revision
+      that assumed continuity arrives as bare feedback with no brief behind it -- the
+      confidently-wrong-work failure this plugin exists to avoid.
+    - The session exists but belongs to another workspace. Muse refuses and the run dies
+      with no run_terminal record, burning a round for nothing.
+
+    Treating both as "not resumable" routes them to the fallback that re-sends the brief,
+    which is correct in both cases."""
     if not session_id:
         return False
     base = Path(os.path.expanduser(MUSE_DATA_DIR)) / "sessions"
-    if (base / ".msp-view-v1" / session_id).is_dir():
-        return True
-    # The dated tree is the durable copy; the view index above is derived from it.
-    return any(base.glob("*/*/*/" + session_id))
+    # The dated tree is the durable copy; the view index is derived from it.
+    if not (base / ".msp-view-v1" / session_id).is_dir() \
+            and not any(base.glob("*/*/*/" + session_id)):
+        return False
+    if workspace:
+        recorded = session_workspace(session_id)
+        if recorded and os.path.realpath(recorded) != os.path.realpath(str(workspace)):
+            return False
+    return True
 
 
 def new_session_id() -> str:

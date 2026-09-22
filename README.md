@@ -44,7 +44,8 @@ to type.
 
 ## Install
 
-Requires the Muse Code CLI (`muse`) on `PATH`, plus `git`, `python3` and Claude Code.
+Requires the Muse Code CLI (`muse`) on `PATH`, plus `git`, Python 3.9+ and Claude Code.
+(CI exercises Python 3.9, 3.11 and 3.13 on Linux; development is on macOS.)
 
 ```
 /plugin marketplace add jellologic/claude-code-muse

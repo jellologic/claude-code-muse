@@ -281,7 +281,9 @@ def cmd_revise(args) -> int:
     feedback = args.feedback
     if args.feedback_file:
         feedback = Path(args.feedback_file).read_text()
-    resumed = core.session_exists(st.get("session_id") or "")
+    # Pass the worktree: a session bound to a different workspace is not resumable, and
+    # muse fails the whole run rather than starting fresh if you try.
+    resumed = core.session_exists(st.get("session_id") or "", workspace=st["worktree"])
     if resumed:
         prompt = REVISION_RESUMED_TEMPLATE.format(n=used + 1, feedback=feedback)
     else:
@@ -290,7 +292,8 @@ def cmd_revise(args) -> int:
     out = do_round(st, tdir, prompt, args, "revision", resumed=resumed)
     if not resumed:
         out["session_warning"] = (
-            "muse session {} was not found on disk, so this round re-sent the full brief "
+            "muse session {} is not resumable here -- either it is not on disk, or it is "
+            "bound to a different workspace -- so this round re-sent the full brief "
             "instead of continuing the conversation. The worker does not remember its "
             "previous reasoning.".format(st.get("session_id"))
         )

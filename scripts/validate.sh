@@ -193,6 +193,30 @@ if bad:
 sys.exit(1 if bad else 0)
 PY
 
+# Muse refuses to resume a session bound to another workspace, and FAILS the run rather
+# than starting fresh -- so treating "exists" as "resumable" burns a round for nothing.
+WSDATA="$LAB/v_wsdata"
+WSID="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+mkdir -p "$WSDATA/sessions/.msp-view-v1/$WSID"
+printf '{"x":{"viewCursor":"v:1","workspaceRoot":"%s/the-right-place"}}\n' "$LAB" \
+  > "$WSDATA/sessions/.msp-view-v1/$WSID/snapshot-1.json"
+mkdir -p "$LAB/the-right-place" "$LAB/somewhere-else"
+MUSE_DATA_DIR="$WSDATA" python3 - "$LAB" "$WSID" <<'PY' && ok "a session bound to another workspace counts as not resumable" || bad "workspace binding ignored"
+import importlib.util, os, sys
+lab, sid = sys.argv[1], sys.argv[2]
+spec = importlib.util.spec_from_file_location("mc", os.path.join(os.environ["PLUGIN_ROOT"], "scripts/muse_core.py"))
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+checks = [
+    ("no workspace arg -> exists",   m.session_exists(sid),                                  True),
+    ("matching workspace",           m.session_exists(sid, lab + "/the-right-place"),        True),
+    ("different workspace",          m.session_exists(sid, lab + "/somewhere-else"),         False),
+    ("workspace recorded",           m.session_workspace(sid) == lab + "/the-right-place",   True),
+]
+wrong = [n for n, got, want in checks if got != want]
+if wrong: print("        wrong:", wrong)
+sys.exit(1 if wrong else 0)
+PY
+
 python3 - <<'PY' && ok "muse_cmd carries --session-id only when given one" || bad "muse_cmd session wiring"
 import importlib.util, os, sys, pathlib
 spec = importlib.util.spec_from_file_location("mc", os.path.join(os.environ["PLUGIN_ROOT"], "scripts/muse_core.py"))
@@ -357,6 +381,26 @@ git -C "$SC" branch --format='%(refname:short)' | grep -q '^fleet/s/c$' \
   && ok "cleanup --all reaps the rest" || bad "worktrees left after --all"
 [ ! -d "$SC/.muse-fleet" ] \
   && ok "cleanup --artifacts removes the artifact root" || bad "artifact root survived"
+
+# A revision that could not resume is a silent quality problem -- the worker got feedback
+# and a re-sent brief but no memory of its own attempt, so it is closer to a fresh try
+# than a correction. It must be visible in the report, not buried in state.json.
+CTX="$LAB/v_ctx"; mkdir -p "$CTX/.muse-fleet/tasks/lost"
+cat > "$CTX/.muse-fleet/tasks/lost/state.json" <<'JSON'
+{"id":"lost","done":true,"verdict":"accept","session_id":"s1","max_rounds":3,
+ "rounds":[{"n":1,"kind":"initial","resumed":false},
+           {"n":2,"kind":"revision","resumed":true},
+           {"n":3,"kind":"revision","resumed":false}],
+ "verifications":[{"after_round":3,"command":"true","exit_code":0,"passed":true}]}
+JSON
+CTXOUT=$(python3 "$SKILL/scripts/muse_status.py" --out "$CTX/.muse-fleet" 2>&1)
+echo "$CTXOUT" | grep -q 'could not resume the muse session' \
+  && ok "status flags a revision that lost its session context" \
+  || bad "lost context not surfaced" "$CTXOUT"
+# Round 1 is legitimately unresumed and round 2 did resume; naming either is a false alarm.
+echo "$CTXOUT" | grep -q 'round(s) 3 could not resume' \
+  && ok "status names only the revision that actually lost context" \
+  || bad "wrong rounds named" "$(echo "$CTXOUT" | grep 'could not resume')"
 
 # --artifacts rmtree's a path the user named. A typo must not take a directory with it,
 # so the marker-file check is the only thing between a mistyped --out and real data loss.
@@ -639,11 +683,15 @@ grep -q 'TIGERMOTH' "$SSOUT/resume/patch.diff" \
   || bad "codeword absent from patch — the session did not carry context"
 
 # The safety path: muse does not error on an unknown session id, it silently starts fresh.
+# A FRESH uuid every run. A hardcoded one stops being fake the moment an earlier run
+# writes a real session under it -- which happened here, and muse then refused to resume
+# it across workspaces instead of starting fresh, so the test measured the wrong thing.
+DEADSID=$(python3 -c "import uuid;print(uuid.uuid4())")
 python3 -c "
-import json
+import json,sys
 p='$SSOUT/resume/state.json'; st=json.load(open(p))
-st['session_id']='00000000-dead-beef-0000-000000000000'
-json.dump(st, open(p,'w'), indent=2)"
+st['session_id']=sys.argv[1]
+json.dump(st, open(p,'w'), indent=2)" "$DEADSID"
 python3 "$TASK" revise --id resume --out "$SSOUT" \
   --feedback "Change the returned integer from 7 to 8." > /tmp/v_sess3.json 2>/dev/null
 python3 -c "

@@ -11,8 +11,16 @@ permissions:
 
 jobs:
   offline:
-    name: offline suite
+    # The scripts use nothing newer than 3.7 (deferred annotations everywhere, and
+    # capture_output/text= are the newest calls), but "should work" is not evidence.
+    # Run the floor, a mid version and the newest so a deprecation shows up here rather
+    # than on a contributor's machine.
+    name: offline suite (py${{ matrix.python }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.9", "3.11", "3.13"]
     steps:
       - uses: actions/checkout@v4
 
@@ -24,7 +32,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "${{ matrix.python }}"
 
       - name: Git identity for the throwaway test repos
         run: |
