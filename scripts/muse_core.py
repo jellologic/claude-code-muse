@@ -65,7 +65,7 @@ def catalog_rows():
     rows = []
     for f in glob.glob(os.path.expanduser(CATALOG_GLOB)):
         try:
-            rows.extend(json.load(open(f)).get("rows") or [])
+            rows.extend(json.load(open(f, encoding="utf-8")).get("rows") or [])
         except (OSError, ValueError, AttributeError):
             continue
     return rows
@@ -210,11 +210,11 @@ def preflight(repo: Path, require_clean: bool) -> str:
     # Worktrees created under the repo would otherwise show up as untracked noise.
     excl = repo / ".git" / "info" / "exclude"
     try:
-        cur = excl.read_text() if excl.exists() else ""
+        cur = excl.read_text(encoding="utf-8") if excl.exists() else ""
         add = [p for p in (".muse/", ".muse-fleet/") if p not in cur]
         if add:
             excl.parent.mkdir(parents=True, exist_ok=True)
-            excl.write_text(cur.rstrip("\n") + "\n" + "\n".join(add) + "\n")
+            excl.write_text(cur.rstrip("\n") + "\n" + "\n".join(add) + "\n", encoding="utf-8")
     except OSError:
         pass
 
@@ -234,7 +234,7 @@ def check_schema(path: str) -> None:
     every key in `properties` -- there is no such thing as an optional field. Catching
     that here turns a fleet-wide 400 into a one-line message before anything spawns."""
     try:
-        sch = json.loads(Path(path).read_text())
+        sch = json.loads(Path(path).read_text(encoding="utf-8"))
     except Exception as e:
         raise PreflightError(
             "--schema {}: not readable/parseable JSON ({})".format(path, e))
@@ -321,7 +321,7 @@ def session_workspace(session_id: str):
     snaps = [f for _, f in sorted(dated, key=lambda pair: pair[0], reverse=True)]
     for f in snaps:
         try:
-            m = re.search(r'"workspaceRoot"\s*:\s*"([^"]+)"', f.read_text())
+            m = re.search(r'"workspaceRoot"\s*:\s*"([^"]+)"', f.read_text(encoding="utf-8"))
         except OSError:
             continue
         if m:
@@ -444,7 +444,7 @@ def scan_secrets(root: Path, max_files: int = SCAN_MAX_FILES):
             try:
                 if f.is_symlink() or not f.is_file() or f.stat().st_size > SCAN_MAX_BYTES:
                     continue
-                text = f.read_text(errors="strict")
+                text = f.read_text(encoding="utf-8", errors="strict")
             except (OSError, ValueError, UnicodeDecodeError):
                 continue    # binary or unreadable: not hand-written config
             scanned += 1
@@ -511,7 +511,7 @@ def run_muse(cmd, prompt: str, repo: Path, events: Path, stderr: Path, timeout: 
            "text": "", "elapsed_s": 0.0}
 
     events.parent.mkdir(parents=True, exist_ok=True)
-    with events.open("w") as fo, stderr.open("w") as fe:
+    with events.open("w", encoding="utf-8") as fo, stderr.open("w", encoding="utf-8") as fe:
         # Its own session, so a timeout can signal the whole tree. A --yolo muse run
         # spawns builds and test runners; killing only the direct child leaves those
         # writing into a worktree we are about to delete, and still spending.
@@ -531,7 +531,7 @@ def run_muse(cmd, prompt: str, repo: Path, events: Path, stderr: Path, timeout: 
     # run_terminal is the single authoritative record; everything else is noise.
     term = None
     try:
-        with events.open() as f:
+        with events.open(encoding="utf-8") as f:
             for line in f:
                 try:
                     pl = json.loads(line).get("payload", {})
@@ -581,7 +581,7 @@ def harvest(wt: Path, base: str, excludes, patch_path: Path):
             return rec
         # Only now is it safe to replace whatever patch.diff already held.
         patch_path.parent.mkdir(parents=True, exist_ok=True)
-        patch_path.write_text(diff.stdout)
+        patch_path.write_text(diff.stdout, encoding="utf-8")
         rec["patch_lines"] = diff.stdout.count("\n")
         names = subprocess.run(
             ["git", "-C", str(wt), "diff", "--cached", base, "--name-only", *spec],

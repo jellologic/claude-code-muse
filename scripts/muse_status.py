@@ -31,7 +31,7 @@ DEFAULT_ROOT = ".muse-fleet"
 
 def load(p: Path):
     try:
-        return json.loads(p.read_text())
+        return json.loads(p.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
 
@@ -66,7 +66,7 @@ def summarise(tdir: Path) -> dict:
         patch_lines = st.get("final_patch_lines")
     if patch_lines is None and patch.exists():
         try:
-            patch_lines = sum(1 for _ in patch.open(errors="replace"))
+            patch_lines = sum(1 for _ in patch.open(encoding="utf-8", errors="replace"))
         except OSError:
             patch_lines = None
 

@@ -68,7 +68,7 @@ def load_state(tdir: Path) -> dict:
                         "first.".format(p)})
         sys.exit(1)
     try:
-        st = json.loads(p.read_text())
+        st = json.loads(p.read_text(encoding="utf-8"))
     except (ValueError, OSError) as e:
         emit({"id": tdir.name, "status": "state_corrupt",
               "reason": "{} is not readable task state ({}). It may be a crash mid-write; "
@@ -88,7 +88,7 @@ def save_state(tdir: Path, st: dict) -> None:
     JSON -- and every later subcommand on that task then fails on it."""
     p = state_path(tdir)
     tmp = p.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(st, indent=2))
+    tmp.write_text(json.dumps(st, indent=2), encoding="utf-8")
     os.replace(str(tmp), str(p))
 
 
@@ -121,7 +121,7 @@ def do_round(st: dict, tdir: Path, prompt: str, args, kind: str,
     n = len(st["rounds"]) + 1
     rdir = tdir / "round-{}".format(n)
     rdir.mkdir(parents=True, exist_ok=True)
-    (rdir / "prompt.txt").write_text(prompt)
+    (rdir / "prompt.txt").write_text(prompt, encoding="utf-8")
 
     cmd = core.muse_cmd(
         st["model"], st.get("effort", core.DEFAULT_EFFORT), wt,
@@ -153,7 +153,7 @@ def do_round(st: dict, tdir: Path, prompt: str, args, kind: str,
         parsed = core.parse_answers(res["text"])
         if isinstance(parsed, dict):
             result = parsed
-            (rdir / "result.json").write_text(json.dumps(parsed, indent=2))
+            (rdir / "result.json").write_text(json.dumps(parsed, indent=2), encoding="utf-8")
     if result is None and res["text"]:
         rnd["text"] = res["text"][:2000]
 
@@ -217,7 +217,7 @@ def cmd_run(args) -> int:
     prior, unreadable = None, False
     if state_path(tdir).exists():
         try:
-            prior = json.loads(state_path(tdir).read_text())
+            prior = json.loads(state_path(tdir).read_text(encoding="utf-8"))
         except (ValueError, OSError):
             unreadable = True
         if prior is not None and not isinstance(prior, dict):
@@ -413,7 +413,7 @@ def cmd_revise(args) -> int:
         st["effort"] = args.effort
     feedback = args.feedback
     if args.feedback_file:
-        feedback = Path(args.feedback_file).read_text()
+        feedback = Path(args.feedback_file).read_text(encoding="utf-8")
     # Pass the worktree: a session bound to a different workspace is not resumable, and
     # muse fails the whole run rather than starting fresh if you try.
     resumed = core.session_exists(st.get("session_id") or "", workspace=st["worktree"])
@@ -557,7 +557,7 @@ def cmd_finish(args) -> int:
     }
     if h.get("harvest_error"):
         out["harvest_error"] = h["harvest_error"]
-    (tdir / "task.json").write_text(json.dumps(out, indent=2))
+    (tdir / "task.json").write_text(json.dumps(out, indent=2), encoding="utf-8")
 
     if args.cleanup:
         core.drop_worktree(Path(st["repo"]), Path(st["worktree"]), st["branch"])

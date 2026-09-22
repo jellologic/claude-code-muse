@@ -129,7 +129,7 @@ def check_interactive_pin(out):
     settings = Path(os.path.expanduser(
         os.environ.get("MUSE_CONFIG_DIR", "~/.config/muse"))) / "settings.json"
     try:
-        pinned = json.loads(settings.read_text()).get("model")
+        pinned = json.loads(settings.read_text(encoding="utf-8")).get("model")
     except (OSError, ValueError):
         out.append(("OK", "interactive pin", "unset (interactive muse follows the catalog)", ""))
         return

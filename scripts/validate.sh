@@ -11,6 +11,14 @@ set -uo pipefail
 # translation and reaches python as an unresolvable literal. Normalise once, here, so
 # every consumer downstream is handed something both shells understand. cygpath -m gives
 # "D:/a/repo": native, with forward slashes, so it stays safe to embed either side.
+# Windows Python defaults to cp1252 for text I/O, and this repo's own files contain
+# UTF-8 (em dashes, box drawing, arrows) -- so every embedded `open(...).read()` below
+# would raise UnicodeDecodeError there. PYTHONUTF8=1 puts the interpreter in UTF-8 mode
+# for the whole suite, which is one line instead of an encoding= on 23 call sites. The
+# SHIPPED scripts do not rely on this: they pass encoding= explicitly, because a user
+# runs those directly and will not have this variable set.
+export PYTHONUTF8=1
+
 native_path() {
   if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi
 }
@@ -145,7 +153,7 @@ fi
 
 # ------------------------------------------------------- 2. pure functions
 head_ "2. Unit tests — parse_answers / resolve_model"
-python3 - <<'PY'
+python3 - "$LAB" <<'PY'
 import importlib.util, os, sys, pathlib
 # These live in muse_core now. Load THAT module, not muse_fleet: muse_fleet only holds
 # re-exported copies, and rebinding a copied constant there does not change what
@@ -167,27 +175,27 @@ chk("parse: no json -> None",      pa('nothing')is None)
 chk("parse: empty -> None",        pa('')is None)
 chk("parse: nested objects",       pa('{"a":{"b":[1,2]}}')=={"a":{"b":[1,2]}})
 
-d=pathlib.Path("/tmp/vcat"); d.mkdir(exist_ok=True)
+d=pathlib.Path(sys.argv[1])/"vcat"; d.mkdir(parents=True, exist_ok=True)
 (d/"c.json").write_text('{"rows":[{"model_id":"muse-spark-1.3-contributor","release_date":"2026-09-02","is_default":true,"visibility":"visible"},{"model_id":"muse-spark-9.0-contributor","release_date":"2029-01-01","is_default":false,"visibility":"visible"},{"model_id":"muse-spark-9.0","release_date":"2029-01-01","visibility":"visible"},{"model_id":"muse-spark-9.9-contributor","release_date":"2030-01-01","visibility":"hidden"}]}')
-mf.CATALOG_GLOB="/tmp/vcat/*.json"
+mf.CATALOG_GLOB=str(d/"*.json")
 m,_=mf.resolve_model(mf.LATEST)
 chk("model: picks newest contributor over is_default", m=="muse-spark-9.0-contributor")
 chk("model: skips non-contributor",  m.endswith("-contributor"))
 chk("model: skips hidden",           m!="muse-spark-9.9-contributor")
 chk("model: explicit passes through", mf.resolve_model("foo")[0]=="foo")
-mf.CATALOG_GLOB="/tmp/nope/*.json"
+mf.CATALOG_GLOB=str(pathlib.Path(sys.argv[1])/"nope"/"*.json")
 chk("model: fallback when no catalog", mf.resolve_model(mf.LATEST)[0]==mf.FALLBACK_MODEL)
 (d/"bad.json").write_text("{broken")
-mf.CATALOG_GLOB="/tmp/vcat/bad.json"
+mf.CATALOG_GLOB=str(d/"bad.json")
 mid,how=mf.resolve_model(mf.LATEST)
 chk("model: survives corrupt catalog", mid==mf.FALLBACK_MODEL and how.startswith("fallback"))
 
 # Self-test of the seam these tests depend on. FALLBACK_MODEL currently equals what the
 # real catalog returns, so an override that silently stopped working would leave every
 # assertion above passing on live data. Steering the glob must change the answer.
-mf.CATALOG_GLOB="/tmp/vcat/c.json"
+mf.CATALOG_GLOB=str(d/"c.json")
 a=mf.resolve_model(mf.LATEST)[0]
-mf.CATALOG_GLOB="/tmp/nope/*.json"
+mf.CATALOG_GLOB=str(pathlib.Path(sys.argv[1])/"nope"/"*.json")
 b=mf.resolve_model(mf.LATEST)[0]
 chk("CATALOG_GLOB is a live seam (overrides still steer resolution)", a!=b)
 sys.exit(1 if fails else 0)
@@ -279,8 +287,9 @@ python3 - <<'PY' && ok "muse_cmd carries --session-id only when given one" || ba
 import importlib.util, os, sys, pathlib
 spec = importlib.util.spec_from_file_location("mc", os.path.join(os.environ["PLUGIN_ROOT"], "scripts/muse_core.py"))
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
-with_id = m.muse_cmd("mdl", "low", pathlib.Path("/tmp/wt"), session_id="abc-123")
-without  = m.muse_cmd("mdl", "low", pathlib.Path("/tmp/wt"))
+wt = pathlib.Path(os.environ["PLUGIN_ROOT"]) / "not-a-real-worktree"
+with_id = m.muse_cmd("mdl", "low", wt, session_id="abc-123")
+without  = m.muse_cmd("mdl", "low", wt)
 ok1 = "--session-id" in with_id and with_id[with_id.index("--session-id") + 1] == "abc-123"
 ok2 = "--session-id" not in without
 # A generated id must be a real uuid, not a placeholder that collides across tasks.
@@ -515,8 +524,14 @@ git -C "$SC" branch --format='%(refname:short)' | grep -q '^fleet/s/c$' \
 # symlinks before the suite writes them. LAB is already a mktemp dir; everything scratch
 # belongs under it. The pattern is assembled at runtime so this guard does not match its
 # own source line -- the first version of it did exactly that and failed on a clean tree.
-TMPPAT="$(printf '/tmp/%s' 'v_')"
-TMPLEAK=$(grep -n "$TMPPAT" "$SKILL/scripts/validate.sh" || true)
+# Matches any fixed scratch path, not just the v_ prefix the first version looked for --
+# a "vcat" directory slipped past it and only surfaced on Windows, where native python
+# read the MSYS path as a backslash literal. The pattern is assembled at runtime and this
+# comment names no literal path, because BOTH earlier versions of this guard matched
+# their own source. The trailing character class also means the TMPDIR fallback below,
+# which ends in a brace, is not a hit.
+TMPPAT="$(printf '/tmp/%s' '[A-Za-z0-9]')"
+TMPLEAK=$(grep -nE "$TMPPAT" "$SKILL/scripts/validate.sh" || true)
 [ -z "$TMPLEAK" ] \
   && ok "the suite writes no fixed scratch path (all of it is under \$LAB)" \
   || bad "a fixed scratch path crept back in" "$TMPLEAK"

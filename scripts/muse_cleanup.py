@@ -75,7 +75,7 @@ def artifact_index(root: Path):
         st, task = None, None
         for name, target in (("state.json", "st"), ("task.json", "task")):
             try:
-                val = json.loads((d / name).read_text())
+                val = json.loads((d / name).read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 val = None
             if target == "st":

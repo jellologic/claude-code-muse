@@ -146,7 +146,7 @@ def run_task(task: dict, repo: Path, out: Path, args) -> dict:
         if not isinstance(parsed, dict):
             parsed = None
         if parsed is not None:
-            (tdir / "result.json").write_text(json.dumps(parsed, indent=2))
+            (tdir / "result.json").write_text(json.dumps(parsed, indent=2), encoding="utf-8")
             rec["summary"] = parsed.get("summary")
             rec["files_changed"] = parsed.get("files_changed", [])
             rec["confidence"] = parsed.get("confidence")
@@ -183,7 +183,7 @@ def run_task(task: dict, repo: Path, out: Path, args) -> dict:
         "final_files_changed": rec.get("files_changed") or [],
         "unsupervised": True,
     }
-    (tdir / "state.json").write_text(json.dumps(state, indent=2))
+    (tdir / "state.json").write_text(json.dumps(state, indent=2), encoding="utf-8")
     (tdir / "task.json").write_text(json.dumps({
         "id": tid, "verdict": None, "summary": rec.get("summary"), "concerns": [],
         "patch": str(tdir / "patch.diff"), "patch_lines": rec.get("patch_lines", 0),
@@ -191,7 +191,7 @@ def run_task(task: dict, repo: Path, out: Path, args) -> dict:
         "rounds_used": 1, "worktree": str(wt), "branch": branch,
         "verified_by_supervisor": False, "verifications": [],
         "unsupervised": True,
-    }, indent=2))
+    }, indent=2), encoding="utf-8")
 
     if args.cleanup:
         drop_worktree(repo, wt, branch)
@@ -261,7 +261,7 @@ def main() -> int:
         args.worktree_root = str(repo.parent / f".muse-fleet-wt-{repo.name}")
     Path(args.worktree_root).mkdir(parents=True, exist_ok=True)
 
-    tasks = json.loads(Path(args.tasks).read_text())
+    tasks = json.loads(Path(args.tasks).read_text(encoding="utf-8"))
     if not isinstance(tasks, list) or not tasks:
         sys.exit("--tasks must be a non-empty JSON list")
     # Each id becomes a worktree directory and a git branch component; a path separator
@@ -333,7 +333,7 @@ def main() -> int:
         "out_dir": str(out), "worktree_root": args.worktree_root,
         "tasks": results,
     }
-    (out / "report.json").write_text(json.dumps(report, indent=2))
+    (out / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
 
     lines = [
         f"# muse-fleet report — {ok}/{len(results)} completed"
@@ -370,7 +370,7 @@ def main() -> int:
                   for r in failed]
     lines += ["", "## Apply a patch", "",
               "```bash", f"git apply --3way {out}/<id>/patch.diff", "```", ""]
-    (out / "report.md").write_text("\n".join(lines))
+    (out / "report.md").write_text("\n".join(lines), encoding="utf-8")
 
     print(f"\nfleet: {ok}/{len(results)} completed in {wall}s "
           f"(serial would be ~{serial}s)", file=sys.stderr)
