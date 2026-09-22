@@ -23,6 +23,19 @@ native_path() {
   if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi
 }
 
+# A stub `muse` that BOTH shells can find. shutil.which() on Windows honours PATHEXT, so
+# a bare shell script named "muse" is invisible to native python no matter how executable
+# bash thinks it is -- which made every preflight-dependent check fail there for a reason
+# that had nothing to do with the code under test.
+make_muse_stub() {  # make_muse_stub <dir>
+  mkdir -p "$1"
+  printf '#!/bin/sh\nexit 0\n' > "$1/muse"
+  chmod +x "$1/muse"
+  if command -v cygpath >/dev/null 2>&1; then
+    printf '@echo off\r\nexit /b 0\r\n' > "$1/muse.cmd"
+  fi
+}
+
 SKILL="$(native_path "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)")"
 export PLUGIN_ROOT="$SKILL"
 SKILL_MD="$SKILL/skills/muse-fleet/SKILL.md"
@@ -327,9 +340,7 @@ head_ "3. Preflight guardrails (no muse spawned)"
 # section spawns nothing, so a stub that satisfies the which() lookup is enough to reach
 # the guards. If muse is genuinely installed, nothing here changes.
 if ! command -v muse >/dev/null 2>&1; then
-  mkdir -p "$LAB/stub-bin"
-  printf '#!/bin/sh\nexit 0\n' > "$LAB/stub-bin/muse"
-  chmod +x "$LAB/stub-bin/muse"
+  make_muse_stub "$LAB/stub-bin"
   PATH="$LAB/stub-bin:$PATH"
   export PATH
   printf '  \033[33mNOTE\033[0m  muse not installed — using a stub so the repo guards stay testable\n'
@@ -756,8 +767,8 @@ grep -q '"state.json"' "$SKILL/scripts/muse_fleet.py" && grep -q '"task.json"' "
 head_ "3d. Doctor and credential scan"
 # A diagnostic that only works on a healthy machine is not a diagnostic.
 DOC="$SKILL/scripts/muse_doctor.py"
-DLAB="$LAB/v_doctor"; mkdir -p "$DLAB/empty" "$DLAB/stubbin"
-printf '#!/bin/sh\nexit 0\n' > "$DLAB/stubbin/muse"; chmod +x "$DLAB/stubbin/muse"
+DLAB="$LAB/v_doctor"; mkdir -p "$DLAB/empty"
+make_muse_stub "$DLAB/stubbin"
 
 # The doctor is the tool you reach for when things are ALREADY broken, so the property
 # that matters is that it never dies on the way to telling you. It must survive a hostile
