@@ -95,7 +95,7 @@ skills/muse-fleet/SKILL.md     the auto-triggering surface
 references/                    workflow script, CLI surface, routing, field notes
 scripts/                       the drivers — see below
 assets/result-schema.json      structured-output schema for worker self-reports
-evals/evals.json               skill-triggering evals
+evals/evals.json               skill-triggering evals (see note below)
 ```
 
 | Script | Does |
@@ -108,6 +108,17 @@ evals/evals.json               skill-triggering evals
 | `muse_cleanup.py` | reap worktrees, branches, artifacts |
 | `use_latest_contributor.sh` | point interactive muse at the newest contributor model |
 | `validate.sh` | the full suite — static checks, unit tests, live runs, the supervisor loop |
+
+## A note on the evals
+
+`evals/evals.json` holds five skill-triggering cases — the overlap trap, the job with no
+acceptance check, the coherent single change that should not fan out, and trusting a
+worker's self-report. They encode the judgment calls this plugin exists to get right.
+
+They are **not** in the `claude plugin eval` format, which wants `evals/**/case.yaml` or
+`prompt.md` + `graders/*.md`. That runner is early access and was not enabled here, so the
+cases were kept in their original shape rather than converted against a schema that could
+not be run. Convert them when eval access lands.
 
 ## Guardrails
 
