@@ -641,6 +641,37 @@ if problems:
     sys.exit(1)
 PY
 
+# The input_match regex is the part of the converted suite most likely to be silently
+# wrong: a pattern that matches nothing makes every positive case fail, and one that
+# matches too much makes every negative case pass for the wrong reason. It is also the
+# one part testable WITHOUT the eval runner, against the payload shape a real Skill
+# tool_use record carries: {"skill": "plugin:skill-name"}.
+python3 - <<'PY' && ok "the skill matcher accepts real Skill payloads and rejects near misses" || bad "input_match regex"
+import os, pathlib, re, sys
+root = pathlib.Path(os.environ["PLUGIN_ROOT"]) / "evals"
+pats = set()
+for g in root.glob("*/graders/*.md"):
+    m = re.search(r"input_match:\s*'(.+?)'\s*$", g.read_text(encoding="utf-8"), re.M)
+    if m:
+        pats.add(m.group(1))
+if len(pats) != 1:
+    print("        expected one shared matcher, found:", sorted(pats)); sys.exit(1)
+rx = re.compile(pats.pop())
+cases = [
+    ('{"skill": "muse:muse-fleet"}',             True),   # the real plugin-scoped shape
+    ('{"skill":"muse:muse-fleet"}',              True),   # no space after the colon
+    ('{"skill": "muse-fleet"}',                  True),   # unscoped
+    ('{"skill": "other-plugin:muse-fleet"}',     True),   # plugin renamed
+    ('{"skill": "muse-fleet-extra"}',            False),  # shares the prefix
+    ('{"skill": "notmuse-fleet"}',               False),  # shares the suffix
+    ('{"skill": "plugin-dev:plugin-structure"}', False),  # an unrelated real skill
+    ('{"skill": "muse:ask"}',                    False),  # a sibling in this plugin
+]
+wrong = [p for p, want in cases if bool(rx.search(p)) != want]
+if wrong:
+    print("        wrong verdict for:", wrong); sys.exit(1)
+PY
+
 # Numbers in prose rot: README and CONTRIBUTING both claimed "55 checks" long after the
 # suite reached 65, and nothing noticed. The suite prints its own count, so the docs must
 # not restate it. CHANGELOG is exempt -- a released version's count is a historical fact.
