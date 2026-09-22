@@ -98,8 +98,30 @@ def emit(obj: dict) -> None:
     print(json.dumps(obj, indent=2))
 
 
+def artifact_root(args) -> Path:
+    """Where `<out>/<id>/` lives, resolved so it does not move with the cwd.
+
+    An agent's Bash cwd resets between tool calls and the documented `--out` is the
+    relative `.muse-fleet/tasks`, so `Path(out).resolve()` meant `run` from the repo root
+    and `verify` from a subdirectory addressed two different task directories. The second
+    reported `no_such_task`, and the supervisor's natural recovery -- `run --force` --
+    discards the patch the first one had just made.
+
+    A relative `--out` resolves against the repository, which is what it is actually
+    relative to. An absolute one is untouched. Outside a repository there is nothing
+    better than the cwd, which is where this started."""
+    out = Path(args.out)
+    if out.is_absolute():
+        return out.resolve()
+    # On `run` the repository is whatever --repo names; everywhere else the only thing
+    # available is the cwd, and cmd_run refuses the combination where those disagree.
+    anchor = Path(getattr(args, "repo", ".") or ".")
+    top = core.git_toplevel(anchor if anchor.exists() else Path.cwd())
+    return ((top or Path.cwd()) / out).resolve()
+
+
 def task_dir(args) -> Path:
-    return Path(args.out).resolve() / args.id
+    return artifact_root(args) / args.id
 
 
 def harvest_base(st: dict) -> str:
@@ -215,6 +237,22 @@ def do_round(st: dict, tdir: Path, prompt: str, args, kind: str,
 
 def cmd_run(args) -> int:
     repo = Path(args.repo).resolve()
+    # A relative --out is resolved against the repository it belongs to. `run` knows
+    # which one that is; `verify` and `finish` have only the cwd. When those two are
+    # different repositories the later commands cannot find the task, and the failure
+    # looks like a missing task rather than a mis-resolved path -- so refuse here, where
+    # the absolute path to pass is still known.
+    if not Path(args.out).is_absolute():
+        here = core.git_toplevel(Path.cwd())
+        there = core.git_toplevel(repo)
+        if there is not None and (here is None or here.resolve() != there.resolve()):
+            emit({"id": args.id, "status": "refused",
+                  "reason": "--out {!r} is relative and --repo points at a different "
+                            "repository than the current directory, so the later "
+                            "subcommands would resolve it somewhere else and report "
+                            "no_such_task. Pass --out {}."
+                            .format(args.out, (there / args.out).resolve())})
+            return 1
     try:
         core.validate_task_id(args.id)
         head = core.preflight(repo, require_clean=not args.allow_dirty)
@@ -584,16 +622,20 @@ def cmd_show(args) -> int:
     tdir = task_dir(args)
     st = load_state(tdir)
     emit({
-        "id": st["id"], "done": st.get("done", False),
-        "worktree": st["worktree"], "branch": st["branch"], "base": st["base"],
-        "model": st["model"], "effort": st.get("effort"),
-        "rounds_used": len(st["rounds"]), "max_rounds": st["max_rounds"],
+        # .get throughout: this is the inspection command, so it is what a supervisor
+        # reaches for when something has already gone wrong. State written by an older
+        # version, or truncated by a crash, must come back as JSON with holes in it
+        # rather than a KeyError traceback on the stream the supervisor parses.
+        "id": st.get("id", args.id), "done": st.get("done", False),
+        "worktree": st.get("worktree"), "branch": st.get("branch"), "base": st.get("base"),
+        "model": st.get("model"), "effort": st.get("effort"),
+        "rounds_used": len(st.get("rounds") or []), "max_rounds": st.get("max_rounds"),
         "patch": str(tdir / "patch.diff"),
-        "patch_lines": st["rounds"][-1]["patch_lines"] if st["rounds"] else 0,
-        "files_changed": st["rounds"][-1]["files_changed"] if st["rounds"] else [],
+        "patch_lines": (st.get("rounds") or [{}])[-1].get("patch_lines", 0),
+        "files_changed": (st.get("rounds") or [{}])[-1].get("files_changed", []),
         "verifications": st.get("verifications", []),
         "rounds": [{k: r.get(k) for k in ("n", "kind", "status", "elapsed_s", "patch_lines")}
-                   for r in st["rounds"]],
+                   for r in (st.get("rounds") or [])],
     })
     return 0
 

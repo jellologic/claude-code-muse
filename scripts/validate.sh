@@ -161,6 +161,56 @@ PY
       || bad "doctrine drift between the agent and the workflow prompt: $RULE"
   done
 
+  # `const STAMP = args.stamp || 'run'` made every fan-out share one artifact root, so a
+  # second run of the same job -- or two jobs that both planned a task called
+  # tests-parser -- had every supervisor refuse at step one with "task already exists":
+  # the re-run guard firing correctly against a namespace that should never have
+  # collided. Branches and worktrees were stamped; --out was the one part that was not.
+  #
+  # The header is EXECUTED here rather than greped, so a default that creeps back in as
+  # `args.stamp ?? 'run'` or a ternary is caught too.
+  python3 - <<'PY' && ok "every workflow header demands a stamp and puts it in --out" || bad "the workflow artifact root is not namespaced"
+import json, os, pathlib, re, subprocess, sys, tempfile
+t = pathlib.Path(os.path.join(os.environ["PLUGIN_ROOT"], "references/workflow.md")).read_text()
+blocks = [b for b in re.findall(r"```javascript\n(.*?)```", t, re.S) if "const STAMP" in b]
+if not blocks:
+    print("        no javascript block defines STAMP -- this guard is measuring nothing")
+    sys.exit(1)
+
+def run_header(src, argv):
+    lines = src.splitlines()
+    cut = max(i for i, l in enumerate(lines)
+              if re.match(r"const (OUT|STAMP|ROUNDS)\s*=", l))
+    body = ("globalThis.args=" + json.dumps(argv) + ";\n"
+            + "\n".join(lines[:cut + 1])
+            + "\nconsole.log(JSON.stringify({OUT, STAMP}));\n")
+    f = tempfile.NamedTemporaryFile("w", suffix=".mjs", delete=False, encoding="utf-8")
+    f.write(body); f.close()
+    r = subprocess.run([os.environ.get("NODE_BIN", "node"), f.name],
+                       capture_output=True, text=True)
+    os.unlink(f.name)
+    return r
+
+problems = []
+for i, b in enumerate(blocks, 1):
+    ok_run = run_header(b, {"pluginRoot": "/p", "repo": "/r", "stamp": "STAMP1234"})
+    if ok_run.returncode != 0:
+        problems.append("block %d: header failed with a stamp: %s"
+                        % (i, (ok_run.stderr or "").strip().splitlines()[-1][:90]))
+        continue
+    got = json.loads(ok_run.stdout)
+    if "STAMP1234" not in got["OUT"]:
+        problems.append("block %d: --out %r does not carry the stamp, so two runs collide"
+                        % (i, got["OUT"]))
+    no_stamp = run_header(b, {"pluginRoot": "/p", "repo": "/r"})
+    if no_stamp.returncode == 0:
+        problems.append("block %d: a missing stamp silently defaulted to %r instead of throwing"
+                        % (i, json.loads(no_stamp.stdout).get("STAMP")))
+if problems:
+    for p in problems: print("        " + p)
+    sys.exit(1)
+PY
+
   python3 - <<'PY' && ok "workflow meta.phases cover every phase() call" || bad "phase titles drift"
 import re, pathlib, os, sys
 t = pathlib.Path(os.path.join(os.environ["PLUGIN_ROOT"], "references/workflow.md")).read_text()
@@ -547,6 +597,61 @@ if problems:
     for p in problems: print("        " + p)
     sys.exit(1)
 PY
+
+# An agent's Bash cwd resets between tool calls, and the documented --out is relative.
+# Resolving it against the cwd meant `run` from the repo root and `verify` from a
+# subdirectory addressed two different task directories: the second reported
+# no_such_task, and the supervisor's natural recovery -- `run --force` -- discards the
+# patch the first one just made. Two documents disagreed about this and the wrong one
+# was the command a user actually runs.
+CWD="$LAB/v_cwd"; mkrepo "$CWD"
+printf '.muse-fleet/\n' >> "$CWD/.git/info/exclude"
+mkdir -p "$CWD/sub/deeper"
+CWDSHA=$(git -C "$CWD" rev-parse --verify HEAD)
+git -C "$CWD" worktree add -q -b muse/cwd/t1 "$LAB/v_cwd_wt" "$CWDSHA"
+mkdir -p "$CWD/.muse-fleet/tasks/t1"
+python3 - "$CWD" "$LAB/v_cwd_wt" "$CWDSHA" <<'PY'
+import json, sys
+repo, wt, sha = sys.argv[1:4]
+json.dump({"id": "t1", "repo": repo, "worktree": wt, "branch": "muse/cwd/t1",
+           "base": "HEAD", "base_sha": sha, "excludes": [".muse-fleet/"],
+           "model": "muse-spark-1.3-contributor", "effort": "low",
+           "rounds": [{"n": 1, "kind": "initial", "patch_lines": 2,
+                       "files_changed": ["calc.py"]}],
+           "max_rounds": 3, "done": False},
+          open(repo + "/.muse-fleet/tasks/t1/state.json", "w"))
+PY
+SUBOUT=$(cd "$CWD/sub/deeper" && python3 "$TASK" show --id t1 --out .muse-fleet/tasks 2>/dev/null)
+echo "$SUBOUT" | python3 -c "
+import json,sys
+try: d=json.load(sys.stdin)
+except Exception: sys.exit(1)
+sys.exit(0 if d.get('id')=='t1' and d.get('status')!='no_such_task' else 1)" \
+  && ok "a relative --out finds the same task from a subdirectory" \
+  || bad "the artifact root moved with the cwd" "$SUBOUT"
+# The control: an ABSOLUTE --out must still mean exactly what it says, and a genuinely
+# absent task must still report no_such_task rather than being conjured by the anchor.
+ABSOUT=$(cd "$CWD/sub" && python3 "$TASK" show --id t1 --out "$CWD/.muse-fleet/tasks" 2>/dev/null)
+echo "$ABSOUT" | python3 -c "
+import json,sys
+sys.exit(0 if json.load(sys.stdin).get('id')=='t1' else 1)" \
+  && ok "an absolute --out is left alone" || bad "absolute --out was re-anchored" "$ABSOUT"
+MISSOUT=$(cd "$CWD/sub" && python3 "$TASK" show --id nosuch --out .muse-fleet/tasks 2>/dev/null)
+echo "$MISSOUT" | python3 -c "
+import json,sys
+sys.exit(0 if json.load(sys.stdin).get('status')=='no_such_task' else 1)" \
+  && ok "an absent task still reports no_such_task" || bad "the anchor invented a task" "$MISSOUT"
+# And the one case the anchor cannot rescue: --repo naming a different repository than
+# the cwd, where the later subcommands have nothing to resolve against.
+OTHER="$LAB/v_cwd_other"; mkrepo "$OTHER"
+XOUT=$(cd "$CWD" && python3 "$TASK" run --id x --repo "$OTHER" --out .muse-fleet/tasks --prompt noop 2>/dev/null)
+echo "$XOUT" | python3 -c "
+import json,sys
+try: d=json.load(sys.stdin)
+except Exception: sys.exit(1)
+sys.exit(0 if d.get('status')=='refused' and 'relative' in (d.get('reason') or '') else 1)" \
+  && ok "a relative --out against another repo is refused, with the absolute path named" \
+  || bad "a task was created where later subcommands cannot find it" "$XOUT"
 
 # Entropy handles the common case. This is the one it cannot: two runs handed the same
 # explicit --out collide however unique the stamp is.

@@ -55,13 +55,20 @@ export const meta = {
 const PLUGIN = args.pluginRoot
 if (!PLUGIN) throw new Error('args.pluginRoot is required: pass the value of ${CLAUDE_PLUGIN_ROOT}')
 const TASK  = `python3 "${PLUGIN}/scripts/muse_task.py"`
-// Absolute, deliberately. muse_task resolves --out against the CURRENT DIRECTORY, and an
-// agent's Bash cwd resets between tool calls -- so a relative --out lets `run` and
-// `verify` address different task directories and the second one reports "no such task".
-// Pass args.repo as an absolute path.
+// Absolute, deliberately. A relative --out is now resolved against the repository rather
+// than the cwd, which fixes the common case -- but only when every subcommand runs inside
+// that repository, and a workflow's agents make no such promise. Pass args.repo as an
+// absolute path and this question does not arise.
 const REPO  = args.repo || '.'
-const OUT   = args.out  || `${REPO}/.muse-fleet/supervised`
-const STAMP = args.stamp || 'run'   // Date.now() throws in workflow scripts — pass one in.
+// Throw rather than default. `|| 'run'` made every fan-out share one namespace, so a
+// second run of the same job -- or two jobs that both plan a task called tests-parser --
+// had every supervisor refuse at step one with "task already exists". That is the re-run
+// guard firing correctly against a namespace that should never have collided.
+const STAMP = args.stamp
+if (!STAMP) throw new Error('args.stamp is required: Date.now() throws in workflow scripts, so pass one in (`date +%Y%m%d-%H%M%S`)')
+// Stamped, like the branches and the worktrees already were. The artifact root was the
+// one part of the namespace that was not.
+const OUT   = args.out  || `${REPO}/.muse-fleet/supervised/${STAMP}`
 const ROUNDS = args.maxRounds || 3
 
 const PLAN_SCHEMA = {
@@ -318,8 +325,11 @@ workflow you are writing — research, then delegate, then review. The shape is 
 // Resolve them in the turn that calls Workflow: `echo ${CLAUDE_PLUGIN_ROOT}` and `date`.
 const TASK  = `python3 "${args.pluginRoot}/scripts/muse_task.py"`
 const REPO  = args.repo || '.'
-const OUT   = `${REPO}/.muse-fleet/tasks`   // absolute: see the cwd rule below
 const STAMP = args.stamp
+if (!STAMP) throw new Error('args.stamp is required: Date.now() throws in workflow scripts, so pass one in')
+// Absolute AND stamped: absolute for the cwd rule below, stamped so a second run of the
+// same workflow does not collide with the first and get refused task by task.
+const OUT   = `${REPO}/.muse-fleet/supervised/${STAMP}`
 
 const VERDICT = {
   type: 'object',
@@ -359,11 +369,16 @@ Four rules that are not obvious from the API:
 - **Task ids must match `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`.** An id names a worktree
   directory and a git branch, and `run` refuses anything else. If a planning agent
   invents ids, put that pattern in its schema, or every task dies at step one.
-- **Use an absolute `--out`, and pass `repo` absolute.** `muse_task` resolves `--out`
-  against the current directory, and an agent's Bash cwd resets between tool calls — so a
-  relative `--out` lets `run` create `<somewhere>/.muse-fleet/...` and `verify` look in
-  `<elsewhere>/.muse-fleet/...` and report "no such task". Proven: the same `--out` from
-  two directories yields two different task directories.
+- **Use an absolute `--out`, and pass `repo` absolute.** A relative `--out` is resolved
+  against the **repository**, not the cwd, so `run` from the repo root and `verify` from
+  a subdirectory now agree — that was measured to produce two different task directories
+  and a "no such task" on the second call. What that fix does not cover is a workflow
+  whose agents run outside the repository at all, or a `--repo` pointing somewhere other
+  than the cwd, which `run` refuses outright rather than creating a task the later
+  subcommands cannot find. Absolute sidesteps the whole question.
+- **Stamp the artifact root.** Branches and worktrees were stamped and `--out` was not,
+  so a second run of the same job — or two jobs both planning a task called
+  `tests-parser` — had every supervisor refuse at step one with "task already exists".
 - **Reap what you spawn.** Each task leaves a worktree and a branch. A workflow that fans
   out many of them should finish with `muse_cleanup.py --yes` (or `finish --cleanup` per
   task) once the patches are harvested, or the worktree root grows every run.

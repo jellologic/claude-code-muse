@@ -46,8 +46,31 @@ All notable changes to this plugin are documented here. Format follows
   it counted source files and a mid-size repo passed it; it is now 20000 and
   `MUSE_SCAN_MAX_FILES` overrides it.
 
+- **The fleet workflow's artifact root is stamped** (#18). Branches and worktrees carried
+  the run stamp and `--out` did not, and `const STAMP = args.stamp || 'run'` defaulted the
+  stamp to a literal despite the skill insisting a real one be passed. A second run of the
+  same job — or two jobs both planning a task called `tests-parser` — had every supervisor
+  refuse at step one with "task already exists": the re-run guard firing correctly against
+  a namespace that should never have collided. A missing stamp now throws, and the guard
+  *executes* both script headers rather than greping them, so a default creeping back as
+  `?? 'run'` is caught too.
+
 ### Fixed
 
+- **A relative `--out` moved with the current directory** (#17). An agent's Bash cwd
+  resets between tool calls, `commands/delegate.md` prescribed the relative
+  `.muse-fleet/tasks`, and `references/workflow.md` said the opposite and called it
+  *"Proven: the same `--out` from two directories yields two different task
+  directories."* The wrong document was the command a user actually runs. `run` from the
+  repo root and `verify` from a subdirectory addressed two task directories; the second
+  reported `no_such_task`, and the supervisor's natural recovery — `run --force` —
+  discards the patch the first one just made. A relative `--out` now resolves against the
+  repository, which is what it is relative to, and `run` refuses a relative `--out`
+  against a `--repo` elsewhere rather than creating a task the later subcommands cannot
+  find. The three documents now agree.
+- **`show` raised `KeyError` on partial state.** It is the command a supervisor reaches
+  for when something has already gone wrong, and state written by an older version or
+  truncated by a crash produced a traceback on the stream the supervisor parses.
 - **`session_exists` failed OPEN on an unknown session schema** (#16). `if recorded and
   ...` read "cannot tell which workspace" as "no constraint", so a view directory that
   survived a muse schema change with `workspaceRoot` renamed came back resumable. Muse
@@ -78,7 +101,10 @@ All notable changes to this plugin are documented here. Format follows
   check at 3s and found five `sleep 600` processes still alive afterwards, writing into a
   worktree `finish --cleanup` was about to force-remove. It now uses `Popen` +
   `kill_process_tree`, matching `run_muse`. The timeout path had no test at all; it has
-  three now, including a control proving the survivor fixture really spawns one.
+  three now, including a control proving the survivor fixture really spawns one. On
+  Windows, where there are no process groups to signal, the kill now goes through
+  `taskkill /F /T` instead of degrading to the direct child — the CI leg caught that the
+  first fix was POSIX-only.
 - **A second `finish` replaced the first verdict silently** (#12). `cmd_revise` refuses a
   finished task and this had no equivalent guard, so a second call overwrote the verdict,
   summary and concerns and re-harvested on top. With `--commit` it also used to erase the

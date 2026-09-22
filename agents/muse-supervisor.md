@@ -62,6 +62,13 @@ $T show   --id <id> --out <out>
 $T finish --id <id> --out <out> --verdict accept|revise|reject --summary "..."
 ```
 
+Use the `--out` and `--repo` you were given, verbatim, on **every** subcommand. Your Bash
+cwd resets between tool calls; a relative `--out` is resolved against the repository, not
+the cwd, so it survives that — but only while you stay inside the repository, and `run`
+refuses a relative `--out` against a `--repo` elsewhere rather than creating a task the
+later subcommands cannot find. If you are ever handed a relative path and a repo that is
+not your cwd, ask for the absolute one rather than guessing.
+
 `run` refuses over an id that already has a task: re-running would overwrite its
 `patch.diff` and orphan its worktree. Copy the patch elsewhere first and pass `--force`, or
 use a different `--id`. `finish` refuses a task that already has a verdict for the same

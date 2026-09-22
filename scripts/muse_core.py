@@ -316,6 +316,17 @@ def validate_task_id(task_id: str) -> str:
     return task_id
 
 
+def git_toplevel(start: Path):
+    """The repository root containing `start`, or None if there is not one."""
+    try:
+        r = subprocess.run(["git", "-C", str(start), "rev-parse", "--show-toplevel"],
+                           capture_output=True, text=True)
+    except OSError:
+        return None
+    top = (r.stdout or "").strip()
+    return Path(top) if r.returncode == 0 and top else None
+
+
 def session_workspace(session_id: str):
     """The workspace root a session is bound to, or None if it cannot be determined.
 
@@ -547,9 +558,9 @@ def kill_process_tree(p) -> None:
 
     p.kill() signals only the direct child. Anything it started -- npm, pytest, a build
     -- survives, keeps writing into the worktree and keeps costing money after the
-    timeout has been declared. Where process groups exist we kill the whole group; where
-    they do not (Windows) we fall back to the direct child, which is weaker but is what
-    the platform offers.
+    timeout has been declared. Where process groups exist we signal the whole group; on
+    Windows, which has none, `taskkill /T` walks the parent-child table instead. Only if
+    both are unavailable does this degrade to the direct child.
     """
     killed_group = False
     if HAVE_PROCESS_GROUPS:
@@ -557,6 +568,17 @@ def kill_process_tree(p) -> None:
             os.killpg(os.getpgid(p.pid), signal.SIGKILL)
             killed_group = True
         except (ProcessLookupError, PermissionError, OSError):
+            pass
+    elif os.name == "nt":
+        # `taskkill /T` has to run while the parent is still alive: it finds children by
+        # walking parent ids, so killing the shell first orphans them beyond its reach.
+        # This is the difference between a hung build dying with its timeout and one that
+        # keeps writing into a worktree `finish --cleanup` is about to force-remove.
+        try:
+            killed_group = subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(p.pid)],
+                capture_output=True, text=True).returncode == 0
+        except OSError:
             pass
     if not killed_group:
         try:

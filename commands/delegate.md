@@ -73,11 +73,15 @@ Never symlink something the worker might install into.
 Launch the `muse-supervisor` agent with one task. Give it the literal plugin root — it
 cannot expand `${CLAUDE_PLUGIN_ROOT}` from your message, so paste the value you echoed.
 
-The brief you hand the agent must contain: the task id, the artifact root
-(`.muse-fleet/tasks` unless the user asked otherwise), the repo path, the prompt, the
-acceptance check, the effort, any `--seed`/`--link` flags, and the round cap (3 unless told
-otherwise). Tell it to return a verdict, the check it ran with its exit code, the patch path,
-and any residual concerns — and that it must not apply the patch.
+The brief you hand the agent must contain: the task id, the artifact root, the repo path,
+the prompt, the acceptance check, the effort, any `--seed`/`--link` flags, and the round
+cap (3 unless told otherwise). Tell it to return a verdict, the check it ran with its exit
+code, the patch path, and any residual concerns — and that it must not apply the patch.
+
+Give both paths **absolute**. `run` resolves a relative `--out` against the repository, so
+`.muse-fleet/tasks` is stable across the agent's Bash cwd resets — but only while every
+call happens inside that repository, and an absolute path does not depend on knowing that.
+`echo "$PWD"` once and paste the value.
 
 For several independent tasks, spawn one supervisor per task in a single message so they run
 concurrently, and confirm first that no two tasks touch the same file. Two workers editing
