@@ -89,10 +89,13 @@ concern per PR — a rename and a behaviour change are two PRs. Comments explain
 something would break*, not what the line does.
 
 **Referencing issues:** write `Closes #N` only when the change genuinely finishes the
-issue. Otherwise write `Refs #N` — and keep the words *close/closes/fixes/resolves* away
-from the issue number entirely, including in negative sentences. A commit here that said
-"Does NOT close #3" closed #3: GitHub's parser matched `close #3` and ignored the
-negation.
+issue. Otherwise write `Refs #N`.
+
+Keep the words *close/closes/fixes/resolves* away from an issue number **entirely** —
+GitHub's parser matches the keyword and ignores surrounding grammar. A commit here that
+said "does NOT close" followed by an issue number closed that issue. The follow-up commit
+documenting the trap quoted itself, and closed the same issue a second time. If you need
+to write about this, spell the number in words or refer to "the issue" instead.
 
 If you are unsure whether something is a bug, **file an issue rather than a PR**, and
 include the exact command, its output, your OS, `python3 --version`, and
