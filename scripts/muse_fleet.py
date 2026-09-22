@@ -46,6 +46,7 @@ import concurrent.futures as cf
 import datetime as dt
 import importlib.util
 import json
+import secrets
 import sys
 import time
 from pathlib import Path
@@ -106,6 +107,17 @@ def run_task(task: dict, repo: Path, out: Path, args) -> dict:
     # Fresh worktree. Pre-creating it (rather than letting muse generate one under
     # .muse/) gives a deterministic path and branch we can harvest without having to
     # parse them back out of the event stream.
+    #
+    # Refuse rather than force-remove if something is already there. With a unique run
+    # stamp this should be impossible, so reaching it means two runs are sharing a
+    # namespace -- almost certainly the same explicit --out -- and the existing tree is
+    # another run's live work.
+    if wt.exists() and any(wt.iterdir()):
+        rec["status"] = "setup_failed"
+        rec["reason"] = ("worktree {} already exists and is not empty. Another fleet is "
+                         "probably using this --out; removing it would destroy that run's "
+                         "in-flight work.".format(wt))
+        return rec
     drop_worktree(repo, wt, branch)
     try:
         git(repo, "worktree", "add", "-q", "-b", branch, str(wt), base)
@@ -236,7 +248,13 @@ def main() -> int:
     except core.PreflightError as e:
         sys.exit(str(e))
 
-    stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+    # A 1-second stamp is not a unique namespace. Two fleets started in the same second
+    # computed identical branch names AND identical worktree paths, and run_task opens
+    # with drop_worktree -- so the second run force-removed the first's LIVE worktrees,
+    # destroying in-flight work silently. Add entropy; the stamp stays human-readable
+    # and still sorts chronologically.
+    stamp = "{}-{}".format(dt.datetime.now().strftime("%Y%m%d-%H%M%S"),
+                           secrets.token_hex(2))
     out = Path(args.out).resolve() if args.out else repo / ".muse-fleet" / stamp
     out.mkdir(parents=True, exist_ok=True)
     if args.worktree_root is None:

@@ -363,6 +363,52 @@ echo "$out" | grep -q 'muse-spark-9.9-contributor' \
   && ok "resolves the newest CONTRIBUTOR model through the subprocess path" \
   || bad "default model resolution" "$out"
 
+# A 1-second stamp is not a unique namespace: two fleets started in the same second
+# computed identical branches AND worktree paths, and run_task opens with drop_worktree,
+# so the second silently force-removed the first's live worktrees.
+python3 - <<'PY' && ok "fleet run stamps are unique within the same second" || bad "stamp collision still possible"
+import importlib.util, os, re, sys
+src = open(os.path.join(os.environ["PLUGIN_ROOT"], "scripts/muse_fleet.py")).read()
+# The stamp must carry entropy, not just a second-resolution clock.
+if "secrets.token_hex" not in src:
+    print("        stamp has no entropy source"); sys.exit(1)
+import datetime as dt, secrets
+mk = lambda: "{}-{}".format(dt.datetime.now().strftime("%Y%m%d-%H%M%S"), secrets.token_hex(2))
+s = [mk() for _ in range(50)]
+if len(set(s)) != len(s):
+    print("        collided in 50 draws"); sys.exit(1)
+# and must still sort chronologically on its time prefix
+if [x[:15] for x in s] != sorted(x[:15] for x in s):
+    print("        no longer chronological"); sys.exit(1)
+PY
+
+# Entropy handles the common case. This is the one it cannot: two runs handed the same
+# explicit --out collide however unique the stamp is.
+COL="$LAB/v_collide"; mkrepo "$COL"
+printf '.muse-fleet/\n' >> "$COL/.git/info/exclude"
+COLWT="$LAB/v_collide_wt"; mkdir -p "$COLWT"
+# A REAL registered worktree, standing in for another run's live one. A plain directory
+# does not reproduce the hazard: drop_worktree only removes worktrees git knows about, so
+# the first version of this fixture survived even with the guard disabled, and git's own
+# "already exists" error matched the assertion by coincidence.
+git -C "$COL" worktree add -q -b "fleet/OTHERRUN/t1" "$COLWT/RUNX-t1" HEAD
+echo "another run's in-flight work" > "$COLWT/RUNX-t1/PRECIOUS.txt"
+cat > "$LAB/v_collide_tasks.json" <<'JSON'
+[{"id":"t1","prompt":"noop"}]
+JSON
+python3 "$FLEET" --tasks "$LAB/v_collide_tasks.json" --repo "$COL" \
+  --out "$LAB/v_collide/RUNX" --worktree-root "$COLWT" --allow-dirty >/dev/null 2>&1
+[ -f "$COLWT/RUNX-t1/PRECIOUS.txt" ] \
+  && ok "the fleet refuses a worktree another run is using instead of deleting it" \
+  || bad "the fleet destroyed another run's live worktree"
+python3 -c "
+import json,sys
+d=json.load(open('$LAB/v_collide/RUNX/report.json'))
+t=d['tasks'][0]
+sys.exit(0 if t['status']=='setup_failed' and 'already exists' in (t.get('reason') or '') else 1)
+" 2>/dev/null && ok "the collision is reported as setup_failed, not silently skipped" \
+  || bad "collision not reported in the fleet report"
+
 # ------------------------------------------- 3b. status + cleanup (no muse spawned)
 head_ "3b. Status and cleanup"
 
