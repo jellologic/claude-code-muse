@@ -17,6 +17,7 @@ CLI did", which is exactly the class of bug nobody debugs quickly.
 from __future__ import annotations
 
 import glob
+import hashlib
 import json
 import os
 import re
@@ -554,23 +555,55 @@ def run_muse(cmd, prompt: str, repo: Path, events: Path, stderr: Path, timeout: 
     return out
 
 
-def worktree_tree_hash(wt: Path):
-    """A content hash of everything in the worktree, or None if it cannot be taken.
+def _diff_spec(excludes):
+    """The pathspec harvest diffs through. Shared so a fingerprint measures exactly the
+    bytes that end up in patch.diff and not one byte more."""
+    return ["--"] + [":(exclude,glob){}".format(p) for p in excludes] \
+                  + [":(exclude,glob)**/{}".format(p) for p in excludes]
 
-    This is what binds a verification to the thing it verified. `git write-tree` over a
-    fully staged index is exact, cheap, and ignores mtimes -- two trees with identical
-    content hash identically. Without it, `verify` certifies a moment and `finish`
-    reports a different one, with nothing comparing the two."""
+
+def stage_all(wt: Path, spec):
+    """Stage the whole worktree. Returns None on success, or an error string.
+
+    `git add -A -- :(exclude,glob)X` exits 1 when a path git ALREADY ignores matches one
+    of those excludes, and DEFAULT_EXCLUDES is a list of precisely the things a real repo
+    gitignores -- __pycache__, node_modules, .venv, dist, build. So on any repo with a
+    .gitignore, the first time a worker generated a __pycache__, every harvest from that
+    point on reported "git add failed" and patch.diff stopped being updated. It never
+    showed up here because the suite's fixture repos have no .gitignore.
+
+    Retrying without the pathspec is correct, not a workaround: git skips ignored files
+    on its own, and the diff applies the same excludes afterwards. The pathspec on the
+    first attempt is only there to avoid staging a huge unignored node_modules, and that
+    case is exactly the one that does not hit this error."""
+    add = subprocess.run(["git", "-C", str(wt), "add", "-A", *spec],
+                         capture_output=True, text=True)
+    if add.returncode == 0:
+        return None
+    retry = subprocess.run(["git", "-C", str(wt), "add", "-A"],
+                           capture_output=True, text=True)
+    if retry.returncode == 0:
+        return None
+    return (add.stderr or retry.stderr).strip()[:300] or "git add exited {}".format(add.returncode)
+
+
+def patch_fingerprint(wt: Path, base: str, excludes):
+    """A hash of the patch this worktree currently produces, or None if it cannot be taken.
+
+    This is what binds a verification to the thing it verified, and it deliberately
+    fingerprints the PATCH rather than the worktree. A tree hash would move whenever an
+    acceptance check dropped a `__pycache__` or a `.pytest_cache` -- churn that never
+    reaches patch.diff -- and every such run would come back refused. The deliverable is
+    the diff; certify the diff."""
     try:
-        add = subprocess.run(["git", "-C", str(wt), "add", "-A"],
-                             capture_output=True, text=True)
-        if add.returncode != 0:
+        spec = _diff_spec(excludes)
+        if stage_all(wt, spec) is not None:
             return None
-        wr = subprocess.run(["git", "-C", str(wt), "write-tree"],
-                            capture_output=True, text=True)
-        if wr.returncode != 0:
+        diff = subprocess.run(["git", "-C", str(wt), "diff", "--cached", base, *spec],
+                              capture_output=True, text=True)
+        if diff.returncode != 0:
             return None
-        return wr.stdout.strip() or None
+        return hashlib.sha256(diff.stdout.encode("utf-8", "replace")).hexdigest()
     except OSError:
         return None
 
@@ -581,8 +614,7 @@ def harvest(wt: Path, base: str, excludes, patch_path: Path):
     Staging first is essential: muse leaves the worktree dirty and never commits, and a
     plain `git diff` silently omits newly created files -- a whole new test suite can
     read as "no changes"."""
-    spec = ["--"] + [":(exclude,glob){}".format(p) for p in excludes] \
-                  + [":(exclude,glob)**/{}".format(p) for p in excludes]
+    spec = _diff_spec(excludes)
     rec = {"patch_lines": 0, "files_changed": [], "harvest_error": None}
     try:
         # git's exit status matters here, and ignoring it is silent data loss: a missing
@@ -590,10 +622,9 @@ def harvest(wt: Path, base: str, excludes, patch_path: Path):
         # stdout, which would overwrite a good patch.diff with an empty file and report
         # a clean zero-line result. The supervisor then reads a failure as "the worker
         # decided nothing needed doing".
-        add = subprocess.run(["git", "-C", str(wt), "add", "-A", *spec],
-                             capture_output=True, text=True)
-        if add.returncode != 0:
-            rec["harvest_error"] = "git add failed: {}".format(add.stderr.strip()[:300])
+        staging_error = stage_all(wt, spec)
+        if staging_error is not None:
+            rec["harvest_error"] = "git add failed: {}".format(staging_error)
             return rec
         diff = subprocess.run(["git", "-C", str(wt), "diff", "--cached", base, *spec],
                               capture_output=True, text=True)

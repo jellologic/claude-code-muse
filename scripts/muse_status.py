@@ -96,6 +96,12 @@ def summarise(tdir: Path) -> dict:
         "verified": (final_passed and (task or {}).get("verified_by_supervisor") is not False)
                     if verifs else bool((task or {}).get("verified_by_supervisor")),
         "accepted_unverified": (task or {}).get("accepted_unverified"),
+        # The harvested patch is not what muse left. Attribution, not accusation -- a
+        # build step in an acceptance check is a legitimate cause, and `mutating_checks`
+        # names the ones that are.
+        "out_of_band_edit": bool((task or {}).get("out_of_band_edit")
+                                 or st.get("out_of_band_edit")),
+        "mutating_checks": (task or {}).get("mutating_checks") or [],
         "checks_run": len(verifs),
         "last_check": (last or {}).get("command"),
         "last_exit": (last or {}).get("exit_code"),
@@ -133,6 +139,11 @@ def flags(r: dict) -> list:
         out.append("out of rounds, no verdict")
     if r["last_exit"] not in (None, 0):
         out.append("last check exited {}".format(r["last_exit"]))
+    if r.get("out_of_band_edit"):
+        out.append("the harvested patch is not what muse produced — {} wrote into the "
+                   "worktree afterwards".format(
+                       "the acceptance check ({})".format("; ".join(r["mutating_checks"]))
+                       if r.get("mutating_checks") else "something else"))
     if r["concerns"]:
         out.append("{} residual concern(s)".format(len(r["concerns"])))
     if r.get("revisions_without_context"):

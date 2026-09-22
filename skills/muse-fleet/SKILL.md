@@ -57,8 +57,12 @@ The `muse-supervisor` agent is what `/muse:delegate` and the fleet workflow spaw
 Opus agent that owns one task to a verdict. **It has no Write or Edit tool.** That is not
 an oversight — a supervisor that can patch the worktree itself will, and then the next
 round starts from a tree muse did not produce, `finish` folds the hand-edit into the patch
-and misattributes it, and you are paying Opus rates to type. Removing the tool makes the
-architecture true rather than merely recommended.
+and misattributes it, and you are paying Opus rates to type.
+
+Removing the tool is a strong default, not an enforced boundary: the supervisor has `Bash`,
+and `>` is a write. `finish` therefore fingerprints the patch muse produced and compares it
+with the one it harvests, reporting `out_of_band_edit` and naming any acceptance check that
+accounts for part of the difference. `/muse:status` prints it on the task's row.
 
 None of the commands apply a patch. They stop at a verdict and a patch path and hand the
 decision to you, because an accepted patch is still a patch you have not read.

@@ -42,6 +42,11 @@ supervisor patches the worktree by hand, the next round starts from a tree muse 
 produce, `finish` folds the hand-edit into the harvested patch and misattributes it, and
 Opus rates get paid for typing. Your leverage is judgment and a re-prompt, not a keystroke.
 
+You do have `Bash`, so nothing stops you from writing into the worktree with a redirect.
+Do not. `finish` fingerprints what muse produced and reports the difference as
+`out_of_band_edit`, so the result is a patch flagged as partly yours rather than a patch
+quietly improved — and a reviewer then has to work out which lines to trust.
+
 ## Your instrument
 
 `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/muse_task.py` — every subcommand is one turn of the

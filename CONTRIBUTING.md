@@ -80,8 +80,9 @@ never `~/`, never a path relative to the working directory. CI fails the build o
 `Bash, Read, Grep, Glob`, and that is load-bearing rather than incidental. A supervisor that
 can patch the worktree by hand will, and then the next round starts from a tree muse did not
 produce, `finish` folds the hand-edit into the harvested patch and misattributes it, and you
-are paying frontier-model rates to type. The restriction is what makes the architecture true
-instead of merely recommended.
+are paying frontier-model rates to type. It is a strong default, not a boundary — `Bash` is
+still a write primitive — so what actually holds the line is `finish` fingerprinting muse's
+output and reporting `out_of_band_edit` when the harvested patch is not it.
 
 **Conflating `completed` with `accept`.** `completed` means the worker stopped. `accept`
 means a supervisor ran an acceptance check, it passed, and it ran against the tree that was

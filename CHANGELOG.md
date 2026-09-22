@@ -20,8 +20,27 @@ All notable changes to this plugin are documented here. Format follows
   example. The reason lands in `task.json` and `/muse:status` prints it on the row, so the
   override costs a human a decision instead of disappearing into a boolean.
 
+- **The "no Write/Edit tool" guarantee is now measured instead of asserted** (#10). Two
+  places in the codebase said the toolset enforced it. The supervisor has `Bash`, a shell
+  redirect is a write, and `verify --command` runs with `shell=True` inside the worktree —
+  in the review's reproduction the *entire harvested patch* was produced by `echo >` and
+  `finish` attributed it to muse. Each round now fingerprints the patch muse produced;
+  `finish` compares it against what it harvests and reports `out_of_band_edit`, with
+  `mutating_checks` naming any acceptance check that accounts for part of the difference.
+  `/muse:status` prints it on the row. The claims are reworded to describe the real
+  mechanism: the toolset is a strong default, the measurement is the enforcement.
+
 ### Fixed
 
+- **`harvest` failed on any repository with a `.gitignore`.** Found by a guard written for
+  the above, and shipped for as long as the exclude list has existed. `git add -A --
+  ':(exclude,glob)__pycache__'` exits 1 when git *already* ignores `__pycache__`, and
+  `DEFAULT_EXCLUDES` is a list of exactly what a real repo gitignores — `__pycache__`,
+  `node_modules`, `.venv`, `dist`, `build`. From the first moment a worker generated one,
+  every harvest returned `git add failed` and `patch.diff` stopped being updated. It was
+  invisible because every fixture repo in the suite is created without a `.gitignore`.
+  Staging now retries without the pathspec, which is correct rather than a workaround:
+  git skips ignored files on its own and the diff applies the same excludes afterwards.
 - **A verification is now bound to the tree it certified** (#8). `verify` recorded
   `after_round` and nothing ever read it, so a check could pass at round *n*, the worktree
   could change, and `finish` would harvest a patch no check had ever seen and report
@@ -29,8 +48,11 @@ All notable changes to this plugin are documented here. Format follows
   BACKDOOR.py` exited 0, `BACKDOOR.py` was then created, and the task came out accepted and
   verified with zero flags. `verify` now records a `git write-tree` hash of the staged
   worktree and `finish` compares it against the tree it harvests; a mismatch is reported as
-  stale and refuses the accept. This closes most of the out-of-band-write gap too: a
-  supervisor's shell redirect between check and finish no longer passes as muse's work.
+  stale and refuses the accept. The fingerprint is taken over the **patch** rather than
+  the worktree, and **after** the acceptance command rather than before, so a check that
+  builds, formats or generates does not come back refused as a TOCTOU — only a change
+  between the check finishing and the harvest does, which is the window the attack lives
+  in.
 - **`/muse:status` no longer reads a stale certification as verified.** It computed
   `verified` from exit codes alone, which cannot see this case — from the artifacts a run
   with a moved tree looks perfect. An explicit `false` written by `finish` now outranks the

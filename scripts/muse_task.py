@@ -168,7 +168,11 @@ def do_round(st: dict, tdir: Path, prompt: str, args, kind: str,
         rnd["text"] = res["text"][:2000]
 
     h = core.harvest(wt, harvest_base(st), st["excludes"], tdir / "patch.diff")
-    rnd.update({"patch_lines": h["patch_lines"], "files_changed": h["files_changed"]})
+    rnd.update({"patch_lines": h["patch_lines"], "files_changed": h["files_changed"],
+                # The deliverable as muse left it. finish compares against this to tell
+                # muse's work apart from anything written into the worktree afterwards.
+                "patch_fingerprint": core.patch_fingerprint(
+                    wt, harvest_base(st), st["excludes"])})
     if h["harvest_error"]:
         rnd["harvest_error"] = h["harvest_error"]
 
@@ -475,12 +479,12 @@ def cmd_verify(args) -> int:
         return 1
 
     tail = lambda s: s[-args.max_output:] if len(s) > args.max_output else s
+    fp = lambda: core.patch_fingerprint(wt, harvest_base(st), st["excludes"])
     rec = {
         "after_round": len(st["rounds"]),
         "command": args.command,
-        # The tree this check actually ran against. finish compares it with the tree it
-        # harvests; a mismatch means the patch changed after the check certified it.
-        "tree_hash": core.worktree_tree_hash(wt),
+        # The patch this check actually ran against.
+        "patch_before": fp(),
     }
     try:
         # start_new_session so a hung check can be killed as a group: the command is a
@@ -505,6 +509,15 @@ def cmd_verify(args) -> int:
                                 if isinstance(e.stdout, bytes) else (e.stdout or "")),
             "stderr_tail": "acceptance check exceeded {}s".format(args.timeout),
         })
+    # Taken AFTER the command, and this is the one finish compares against. A check is
+    # allowed to change the worktree -- a build step, a formatter, a migration -- and
+    # comparing against the pre-command fingerprint would refuse every one of those as a
+    # TOCTOU. What must not happen is a change between the check finishing and the
+    # harvest, which is the window an out-of-band write actually lives in.
+    rec["patch_after"] = fp()
+    if rec["patch_before"] != rec["patch_after"]:
+        # Not fatal, but the patch that ships is then not the patch the check read.
+        rec["check_mutated_patch"] = True
     st.setdefault("verifications", []).append(rec)
     save_state(tdir, st)
 
@@ -539,9 +552,10 @@ def cmd_finish(args) -> int:
     st = load_state(tdir)
 
     # Re-harvest so the recorded patch reflects the tree as it stands right now. Note what
-    # that means: a supervisor that edited the worktree by hand would have its edit folded
-    # into this patch and misattributed to muse. That is why the supervisor has no Write or
-    # Edit tool -- the architecture is enforced by the toolset, not by this comment.
+    # that means: a supervisor that edited the worktree by hand gets its edit folded into
+    # this patch. Withholding Write and Edit from the supervisor makes that unlikely, not
+    # impossible -- it still has Bash, and a shell redirect is a write -- so the fold is
+    # measured below as out_of_band_edit rather than assumed away.
     h = core.harvest(Path(st["worktree"]), harvest_base(st), st["excludes"], tdir / "patch.diff") \
         if Path(st["worktree"]).exists() else {"patch_lines": 0, "files_changed": [],
                                                "harvest_error": "worktree missing"}
@@ -555,29 +569,39 @@ def cmd_finish(args) -> int:
     # collect-only gate succeeded and the real check went red. Observed exactly that.
     verifs = st.get("verifications", [])
     final = verifs[-1] if verifs else None
-    tree_now = core.worktree_tree_hash(Path(st["worktree"])) \
+    now = core.patch_fingerprint(Path(st["worktree"]), harvest_base(st), st["excludes"]) \
         if Path(st["worktree"]).exists() else None
     # Three separate questions, deliberately not collapsed: did a check run, did the last
-    # one pass, and was it looking at THIS tree. Only all three together mean verified.
+    # one pass, and was it looking at THIS patch. Only all three together mean verified.
     passed = bool(final) and bool(final.get("passed"))
-    certified = bool(final) and bool(final.get("tree_hash")) and final["tree_hash"] == tree_now
-    stale = passed and bool(final.get("tree_hash")) and not certified
+    certified = bool(final) and bool(final.get("patch_after")) and final["patch_after"] == now
+    stale = passed and bool(final.get("patch_after")) and not certified
     verified = passed and certified
+
+    # #10: the supervisor has no Write or Edit tool, and it has Bash -- a shell redirect
+    # is a write, and `verify --command` runs with shell=True inside the worktree. The
+    # toolset is a strong default, not a boundary, so the honest move is to measure the
+    # delta rather than claim it cannot happen. Anything between what muse last produced
+    # and what is being harvested now was written by something other than muse.
+    last_round_fp = next((r.get("patch_fingerprint") for r in reversed(st["rounds"])
+                          if r.get("patch_fingerprint")), None)
+    out_of_band = bool(last_round_fp) and bool(now) and last_round_fp != now
+    mutating = [v["command"] for v in verifs if v.get("check_mutated_patch")]
 
     # #9: the verdict is now GATED, not merely annotated. Four documents say `accept`
     # means a supervisor ran a check that passed; until now nothing stopped an accept
     # with no check at all, and the suite asserted that was allowed.
     if args.verdict == "accept" and not verified and not args.accept_unverified:
         if stale:
-            why = ("the check that passed ran against a different tree than the one being "
-                   "harvested -- something changed the worktree after it was verified")
+            why = ("the check that passed produced a different patch than the one being "
+                   "harvested -- something changed the worktree after the check finished")
         elif final is None:
             why = "no acceptance check was ever run on this task"
         elif not passed:
             why = "the final acceptance check exited {}".format(final.get("exit_code"))
         else:
-            why = ("the passing check recorded no tree hash, so it cannot be tied to this "
-                   "patch (state written by an older version)")
+            why = ("the passing check recorded no patch fingerprint, so it cannot be tied "
+                   "to this patch (state written by an older version)")
         emit({"id": st["id"], "status": "refused", "reason":
               "refusing --verdict accept: {}. Run `verify` against the current tree, or "
               "pass --accept-unverified \"<reason>\" if this is the known case where a "
@@ -592,6 +616,7 @@ def cmd_finish(args) -> int:
         "concerns": args.concern or [],
         "final_patch_lines": h["patch_lines"],
         "final_files_changed": h["files_changed"],
+        "out_of_band_edit": out_of_band,
         "accepted_unverified": args.accept_unverified or None,
     })
     save_state(tdir, st)
@@ -607,6 +632,10 @@ def cmd_finish(args) -> int:
         # itself, versus a patch nobody executed.
         "verified_by_supervisor": bool(verified),
         "accepted_unverified": args.accept_unverified or None,
+        # Attribution, not accusation: the harvested patch differs from what muse left,
+        # and `mutating_checks` names the acceptance checks that account for part of it.
+        "out_of_band_edit": out_of_band,
+        "mutating_checks": mutating,
         "verifications": st.get("verifications", []),
     }
     if h.get("harvest_error"):

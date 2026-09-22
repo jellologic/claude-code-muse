@@ -70,8 +70,11 @@ certify the patch that ships. `--accept-unverified "<reason>"` is the deliberate
 it, for the case where a correct patch makes a check legitimately go red; the reason is
 recorded and `/muse:status` prints it. The supervisor agent has **no `Write` or `Edit` tool** — not an oversight. A
 supervisor that can patch the worktree by hand will, and then the next round starts from a
-tree muse did not produce. Removing the tool makes the architecture true rather than
-merely recommended.
+tree muse did not produce. That removal is a strong default, not a boundary: the supervisor
+still has `Bash`, and a shell redirect is a write. So the delta is **measured** rather than
+assumed away — `finish` fingerprints what muse produced, compares it with what it harvests,
+and reports `out_of_band_edit` with the acceptance checks that account for it. Claiming the
+toolset enforced this would be the more comfortable sentence and the false one.
 
 ## Install
 

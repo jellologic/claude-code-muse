@@ -545,6 +545,44 @@ if problems:
     sys.exit(1)
 PY
 
+# Found by the excluded-path guard above, and it had been shipped: `git add -A --
+# :(exclude,glob)__pycache__` exits 1 when git ALREADY ignores __pycache__, and
+# DEFAULT_EXCLUDES is a list of exactly what a real repo gitignores. Every harvest on
+# such a repo returned "git add failed" from the moment a worker generated one, and
+# patch.diff stopped being updated. Invisible here for as long as it was, because every
+# fixture repo in this suite is created without a .gitignore.
+IGN="$LAB/v_ignored"; IGNWT="$LAB/v_ignored_wt"; mkrepo "$IGN"
+printf '__pycache__/\nnode_modules/\n' > "$IGN/.gitignore"
+git -C "$IGN" add -A
+git -C "$IGN" -c user.email=t@l -c user.name=t commit -qm gitignore
+IGNSHA=$(git -C "$IGN" rev-parse --verify HEAD)
+git -C "$IGN" worktree add -q -b task/ignored "$IGNWT" "$IGNSHA"
+printf 'def worked():\n    return 1\n' > "$IGNWT/the_work.py"
+mkdir -p "$IGNWT/__pycache__" && printf 'bytecode\n' > "$IGNWT/__pycache__/calc.cpython-311.pyc"
+python3 - "$IGN" "$IGNWT" "$IGNSHA" <<'PY' && ok "a gitignored build dir does not abort the harvest" || bad "harvest fails on any repo with a .gitignore"
+import importlib.util, os, pathlib, sys
+spec = importlib.util.spec_from_file_location(
+    "mc", os.path.join(os.environ["PLUGIN_ROOT"], "scripts/muse_core.py"))
+mc = importlib.util.module_from_spec(spec); spec.loader.exec_module(mc)
+repo, wt, sha = sys.argv[1], pathlib.Path(sys.argv[2]), sys.argv[3]
+out = pathlib.Path(repo) / "ignored.diff"
+rec = mc.harvest(wt, sha, mc.DEFAULT_EXCLUDES, out)
+problems = []
+if rec["harvest_error"]:
+    problems.append("harvest_error: %s" % rec["harvest_error"])
+if "the_work.py" not in rec["files_changed"]:
+    problems.append("the work is missing from the patch: %r" % (rec["files_changed"],))
+if any(".pyc" in f for f in rec["files_changed"]):
+    problems.append("the ignored build output reached the patch: %r" % (rec["files_changed"],))
+# The control. Without it this guard passes on a harvest that silently stopped
+# excluding anything, which is the other way to make the symptom disappear.
+if mc.patch_fingerprint(wt, sha, mc.DEFAULT_EXCLUDES) is None:
+    problems.append("fingerprint unobtainable on the same tree")
+if problems:
+    for p in problems: print("        " + p)
+    sys.exit(1)
+PY
+
 # ------------------------------------------- 3b. status + cleanup (no muse spawned)
 head_ "3b. Status and cleanup"
 
@@ -845,13 +883,13 @@ STL="$LAB/v_stale"; mkdir -p "$STL/.muse-fleet/tasks/moved"
 cat > "$STL/.muse-fleet/tasks/moved/state.json" <<'JSON'
 {"id":"moved","done":true,"verdict":"accept","max_rounds":3,"rounds":[{"n":1,"kind":"initial"}],
  "verifications":[{"after_round":1,"command":"pytest -q","exit_code":0,"passed":true,
-                   "tree_hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}
+                   "patch_after":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}
 JSON
 cat > "$STL/.muse-fleet/tasks/moved/task.json" <<'JSON'
 {"id":"moved","verdict":"accept","patch_lines":5,"files_changed":["a.py"],"rounds_used":1,
  "verified_by_supervisor":false,
  "verifications":[{"after_round":1,"command":"pytest -q","exit_code":0,"passed":true,
-                   "tree_hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}
+                   "patch_after":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}
 JSON
 STLOUT=$(python3 "$SKILL/scripts/muse_status.py" --out "$STL/.muse-fleet" 2>&1)
 echo "$STLOUT" | grep -q 'UNVERIFIED' \
@@ -889,15 +927,25 @@ GOUT="$GATE/.muse-fleet/tasks"
 gate_task() {   # gate_task <id> -- a task in the exact shape `run` leaves behind
   git -C "$GATE" worktree add -q -b "muse/gate/$1" "$GATEWT/$1" "$GATESHA"
   mkdir -p "$GOUT/$1"
+  printf 'def added():\n    return 1\n' > "$GATEWT/$1/added.py"
+  # The round's patch_fingerprint is stamped the way do_round stamps it -- through
+  # muse_core, over the tree muse would have left -- so these fixtures cannot drift from
+  # what a real round writes.
   python3 - "$GATE" "$GATEWT/$1" "$GATESHA" "$1" "$GOUT" <<'PY'
-import json, os, sys
+import importlib.util, json, os, pathlib, sys
+spec = importlib.util.spec_from_file_location(
+    "mc", os.path.join(os.environ["PLUGIN_ROOT"], "scripts/muse_core.py"))
+mc = importlib.util.module_from_spec(spec); spec.loader.exec_module(mc)
 repo, wt, sha, tid, out = sys.argv[1:6]
+excludes = [".muse-fleet/", "build"]
 json.dump({"id": tid, "repo": repo, "worktree": wt, "branch": "muse/gate/" + tid,
-           "base": "main", "base_sha": sha, "excludes": [".muse-fleet/"],
-           "rounds": [{"n": 1, "kind": "initial"}], "max_rounds": 3, "done": False},
+           "base": "main", "base_sha": sha, "excludes": excludes,
+           "rounds": [{"n": 1, "kind": "initial",
+                       "patch_fingerprint": mc.patch_fingerprint(
+                           pathlib.Path(wt), sha, excludes)}],
+           "max_rounds": 3, "done": False},
           open(os.path.join(out, tid, "state.json"), "w", encoding="utf-8"))
 PY
-  printf 'def added():\n    return 1\n' > "$GATEWT/$1/added.py"
 }
 
 gate_json() {   # gate_json <emitted json> <python expr over d>
@@ -953,6 +1001,52 @@ GJ=$(python3 "$TASK" finish --id gxfail --out "$GOUT" --verdict accept \
 gate_json "$GJ" "d.get('verdict')=='accept' and d.get('verified_by_supervisor') is False and d.get('accepted_unverified')" \
   && ok "--accept-unverified records the override instead of faking a check" \
   || bad "the escape hatch either blocks or hides itself" "$GJ"
+
+# A check is allowed to change the worktree. Builds, formatters, migrations and code
+# generators all do, and pytest drops a __pycache__ into any tree that does not ignore
+# one. Certifying the PATCH rather than the worktree, and fingerprinting AFTER the
+# command rather than before, is what keeps every one of those from coming back refused.
+gate_task gbuild
+python3 "$TASK" verify --id gbuild --out "$GOUT" \
+  --command "printf 'generated\\n' > built.txt; test -f added.py" >/dev/null 2>&1
+GJ=$(python3 "$TASK" finish --id gbuild --out "$GOUT" --verdict accept 2>/dev/null)
+gate_json "$GJ" "d.get('verdict')=='accept' and d.get('verified_by_supervisor') is True" \
+  && ok "a check that writes into the worktree still certifies its own patch" \
+  || bad "a check with side effects is refused as a TOCTOU" "$GJ"
+gate_json "$GJ" "d.get('out_of_band_edit') is True and d.get('mutating_checks')" \
+  && ok "the check that changed the patch is named, not folded into muse's work" \
+  || bad "an acceptance check's writes were attributed to muse" "$GJ"
+
+# The same write with nothing to account for it. This is #10's real shape: the supervisor
+# has no Write or Edit tool and it has Bash, so a redirect into the worktree is a write
+# that `finish` would otherwise harvest and report as muse's output.
+gate_task gbash
+printf 'HAND_WRITTEN = True\n' > "$GATEWT/gbash/by_hand.py"
+python3 "$TASK" verify --id gbash --out "$GOUT" --command "test -f added.py" >/dev/null 2>&1
+GJ=$(python3 "$TASK" finish --id gbash --out "$GOUT" --verdict accept 2>/dev/null)
+gate_json "$GJ" "d.get('verdict')=='accept' and d.get('out_of_band_edit') is True and not d.get('mutating_checks')" \
+  && ok "a hand-written file with no check to explain it is reported as out of band" \
+  || bad "an out-of-band write passed as muse's output" "$GJ"
+
+# The control for both: a task nobody touched must not be accused of anything. A flag
+# that is always on is exactly as useless as one that never fires.
+gate_json "$(cat "$GOUT/gok/task.json")" "d.get('out_of_band_edit') is False and not d.get('mutating_checks')" \
+  && ok "an untouched worktree is not flagged as edited out of band" \
+  || bad "out_of_band_edit fires on a clean task" "$(cat "$GOUT/gok/task.json")"
+
+# Excluded paths are not part of the deliverable, so churn there cannot invalidate a
+# check. `build/` here is excluded but NOT gitignored, which is the case that separates
+# the two designs: a whole-worktree hash stages it and refuses the accept, a fingerprint
+# of the patch never sees it. A check that compiles something is the everyday shape of
+# this, and refusing every one of those would make the gate unusable.
+gate_task gexcl
+python3 "$TASK" verify --id gexcl --out "$GOUT" --command "test -f added.py" >/dev/null 2>&1
+mkdir -p "$GATEWT/gexcl/build" && printf 'compiled\n' > "$GATEWT/gexcl/build/out.o"
+mkdir -p "$GATEWT/gexcl/.muse-fleet" && printf 'noise\n' > "$GATEWT/gexcl/.muse-fleet/junk"
+GJ=$(python3 "$TASK" finish --id gexcl --out "$GOUT" --verdict accept 2>/dev/null)
+gate_json "$GJ" "d.get('verdict')=='accept' and d.get('verified_by_supervisor') is True and d.get('out_of_band_edit') is False" \
+  && ok "churn in an excluded path invalidates nothing" \
+  || bad "an excluded file broke the certification" "$GJ"
 
 # Only `accept` claims verification. Gating `reject` would strand a task whose check
 # never passed -- which is precisely the task most in need of a verdict.
