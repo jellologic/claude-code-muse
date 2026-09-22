@@ -10,6 +10,15 @@ Nothing yet.
 
 ## [1.2.0] - 2026-09-22
 
+### Fixed after tagging
+
+- `muse_doctor.py` crashed with an `IndexError` when a binary named `muse` exited 0 and
+  printed no version — which is exactly what the test suite's own stub does. A diagnostic
+  that dies on the way to telling you something is the worst possible failure, so every
+  check is now individually guarded and an unexpected error becomes a FAIL line rather
+  than a traceback. Caught by CI within minutes of the tag; the tag was moved rather than
+  leaving a release whose CI was red.
+
 ### Fixed
 
 - **The fleet script's `--out` defaulted to a relative path.** `muse_task` resolves it

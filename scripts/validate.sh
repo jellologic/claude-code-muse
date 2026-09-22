@@ -628,21 +628,52 @@ grep -q '"state.json"' "$SKILL/scripts/muse_fleet.py" && grep -q '"task.json"' "
 head_ "3d. Doctor and credential scan"
 # A diagnostic that only works on a healthy machine is not a diagnostic.
 DOC="$SKILL/scripts/muse_doctor.py"
-python3 "$DOC" --repo "$SKILL" >/dev/null 2>&1 \
-  && ok "doctor exits 0 on a working machine" || bad "doctor failed on a healthy machine"
+DLAB="$LAB/v_doctor"; mkdir -p "$DLAB/empty" "$DLAB/stubbin"
+printf '#!/bin/sh\nexit 0\n' > "$DLAB/stubbin/muse"; chmod +x "$DLAB/stubbin/muse"
 
-DLAB="$LAB/v_doctor"; mkdir -p "$DLAB/empty"
+# The doctor is the tool you reach for when things are ALREADY broken, so the property
+# that matters is that it never dies on the way to telling you. It must survive a hostile
+# machine, including a binary called `muse` that exits 0 and prints nothing -- which CI
+# has, because section 3 stubs one, and which crashed it with an IndexError.
+# Note: asserting "exits 0 here" would be asserting the HOST is healthy, which CI's is
+# deliberately not. Test the behaviour, not the host.
+DOC_CRASHED=""
+for COND in "healthy" "stub" "bare"; do
+  case "$COND" in
+    healthy) DOUT=$(python3 "$DOC" --repo "$SKILL" 2>&1) ;;
+    stub)    DOUT=$(env PATH="$DLAB/stubbin:$PATH" python3 "$DOC" --repo "$SKILL" 2>&1) ;;
+    bare)    DOUT=$(env PATH="/usr/bin:/bin" MUSE_CONFIG_DIR="$DLAB/nocfg" \
+                    MUSE_CATALOG_GLOB="$DLAB/nocat/*.json" python3 "$DOC" --repo "$DLAB/empty" 2>&1) ;;
+  esac
+  case "$DOUT" in
+    *Traceback*) DOC_CRASHED="$DOC_CRASHED $COND(traceback)" ;;
+  esac
+  case "$DOUT" in
+    *READY*|*"NOT READY"*) : ;;
+    *) DOC_CRASHED="$DOC_CRASHED $COND(no verdict)" ;;
+  esac
+done
+[ -z "$DOC_CRASHED" ] \
+  && ok "doctor reaches a verdict on a healthy, stubbed and bare machine" \
+  || bad "doctor crashed or gave no verdict" "$DOC_CRASHED"
+
 env PATH="/usr/bin:/bin" MUSE_CONFIG_DIR="$DLAB/nocfg" python3 "$DOC" --repo "$DLAB/empty" >/dev/null 2>&1
 [ $? -ne 0 ] && ok "doctor exits non-zero when something is blocking" || bad "doctor reported a broken machine as ready"
 
-DJSON=$(python3 "$DOC" --repo "$SKILL" --json 2>/dev/null)
-echo "$DJSON" | python3 -c "
+# Well-formed regardless of verdict: a consumer parses this to decide what to do about a
+# machine that is, by definition, possibly broken.
+for COND in "$SKILL" "$DLAB/empty"; do
+  DJSON=$(env MUSE_CONFIG_DIR="$DLAB/nocfg" python3 "$DOC" --repo "$COND" --json 2>/dev/null)
+  echo "$DJSON" | python3 -c "
 import json,sys
 d=json.load(sys.stdin)
 assert isinstance(d.get('checks'), list) and d['checks']
 assert {'severity','name','value','fix'} <= set(d['checks'][0])
 assert isinstance(d.get('ready'), bool)
-" 2>/dev/null && ok "doctor --json is well-formed" || bad "doctor --json shape" "$DJSON"
+assert all(c['severity'] in ('OK','WARN','FAIL') for c in d['checks'])
+" 2>/dev/null || { bad "doctor --json shape" "$DJSON"; DJSON_BAD=1; }
+done
+[ -z "${DJSON_BAD:-}" ] && ok "doctor --json is well-formed whatever the verdict" || true
 
 # The credential scan is the one that must not leak what it found into an artifact.
 SCANDIR="$LAB/v_scan"; mkdir -p "$SCANDIR/sub" "$SCANDIR/node_modules"

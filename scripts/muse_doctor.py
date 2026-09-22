@@ -62,7 +62,15 @@ def check_muse(out):
         out.append(("FAIL", "muse binary", "found but `muse --version` failed: %s" % ver[:60],
                     "The binary on PATH may be broken or a different program."))
         return False
-    out.append(("OK", "muse binary", ver.splitlines()[0][:60], ""))
+    first = (ver.splitlines() or [""])[0].strip()
+    if not first:
+        # A binary named `muse` that exits 0 and prints nothing is not Muse Code -- most
+        # likely a stub or a different program of the same name. Saying "OK" here would
+        # be worse than saying nothing.
+        out.append(("WARN", "muse binary", "on PATH but `muse --version` printed nothing",
+                    "That is probably not Muse Code. Check `which muse`."))
+        return True
+    out.append(("OK", "muse binary", first[:60], ""))
     return True
 
 
@@ -226,17 +234,26 @@ def main() -> int:
     repo = Path(args.repo).resolve()
     out = []
 
-    have_muse = check_muse(out)
-    check_credentials(out, core)
-    check_catalog(out, core)
-    check_resolution(out, core)
-    check_interactive_pin(out)
-    check_python_git(out)
-    check_scripts(out)
-    if check_repo(out, core, repo):
-        check_worktree_root(out, repo)
+    def guarded(name, fn, *a):
+        try:
+            return fn(*a)
+        except Exception as e:
+            out.append(("FAIL", name, "check itself failed: %s: %s"
+                        % (type(e).__name__, str(e)[:80]),
+                        "This is a bug in muse_doctor.py — please report it."))
+            return False
+
+    have_muse = guarded("muse binary", check_muse, out)
+    guarded("credentials", check_credentials, out, core)
+    guarded("model catalog", check_catalog, out, core)
+    guarded("model resolution", check_resolution, out, core)
+    guarded("interactive pin", check_interactive_pin, out)
+    guarded("python/git", check_python_git, out)
+    guarded("plugin scripts", check_scripts, out)
+    if guarded("repo", check_repo, out, core, repo):
+        guarded("worktree root", check_worktree_root, out, repo)
         if args.scan:
-            check_secrets(out, core, repo)
+            guarded("credential scan", check_secrets, out, core, repo)
 
     fails = [r for r in out if r[0] == "FAIL"]
     warns = [r for r in out if r[0] == "WARN"]
