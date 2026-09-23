@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Full validation of the muse plugin. Offline checks first (fast, free),
 # then live muse runs (slow, costs tokens).
+# How much this suite actually catches is measured, not claimed: scripts/mutate.sh plants each known bug and fails if a MUST_KILL one survives.
 set -uo pipefail
 
 # Self-locate rather than trusting an install path: this script must validate the copy
