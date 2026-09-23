@@ -7,7 +7,6 @@
 <meta name="description" content="Offload bulk coding work from Claude Code to Muse Code workers in isolated git worktrees. A Claude supervisor runs your check and re-prompts until it passes.">
 <link rel="canonical" href="https://jellologic.github.io/claude-code-muse/">
 <meta name="robots" content="index,follow">
-<meta name="keywords" content="Claude Code plugin, Claude Code plugins, Claude Code marketplace, Claude Code subagents, Claude Code skills, delegate coding tasks, Muse Code, git worktree, AI coding agent, agentic coding, multi-agent, agent orchestration, supervised code generation, acceptance check, LLM cost optimization, Anthropic Claude">
 <meta name="theme-color" content="#0f1117" media="(prefers-color-scheme: dark)">
 <meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
 <meta name="color-scheme" content="dark light">
@@ -132,7 +131,6 @@ footer ul{display:flex;flex-wrap:wrap;gap:1.25rem;list-style:none;margin:0;paddi
 footer p{margin:0}
 @media (max-width:900px){.hero .hw,.two,.faq{grid-template-columns:1fr}.steps{grid-template-columns:1fr 1fr}.stats{grid-template-columns:1fr 1fr}.hero{padding-top:3rem}}
 @media (max-width:640px){header.top nav{display:none}.steps,.cards{grid-template-columns:1fr}section{padding:3.25rem 0}.lead{font-size:1.08rem}.install li{font-size:.8rem}tbody th{white-space:normal}.stack thead{display:none}.stack tr{display:block;padding:.8rem 1rem;border-bottom:1px solid var(--line)}.stack tr:last-child{border-bottom:0}.stack th,.stack td{display:block;padding:.15rem 0;border:0}.stack td:nth-child(2):not(:last-child)::before{content:"Default: ";color:var(--mu)}}
-.tags{list-style:none;padding:0;margin:1.25rem 0 0;display:flex;flex-wrap:wrap;gap:.5rem}.tags a{display:inline-block;font:500 .85rem/1 var(--mono);padding:.5rem .75rem;border-radius:999px;border:1px solid var(--line);color:inherit;text-decoration:none}.tags a:hover,.tags a:focus-visible{border-color:#c084fc;color:#c084fc}
 </style>
 <script type="application/ld+json">
 {
@@ -146,7 +144,7 @@ footer p{margin:0}
       "description": "A Claude Code plugin that offloads bulk coding work to Muse Code workers in isolated git worktrees, each supervised by an Opus agent that reads the patch, runs the acceptance check and re-prompts until the work is right.",
       "applicationCategory": "DeveloperApplication",
       "applicationSubCategory": "Claude Code plugin",
-      "keywords": "claude-code, claude-code-plugin, claude-code-plugins, claude-code-marketplace, claude-code-skills, claude, anthropic, subagents, multi-agent, agent-orchestration, ai-agents, agentic-ai, agentic-coding, coding-agent, ai-coding, code-generation, git-worktree, cost-optimization, developer-tools, muse-code",
+      "keywords": "Claude Code plugin, Claude Code marketplace, subagents, model routing, token optimization, git worktree, Muse Code",
       "operatingSystem": "macOS, Linux",
       "softwareVersion": "1.4.0",
       "datePublished": "2026-09-23",
@@ -172,13 +170,13 @@ footer p{margin:0}
       "@id": "https://jellologic.github.io/claude-code-muse/#faq",
       "mainEntity": [
         {"@type": "Question", "name": "How do I delegate coding tasks from Claude Code to a cheaper model?", "acceptedAnswer": {"@type": "Answer", "text": "Install the muse plugin, start a new session, run muse login once, then run /muse:delegate with a brief that names the exact files, says what must not change and gives a runnable acceptance check. A Muse Code worker makes the edit in its own git worktree, and a Claude supervisor runs the check itself and sends the worker back until the final check passes. For a batch of independent tasks, /muse:fleet decomposes the job and runs one supervisor per task."}},
-        {"@type": "Question", "name": "What is Muse Code?", "acceptedAnswer": {"@type": "Answer", "text": "Muse Code is the coding agent behind Meta's Muse Code API, driven through the muse command-line tool. This plugin needs muse on your PATH and credentials from muse login. By default delegated work uses the newest contributor-tier model, resolved from muse's own catalog at run time; you can pin a full-rate model such as muse-spark-1.3 instead."}},
+        {"@type": "Question", "name": "What is Muse Code, and how does it compare with Claude Code?", "acceptedAnswer": {"@type": "Answer", "text": "Muse Code is the coding agent behind Meta's Muse Code API, driven through the muse command-line tool. Here it does not replace Claude Code: muse does the typing, and Claude Code plans the work, reviews each patch and runs your acceptance check. The plugin needs muse on your PATH and credentials from muse login. By default delegated work uses the newest contributor-tier model from muse's own catalog; you can pin a full-rate model such as muse-spark-1.3 instead."}},
         {"@type": "Question", "name": "Does the plugin send my code or secrets anywhere?", "acceptedAnswer": {"@type": "Answer", "text": "Prompts, the files the worker reads and its patches go to Meta's Muse Code API under the model you selected, and contributor-tier models state that content may be used for product improvement. Nothing is sent anywhere else: there is no telemetry, no analytics and no network call in the plugin outside the muse CLI. Before a worker starts, the worktree is scanned and delegation is refused on a PEM private-key block, an AWS key id, or a GitHub, Slack, Stripe or Anthropic-format token. For proprietary code, pin muse-spark-1.3 at full rate or do not delegate it."}},
-        {"@type": "Question", "name": "How is this different from Claude Code subagents?", "acceptedAnswer": {"@type": "Answer", "text": "The supervisor is a Claude Code subagent (muse-supervisor, on Opus), but it does not write the code. A cheaper Muse Code worker does the typing in an isolated git worktree; the supervisor reads the patch, runs your acceptance check itself and re-prompts the worker with specific defects. A PreToolUse hook denies the supervisor's Write, Edit and NotebookEdit calls, and a SubagentStop hook blocks it from stopping while its task has no verdict."}},
+        {"@type": "Question", "name": "Can a Claude Code subagent use a different, cheaper model?", "acceptedAnswer": {"@type": "Answer", "text": "A Claude Code subagent can run on a smaller Claude model, but it still types the code itself. muse routes the typing to a different model entirely: a Muse Code worker edits in an isolated git worktree, while the muse-supervisor subagent (on Opus) reads the patch, runs your acceptance check itself and re-prompts the worker with specific defects. A PreToolUse hook denies the supervisor's own writes, and a SubagentStop hook blocks it from stopping while its task has no verdict."}},
         {"@type": "Question", "name": "Does it apply patches automatically?", "acceptedAnswer": {"@type": "Answer", "text": "No. No command applies a patch: every run stops at a verdict and a patch path, because an accepted patch is still a patch you have not read. Worktrees and branches stay until you remove them with /muse:cleanup, which is a dry run unless you pass --yes."}},
         {"@type": "Question", "name": "Does it work on Windows?", "acceptedAnswer": {"@type": "Answer", "text": "The free offline suite runs in CI on Linux under Python 3.9, 3.11 and 3.13, and on Windows under Git Bash as a blocking job; development is on macOS. You need the muse CLI, git, Python 3.9 or later and Claude Code."}},
         {"@type": "Question", "name": "What is the difference between completed and accepted?", "acceptedAnswer": {"@type": "Answer", "text": "Completed means the worker stopped. Accept means a supervisor ran a check and the final one passed. finish --verdict accept refuses unless the final check passed against the tree being harvested; --accept-unverified with a reason is the deliberate way past it, and /muse:status prints that reason."}},
-        {"@type": "Question", "name": "How much context does the plugin cost when installed?", "acceptedAnswer": {"@type": "Answer", "text": "About 625 always-on tokens, against a 750-token ceiling the project holds itself to. The seven slash commands are opt-in and never invoked by the model, and the hooks add context only when they have something to report."}}
+        {"@type": "Question", "name": "Does it save Claude Code tokens?", "acceptedAnswer": {"@type": "Answer", "text": "It moves the typing off Claude. The Muse Code worker generates the code, and Claude spends its tokens reading the patch and running the check rather than writing boilerplate. The plugin itself adds about 625 always-on tokens, against a 750-token ceiling the project holds itself to; the seven slash commands are opt-in, and the hooks add context only when they have something to report."}}
       ]
     }
   ]
@@ -424,43 +422,14 @@ ran the check itself and it passed.
     <h2 id="faq-h">Questions people ask</h2>
     <div class="faq">
       <article><h3>How do I delegate coding tasks from Claude Code to a cheaper model?</h3><p>Install the muse plugin, start a new session, run muse login once, then run /muse:delegate with a brief that names the exact files, says what must not change and gives a runnable acceptance check. A Muse Code worker makes the edit in its own git worktree, and a Claude supervisor runs the check itself and sends the worker back until the final check passes. For a batch of independent tasks, /muse:fleet decomposes the job and runs one supervisor per task.</p></article>
-      <article><h3>What is Muse Code?</h3><p>Muse Code is the coding agent behind Meta's Muse Code API, driven through the muse command-line tool. This plugin needs muse on your PATH and credentials from muse login. By default delegated work uses the newest contributor-tier model, resolved from muse's own catalog at run time; you can pin a full-rate model such as muse-spark-1.3 instead.</p></article>
+      <article><h3>What is Muse Code, and how does it compare with Claude Code?</h3><p>Muse Code is the coding agent behind Meta's Muse Code API, driven through the muse command-line tool. Here it does not replace Claude Code: muse does the typing, and Claude Code plans the work, reviews each patch and runs your acceptance check. The plugin needs muse on your PATH and credentials from muse login. By default delegated work uses the newest contributor-tier model from muse's own catalog; you can pin a full-rate model such as muse-spark-1.3 instead.</p></article>
       <article><h3>Does the plugin send my code or secrets anywhere?</h3><p>Prompts, the files the worker reads and its patches go to Meta's Muse Code API under the model you selected, and contributor-tier models state that content may be used for product improvement. Nothing is sent anywhere else: there is no telemetry, no analytics and no network call in the plugin outside the muse CLI. Before a worker starts, the worktree is scanned and delegation is refused on a PEM private-key block, an AWS key id, or a GitHub, Slack, Stripe or Anthropic-format token. For proprietary code, pin muse-spark-1.3 at full rate or do not delegate it.</p></article>
-      <article><h3>How is this different from Claude Code subagents?</h3><p>The supervisor is a Claude Code subagent (muse-supervisor, on Opus), but it does not write the code. A cheaper Muse Code worker does the typing in an isolated git worktree; the supervisor reads the patch, runs your acceptance check itself and re-prompts the worker with specific defects. A PreToolUse hook denies the supervisor's Write, Edit and NotebookEdit calls, and a SubagentStop hook blocks it from stopping while its task has no verdict.</p></article>
+      <article><h3>Can a Claude Code subagent use a different, cheaper model?</h3><p>A Claude Code subagent can run on a smaller Claude model, but it still types the code itself. muse routes the typing to a different model entirely: a Muse Code worker edits in an isolated git worktree, while the muse-supervisor subagent (on Opus) reads the patch, runs your acceptance check itself and re-prompts the worker with specific defects. A PreToolUse hook denies the supervisor's own writes, and a SubagentStop hook blocks it from stopping while its task has no verdict.</p></article>
       <article><h3>Does it apply patches automatically?</h3><p>No. No command applies a patch: every run stops at a verdict and a patch path, because an accepted patch is still a patch you have not read. Worktrees and branches stay until you remove them with /muse:cleanup, which is a dry run unless you pass --yes.</p></article>
       <article><h3>Does it work on Windows?</h3><p>The free offline suite runs in CI on Linux under Python 3.9, 3.11 and 3.13, and on Windows under Git Bash as a blocking job; development is on macOS. You need the muse CLI, git, Python 3.9 or later and Claude Code.</p></article>
       <article><h3>What is the difference between completed and accepted?</h3><p>Completed means the worker stopped. Accept means a supervisor ran a check and the final one passed. finish --verdict accept refuses unless the final check passed against the tree being harvested; --accept-unverified with a reason is the deliberate way past it, and /muse:status prints that reason.</p></article>
-      <article><h3>How much context does the plugin cost when installed?</h3><p>About 625 always-on tokens, against a 750-token ceiling the project holds itself to. The seven slash commands are opt-in and never invoked by the model, and the hooks add context only when they have something to report.</p></article>
+      <article><h3>Does it save Claude Code tokens?</h3><p>It moves the typing off Claude. The Muse Code worker generates the code, and Claude spends its tokens reading the patch and running the check rather than writing boilerplate. The plugin itself adds about 625 always-on tokens, against a 750-token ceiling the project holds itself to; the seven slash commands are opt-in, and the hooks add context only when they have something to report.</p></article>
     </div>
-  </div>
-</section>
-<section id="topics" class="alt" aria-labelledby="topics-h">
-  <div class="w">
-    <p class="k">08 · Topics</p>
-    <h2 id="topics-h">Claude Code plugin topics</h2>
-    <p class="intro">muse is a Claude Code plugin and marketplace for supervised delegation: Claude Code subagents that drive Muse Code workers in isolated git worktrees, for agentic coding without paying full-rate models to type boilerplate. Browse related projects by topic on GitHub:</p>
-    <ul class="tags">
-      <li><a href="https://github.com/topics/claude-code" rel="tag">claude-code</a></li>
-      <li><a href="https://github.com/topics/claude-code-plugin" rel="tag">claude-code-plugin</a></li>
-      <li><a href="https://github.com/topics/claude-code-plugins" rel="tag">claude-code-plugins</a></li>
-      <li><a href="https://github.com/topics/claude-code-marketplace" rel="tag">claude-code-marketplace</a></li>
-      <li><a href="https://github.com/topics/claude-code-skills" rel="tag">claude-code-skills</a></li>
-      <li><a href="https://github.com/topics/claude" rel="tag">claude</a></li>
-      <li><a href="https://github.com/topics/anthropic" rel="tag">anthropic</a></li>
-      <li><a href="https://github.com/topics/subagents" rel="tag">subagents</a></li>
-      <li><a href="https://github.com/topics/multi-agent" rel="tag">multi-agent</a></li>
-      <li><a href="https://github.com/topics/agent-orchestration" rel="tag">agent-orchestration</a></li>
-      <li><a href="https://github.com/topics/ai-agents" rel="tag">ai-agents</a></li>
-      <li><a href="https://github.com/topics/agentic-ai" rel="tag">agentic-ai</a></li>
-      <li><a href="https://github.com/topics/agentic-coding" rel="tag">agentic-coding</a></li>
-      <li><a href="https://github.com/topics/coding-agent" rel="tag">coding-agent</a></li>
-      <li><a href="https://github.com/topics/ai-coding" rel="tag">ai-coding</a></li>
-      <li><a href="https://github.com/topics/code-generation" rel="tag">code-generation</a></li>
-      <li><a href="https://github.com/topics/git-worktree" rel="tag">git-worktree</a></li>
-      <li><a href="https://github.com/topics/cost-optimization" rel="tag">cost-optimization</a></li>
-      <li><a href="https://github.com/topics/developer-tools" rel="tag">developer-tools</a></li>
-      <li><a href="https://github.com/topics/muse-code" rel="tag">muse-code</a></li>
-    </ul>
   </div>
 </section>
 </main>
