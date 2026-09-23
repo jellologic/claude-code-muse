@@ -48,9 +48,9 @@ In rough order of usefulness:
    defect. Two real examples already found this way: `SECURITY.md` described a safety
    control that did not exist, and the supervisor agent asserted "muse has no memory
    between rounds" when the opposite is true.
-4. **Portability.** Development happens on macOS; CI runs Linux on Python 3.9/3.11/3.13.
-   Windows is untested. Two shipped bugs were BSD-vs-GNU differences (`mktemp -d -t`),
-   so that class is live.
+4. **Portability.** Development happens on macOS; CI runs Linux on Python 3.9/3.11/3.13
+   plus a blocking Windows Git Bash leg. Two shipped bugs were BSD-vs-GNU differences
+   (`mktemp -d -t`), so that class is live.
 
 ## The five rules that decide whether a PR is merged
 
@@ -64,7 +64,7 @@ In rough order of usefulness:
    worktree by hand will, and then the next round starts from a tree muse did not
    produce, the harvest misattributes the hand-edit, and you are paying frontier rates to
    type. `Bash` remains, so the hook `hooks/supervisor_guard.py` now denies the
-   supervisor's writes (Write/Edit/NotebookEdit and any Bash beyond muse shims,
+   supervisor's writes (Write/Edit/NotebookEdit and any Bash beyond muse-* shims,
    read-only git, readers and the recorded check). `finish` measuring the delta and
    reporting `out_of_band_edit` is still the measurement behind it. Do not restore the
    stronger claim; it was false.
@@ -84,8 +84,9 @@ In rough order of usefulness:
 
 ## Things that look like improvements and are not
 
-- **Adding a second auto-triggering skill.** There is deliberately one. More skills means
-  more descriptions competing for the same prompts.
+- **Adding a second auto-triggering skill.** There are three auto-triggering surfaces
+  (one skill, the supervisor agent, the registered workflow) and deliberately one skill.
+  More skills means more descriptions competing for the same prompts.
 - **Widening scope toward a general agent framework** — swarm topologies, consensus,
   federation, vector memory. This plugin does one job and every claim in it has been
   measured. That property is the product.
@@ -124,8 +125,9 @@ a speculative patch.
 
 | Path | What it is |
 |---|---|
-| `skills/muse-fleet/SKILL.md` | The one auto-triggering skill |
+| `skills/muse-fleet/SKILL.md` | The one auto-triggering skill (of three auto-triggering surfaces) |
 | `commands/*.md` | The seven `/muse:*` commands |
+| `bin/` | The seven shims (`muse-ask`, `muse-cleanup`, `muse-doctor`, `muse-fleet`, `muse-model`, `muse-status`, `muse-task`), each execing its script under `scripts/` |
 | `agents/muse-supervisor.md` | The supervisor's contract (no Write/Edit — see rule 3) |
 | `scripts/muse_core.py` | Worktree, seeding, harvest, model resolution, secret scan |
 | `scripts/muse_task.py` | One task, round by round: run / verify / revise / finish |
@@ -137,5 +139,6 @@ a speculative patch.
 | `hooks/preflight.sh` | SessionStart; silent unless delegation would fail |
 | `hooks/supervisor_stop.py` | SubagentStop (^muse:muse-supervisor$); blocks an owner leaving unfinished work |
 | `hooks/supervisor_result.py` | PostToolUse on Agent; what the artifacts say |
+| `hooks/supervisor_guard.py` | PreToolUse, matcher `Bash\|Write\|Edit\|NotebookEdit`; denies the supervisor's writes |
 | `hooks/leftover_worktrees.py` | SessionStart leftover report; recorded muse/fleet worktrees only |
 | `hooks/_artifacts.py` | Shared recent-task scan for the hooks; never raises |

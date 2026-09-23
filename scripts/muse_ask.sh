@@ -28,6 +28,10 @@
 # one. --allow-secrets scans and reports but does not refuse; --no-secret-scan skips
 # the scan entirely.
 #
+# --model, --repo, --timeout and --max-steps override the configured defaults for one
+# run; --refuse-on-secrets carries the configured default for the credential scan.
+# --effort sets the reasoning effort; --session and --continue resume a past answer.
+#
 # Exits 0 and prints the final answer, or exits 1 and prints the failure reason to stderr.
 
 set -uo pipefail

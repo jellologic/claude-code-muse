@@ -1,18 +1,13 @@
 ---
 name: muse-fleet
 description: >-
-  This skill should be used when a coding job splits into several independent, mechanical
-  edits that can be delegated to Muse Code (`muse exec`) workers in isolated git worktrees,
-  each supervised by an Opus agent that runs the acceptance check and re-prompts until the
-  patch is right. Use it for repetitive refactors across many files, a test or a docstring
-  per module in a list, one migration pattern applied repo-wide, bulk dependency or lint
-  fixes, or competing drafts of one function — and whenever the user names Muse Code or
-  `muse exec`, asks to offload coding work to a cheaper model, to fan tasks out across
-  parallel workers, or says the work is grunt work or "don't burn my tokens on this".
-  Requires the `muse` binary on PATH. Not for a single coherent change threaded through
-  many files, for debugging, for work needing a design decision, or for parallelism that
-  has nothing to do with muse — git worktrees on a human branch, Task-tool subagents, or
-  background jobs.
+  Delegate several independent mechanical edits to Muse Code (`muse exec`)
+  workers in isolated git worktrees, each supervised until its patch is right.
+  Repetitive refactors or tests across many files, naming Muse Code or `muse exec`,
+  offloading to a cheaper model, fan-out, grunt work or "don't burn my tokens on this".
+  Requires the `muse` binary on PATH. Not for a single coherent change, debugging,
+  design decisions, or parallelism unrelated to muse — human worktrees, Task-tool
+  subagents, background jobs.
 allowed-tools: Bash(muse-status:*), Bash(muse-doctor:*), Read, Grep, Glob
 ---
 
@@ -56,7 +51,7 @@ itself.
 
 ## The plugin surface
 
-Six commands you type — `/muse:delegate`, `/muse:ask`, `/muse:fleet`, `/muse:status`,
+Seven commands you type — `/muse:delegate`, `/muse:ask`, `/muse:fleet`, `/muse:status`,
 `/muse:model`, `/muse:cleanup`, `/muse:doctor` — one agent the fan-out spawns, and the
 scripts under both.
 "Running it" below says which to reach for.
@@ -134,7 +129,7 @@ Pick the path before doing anything else. Four exist and they are not interchang
 | A question, an inventory, one small contained edit | `muse-ask` |
 | One task needing a check and revision rounds | Spawn the `muse-supervisor` agent with the brief |
 | 2–5 independent tasks, files already partitioned | One `muse-supervisor` agent per task, all spawned in one message |
-| A job that still needs decomposing | The workflow script in `${CLAUDE_PLUGIN_ROOT}/references/workflow.md` |
+| A job that still needs decomposing | Run the registered workflow `muse-supervised-fleet` by name (code in `${CLAUDE_PLUGIN_ROOT}/workflows/muse-supervised-fleet.js`) |
 | 20+ trivial tasks, review batched to the end | `muse-fleet` |
 
 **Spawning `muse-supervisor` is the default for one or a few tasks.** Hand-driving
@@ -429,11 +424,14 @@ Delegating from inside a workflow **you** are writing — muse as one stage rath
 whole job — is covered by "Embedding muse in your own workflow" in that same file. The
 short version: a workflow script has no filesystem, so muse always runs inside an
 `agent()`; pass `pluginRoot` and `stamp` through `args`; keep `--out` absolute, because an
-agent's Bash cwd resets between calls and `--out` resolves against it.
+agent's Bash cwd resets between calls and a relative `--out` resolves against the owning
+repository rather than the cwd — and `run` refuses a relative `--out` whose `--repo` is a
+different repository, since the later subcommands could not find the task.
 
-`${CLAUDE_PLUGIN_ROOT}/references/workflow.md` is the primary path: the full supervised-fleet script, why each
-choice is the way it is, and the variations (escalation, competing implementations, cheap
-analysis inside a Claude pipeline).
+`${CLAUDE_PLUGIN_ROOT}/references/workflow.md` is the reasoning behind the supervised-fleet
+shape and its variations (escalation, competing implementations, cheap analysis inside a
+Claude pipeline), not the script itself; the code is
+`${CLAUDE_PLUGIN_ROOT}/workflows/muse-supervised-fleet.js`.
 
 `${CLAUDE_PLUGIN_ROOT}/references/muse-cli.md` documents the verified CLI surface: the JSONL event schema, the
 `run_terminal` record that decides success, worktree mechanics, structured output, safety

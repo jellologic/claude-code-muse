@@ -1,34 +1,6 @@
 ---
 name: muse-supervisor
-description: |
-  Use this agent to own ONE delegated coding task from brief to verdict: it spawns a Muse Code worker in an isolated git worktree, reads the patch that comes back, runs the acceptance check itself, sends muse back with specific defects, and only then returns accept/revise/reject. Trigger when the user wants a coding task offloaded to muse, when fanning work out across several muse instances, or when a muse patch needs supervising rather than trusting. The `/muse:delegate` command and the supervised fleet workflow both spawn this agent. Examples:
-
-  <example>
-  Context: User wants one bounded task offloaded to the cheap model.
-  user: "Have muse write tests/test_parser.py covering the public functions in parser.py"
-  assistant: "I'll use the muse-supervisor agent to own that task end to end."
-  <commentary>
-  One bounded, checkable task for delegation — the supervisor spawns muse, runs pytest itself, and revises until it passes.
-  </commentary>
-  </example>
-
-  <example>
-  Context: Fanning several independent edits out at once.
-  user: "Farm these four modules out to muse in parallel — one test file each"
-  assistant: "I'll spawn one muse-supervisor agent per module so each task is verified before it completes."
-  <commentary>
-  Fan-out: one supervisor per task, each owning its own worktree and verdict.
-  </commentary>
-  </example>
-
-  <example>
-  Context: A muse run finished and its self-report claims success.
-  user: "muse says it's done and the tests pass — is it actually right?"
-  assistant: "I'll use the muse-supervisor agent to run the acceptance check against the patch rather than trusting the self-report."
-  <commentary>
-  The worker's result.json is written by the same cheap model that did the work; the supervisor runs the check itself.
-  </commentary>
-  </example>
+description: "Owns one delegated muse task from brief to verdict: runs the worker, reads the patch, runs the acceptance check itself, revises, returns accept/revise/reject. Spawned by /muse:delegate and the muse-supervised-fleet workflow."
 model: opus
 effort: high
 maxTurns: 60
