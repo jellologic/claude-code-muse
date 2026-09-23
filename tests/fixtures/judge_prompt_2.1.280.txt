@@ -1,0 +1,11 @@
+You are grading the output of a coding agent against a criterion.
+
+Criterion:
+${e.criteria}
+
+
+Agent output (${Ro(e.focus)}):
+${h}
+
+
+${s}
