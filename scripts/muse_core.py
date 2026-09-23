@@ -54,7 +54,8 @@ CATALOG_GLOB = os.environ.get(
 #
 # Verified against this version. A mismatch is a WARN, never a refusal: muse ships
 # faster than this plugin does, and refusing to run on an untested version would be
-# wrong far more often than it was right.
+# wrong far more often than it was right. The plugin relies on `exec --prompt-file`
+# and on `--` ending option parsing.
 MUSE_TESTED_VERSION = "1.3.0"
 
 # Floor for the Claude Code CLI, and the single place it lives: CI installs this
@@ -201,7 +202,7 @@ def git(repo: Path, *args: str, **kw) -> str:
     check = kw.pop("check", True)
     r = subprocess.run(
         ["git", "-C", str(repo), *args],
-        capture_output=True, text=True,
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
     if check and r.returncode != 0:
         raise RuntimeError("git {} failed: {}".format(" ".join(args), r.stderr.strip()))
@@ -219,7 +220,8 @@ def drop_worktree(repo: Path, wt: Path, branch: str, force_branch: bool = True) 
     subprocess.run(["git", "-C", str(repo), "worktree", "prune"], capture_output=True)
     # Any other worktree still holding this branch would block the delete.
     listing = subprocess.run(["git", "-C", str(repo), "worktree", "list", "--porcelain"],
-                             capture_output=True, text=True).stdout
+                             capture_output=True, text=True,
+                             encoding="utf-8", errors="surrogateescape").stdout
     path = None
     for line in listing.splitlines():
         if line.startswith("worktree "):
@@ -380,7 +382,8 @@ def git_toplevel(start: Path):
     """The repository root containing `start`, or None if there is not one."""
     try:
         r = subprocess.run(["git", "-C", str(start), "rev-parse", "--show-toplevel"],
-                           capture_output=True, text=True)
+                           capture_output=True, text=True,
+                           encoding="utf-8", errors="surrogateescape")
     except OSError:
         return None
     top = (r.stdout or "").strip()
@@ -399,7 +402,8 @@ def _git_abs_path(start: Path, *revparse_args: str):
         try:
             r = subprocess.run(
                 ["git", "-C", str(start), "rev-parse", *flag, *revparse_args],
-                capture_output=True, text=True)
+                capture_output=True, text=True,
+                encoding="utf-8", errors="surrogateescape")
         except OSError:
             return None
         if r.returncode != 0:
@@ -684,7 +688,8 @@ def muse_version():
     Parsed out rather than compared whole: the line carries more than the number, and
     the number is the only part with a stable meaning."""
     try:
-        r = subprocess.run(["muse", "--version"], capture_output=True, text=True, timeout=10)
+        r = subprocess.run(["muse", "--version"], capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=10)
     except (OSError, subprocess.SubprocessError):
         return None
     if r.returncode != 0:
@@ -734,7 +739,8 @@ def kill_process_tree(p) -> None:
         try:
             killed_group = subprocess.run(
                 ["taskkill", "/F", "/T", "/PID", str(p.pid)],
-                capture_output=True, text=True).returncode == 0
+                capture_output=True, text=True,
+                encoding="utf-8", errors="replace").returncode == 0
         except OSError:
             pass
     if not killed_group:
@@ -749,6 +755,13 @@ def kill_process_tree(p) -> None:
         p.wait(timeout=10)
     except Exception:
         pass
+
+
+# Linux caps ONE argv string at 128 KiB (MAX_ARG_STRLEN). Windows caps the whole
+# CreateProcess command line at 32767 chars. Over this size the prompt goes through
+# `muse exec --prompt-file`, which muse 1.3.0 supports and which cannot be combined
+# with an inline prompt.
+PROMPT_ARG_MAX_BYTES = 16 * 1024
 
 
 def run_muse(cmd, prompt: str, repo: Path, events: Path, stderr: Path, timeout: int,
@@ -777,8 +790,23 @@ def run_muse(cmd, prompt: str, repo: Path, events: Path, stderr: Path, timeout: 
         # installed as a .cmd shim is FileNotFoundError under its bare name even though
         # shutil.which (what preflight checks) resolves it. Resolve the same way first.
         exe = shutil.which(cmd[0]) or cmd[0]
-        p = subprocess.Popen([exe, *cmd[1:], prompt], cwd=str(repo), stdout=fo, stderr=fe,
-                             text=True, start_new_session=True)
+        data = prompt.encode("utf-8", "surrogateescape")
+        if len(data) > PROMPT_ARG_MAX_BYTES:
+            pf = events.with_name("prompt.txt")
+            pf.write_bytes(data)
+            argv = [exe, *cmd[1:], "--prompt-file", str(pf.resolve())]
+        else:
+            # muse parses a positional that starts with '-' as an option and refuses
+            # it ("unknown option - fix it", measured), so `--` must precede the prompt.
+            argv = [exe, *cmd[1:], "--", prompt]
+        try:
+            p = subprocess.Popen(argv, cwd=str(repo), stdout=fo, stderr=fe,
+                                 start_new_session=True)
+        except OSError as e:
+            out["status"] = "spawn_failed"
+            out["reason"] = "could not start muse: {}".format(e)
+            out["elapsed_s"] = round(_time.time() - started, 1)
+            return out
         _LIVE.append(p)
         try:
             # A signal may have arrived between the shutdown check and the spawn; the
@@ -827,7 +855,7 @@ def run_muse(cmd, prompt: str, repo: Path, events: Path, stderr: Path, timeout: 
     # run_terminal is the single authoritative record; everything else is noise.
     term = None
     try:
-        with events.open(encoding="utf-8") as f:
+        with events.open(encoding="utf-8", errors="replace") as f:
             for line in f:
                 try:
                     pl = json.loads(line).get(EV_PAYLOAD, {})
@@ -966,7 +994,7 @@ def patch_fingerprint(wt: Path, base: str, excludes):
         if diff.returncode != 0:
             return None
         return hashlib.sha256(diff.stdout).hexdigest()
-    except OSError:
+    except Exception:
         return None
 
 
