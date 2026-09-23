@@ -13,18 +13,19 @@ set -euo pipefail
 SETTINGS="${MUSE_SETTINGS:-$HOME/.config/muse/settings.json}"
 WRITE=0
 [[ "${1:-}" == "--write" ]] && WRITE=1
+CORE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/muse_core.py"
 
-python3 - "$SETTINGS" "$WRITE" <<'PY'
-import glob, json, os, shutil, sys, time
+python3 - "$SETTINGS" "$WRITE" "$CORE" <<'PY'
+import importlib.util, json, os, shutil, sys, time
 
 settings_path, write = sys.argv[1], sys.argv[2] == "1"
 
-rows = []
-for f in glob.glob(os.path.expanduser("~/.local/share/muse/model-catalog/*.json")):
-    try:
-        rows += json.load(open(f)).get("rows") or []
-    except Exception:
-        pass
+# The catalog glob lives in muse_core, the single source, so MUSE_DATA_DIR and
+# MUSE_CATALOG_GLOB redirect this script exactly as they redirect the fleet.
+spec = importlib.util.spec_from_file_location("muse_core", sys.argv[3])
+core = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(core)
+rows = core.catalog_rows()
 
 if not rows:
     sys.exit("no model catalog found — run any `muse exec` once to populate it")
