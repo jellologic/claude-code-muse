@@ -169,7 +169,7 @@ mkdir -p "$LAB/v_cl_fleet_bin"
 cat > "$LAB/v_cl_fleet_bin/muse" <<'STUB'
 #!/bin/sh
 wt=""
-while [ $# -gt 0 ]; do [ "$1" = "--worktree-existing" ] && wt="$2"; shift; done
+while [ $# -gt 0 ]; do [ "$1" = "--workspace" ] && wt="$2"; shift; done
 for i in 1 2 3; do echo "f$i" > "$wt/feature$i.py"; done
 : > "$(git -C "$wt" rev-parse --absolute-git-dir)/index.lock"
 echo '{"payload":{"kind":"run_terminal","terminal":"completed","text":"done"}}'

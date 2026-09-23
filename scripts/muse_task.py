@@ -227,7 +227,7 @@ def do_round(st: dict, tdir: Path, prompt: str, args, kind: str,
         save_state(tdir, st)
 
     try:
-        res = core.run_muse(cmd, prompt, repo, rdir / "events.jsonl",
+        res = core.run_muse(cmd, prompt, wt, rdir / "events.jsonl",
                             rdir / "stderr.log",
                             int(st.get("timeout") or core.DEFAULT_TIMEOUT),
                             on_spawn=on_spawn)
@@ -462,39 +462,27 @@ def cmd_run(args) -> int:
     # not undoable: contributor-tier models state that content may be used for product
     # improvement. `possible` hits only warn; blocking on those would make the plugin
     # unusable on any repo with test fixtures.
-    scan = {"certain": [], "possible": [], "files_scanned": 0, "truncated": False}
-    if not args.no_secret_scan:
-        scan = core.scan_secrets(wt)
-        # A partial scan and a clean scan produced identical output, which is the exact
-        # failure this project negative-controls everything else against. The cap is a
-        # count of successfully decoded TEXT files, so it is reachable in any mid-size
-        # repo -- and the one control standing between a private key and a tier whose own
-        # catalog says content "may be used for product improvement" would quietly
-        # degrade to partial coverage while `run` carried on.
-        partial = (" The scan stopped at {} files and did NOT cover the whole tree, so "
-                   "this count is a floor, not a total.".format(scan["files_scanned"])
-                   if scan["truncated"] else "")
-        if scan["certain"] and not args.allow_secrets:
-            core.drop_worktree(repo, wt, branch)
-            emit({
-                "id": args.id, "status": "refused",
-                "reason": "{} credential(s) found in the tree this worker would be able "
-                          "to read. Sending them to a contributor-tier model is not "
-                          "undoable. Remove them, add them to .gitignore and stop "
-                          "--seed-ing them, or pass --allow-secrets if they are fake.{}"
-                          .format(len(scan["certain"]), partial),
-                "secrets": scan["certain"][:20],
-                "possible_secrets": len(scan["possible"]),
-                "files_scanned": scan["files_scanned"],
-                "truncated": scan["truncated"],
-            })
-            return 1
-        if scan["certain"] or scan["possible"] or scan["truncated"]:
-            print("muse_task[{}]: secret scan — {} certain, {} possible across {} files{}"
-                  .format(args.id, len(scan["certain"]), len(scan["possible"]),
-                          scan["files_scanned"],
-                          " (PARTIAL — hit the file cap, the rest of the tree was not "
-                          "scanned)" if scan["truncated"] else ""), file=sys.stderr)
+    pf = core.preflight_secrets([wt], {"allow_secrets": args.allow_secrets,
+                                       "no_secret_scan": args.no_secret_scan})
+    scan = {"certain": pf["certain"], "possible": pf["possible"],
+            "files_scanned": pf["files_scanned"], "truncated": pf["truncated"]}
+    if pf["refuse"]:
+        core.drop_worktree(repo, wt, branch)
+        emit({
+            "id": args.id, "status": "refused",
+            "reason": pf["reason"],
+            "secrets": pf["certain"][:20],
+            "possible_secrets": len(pf["possible"]),
+            "files_scanned": pf["files_scanned"],
+            "truncated": pf["truncated"],
+        })
+        return 1
+    if scan["certain"] or scan["possible"] or scan["truncated"]:
+        print("muse_task[{}]: secret scan — {} certain, {} possible across {} files{}"
+              .format(args.id, len(scan["certain"]), len(scan["possible"]),
+                      scan["files_scanned"],
+                      " (PARTIAL — hit the file cap, the rest of the tree was not "
+                      "scanned)" if scan["truncated"] else ""), file=sys.stderr)
     absent = core.absent_locals(repo, (args.seed or []) + (args.link or []))
     if absent:
         print("muse_task[{}]: note — {} exist in the repo but NOT in the worktree; "

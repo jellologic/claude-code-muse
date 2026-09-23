@@ -24,6 +24,10 @@
 # point at a dirty working copy. --write opts into editing (and disables the sandbox),
 # which you should only do against a worktree or a repo you are willing to have modified.
 #
+# --write scans the repo for credentials first and refuses when it finds a confirmed
+# one. --allow-secrets scans and reports but does not refuse; --no-secret-scan skips
+# the scan entirely.
+#
 # Exits 0 and prints the final answer, or exits 1 and prints the failure reason to stderr.
 
 set -uo pipefail
@@ -38,6 +42,8 @@ REPO="."
 WRITE=0
 TIMEOUT=600
 MAX_STEPS=""
+ALLOW_SECRETS=0
+NO_SECRET_SCAN=0
 
 # Print the header comment block, stopping at the first non-comment line. A fixed line
 # range drifts the moment the header is edited -- which is how `--help` started printing
@@ -53,6 +59,8 @@ while [[ $# -gt 0 ]]; do
     --timeout)   TIMEOUT="$2"; shift 2 ;;
     --max-steps) MAX_STEPS="$2"; shift 2 ;;
     --write)     WRITE=1; shift ;;
+    --allow-secrets) ALLOW_SECRETS=1; shift ;;
+    --no-secret-scan) NO_SECRET_SCAN=1; shift ;;
     --session)   SESSION="$2"; shift 2 ;;
     --continue)  CONTINUE=1; shift ;;
     -h|--help)   usage 0 ;;
@@ -95,6 +103,36 @@ REPO_ABS="$(cd "$REPO" 2>/dev/null && pwd || echo "$REPO")"
 # and a filename built from the path itself would need escaping on three platforms.
 SESSION_KEY="$(printf '%s' "$REPO_ABS" | python3 -c 'import hashlib,sys;print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest()[:16])' 2>/dev/null)"
 SESSION_FILE="$DATA_DIR/last-session/$SESSION_KEY"
+
+# A --write run can edit the repo, so scan for credentials BEFORE anything is
+# recorded or spawned. The read-only path never reaches a worker that can write,
+# so it is unchanged.
+if [[ "$WRITE" -eq 1 && "$NO_SECRET_SCAN" -eq 0 ]]; then
+  ASK_SCAN_OUT="$(python3 -c '
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("mc", sys.argv[1])
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+allow = sys.argv[3] == "1" or not m.user_option("refuse_on_secrets", True)
+pf = m.preflight_secrets([sys.argv[2]], {"allow_secrets": allow, "no_secret_scan": False})
+if pf["refuse"]:
+    sys.stderr.write("muse_ask: refused: %s\n" % (pf["reason"] or ""))
+    for f in pf["certain"][:20]:
+        sys.stderr.write("  %s:%s %s\n" % (f["file"], f["line"], f["kind"]))
+    sys.exit(3)
+if pf["certain"] or pf["possible"] or pf["truncated"]:
+    sys.stderr.write("muse_ask: secret scan — %d certain, %d possible across %d files%s\n"
+                     % (len(pf["certain"]), len(pf["possible"]), pf["files_scanned"],
+                        " (PARTIAL — hit the file cap)" if pf["truncated"] else ""))
+sys.exit(0)
+' "$SKILL_DIR/scripts/muse_core.py" "$REPO_ABS" "$ALLOW_SECRETS" 2>&1)"
+  ASK_RC=$?
+  if [ -n "$ASK_SCAN_OUT" ]; then printf '%s\n' "$ASK_SCAN_OUT" >&2; fi
+  if [ "$ASK_RC" -eq 3 ]; then exit 1; fi
+  if [ "$ASK_RC" -ne 0 ]; then
+    echo "muse_ask: refused: the credential scan could not run (exit $ASK_RC); pass --no-secret-scan to skip it" >&2
+    exit 1
+  fi
+fi
 
 if [[ "$CONTINUE" -eq 1 && -z "$SESSION" ]]; then
   if [[ -s "$SESSION_FILE" ]]; then

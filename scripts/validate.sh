@@ -73,7 +73,7 @@ PASS=0; FAIL=0; SKIP=0
 # compares PASS+FAIL against this, so a removed block lowers the tally. Skips do
 # not count -- a SKIP is a check that did not run, and counting it lets a machine
 # without node stay green with fewer executed checks.
-EXPECTED_OFFLINE=293
+EXPECTED_OFFLINE=331
 
 ok()   { PASS=$((PASS+1)); printf '  \033[32mPASS\033[0m  %s\n' "$1"; }
 bad()  { FAIL=$((FAIL+1)); printf '  \033[31mFAIL\033[0m  %s\n' "$1"; [ -n "${2:-}" ] && echo "        $2"; }
@@ -1995,7 +1995,7 @@ problems = []
 if "AWS access key id" not in kinds: problems.append("missed AWS key")
 if "private key block" not in kinds: problems.append("missed PEM header")
 if not r["possible"]: problems.append("missed credential-shaped assignment")
-if any("node_modules" in f["file"] for f in r["certain"]): problems.append("scanned node_modules")
+if not any("node_modules" in f["file"] for f in r["certain"]): problems.append("skipped node_modules, which the worker can read")
 if "AKIAIOSFODNN7EXAMPLE" in blob: problems.append("LEAKED the secret into its own findings")
 if any("clean.py" in f["file"] for f in r["certain"]): problems.append("false positive on clean code")
 if problems: print("        ", problems)
@@ -2057,6 +2057,7 @@ sys.exit(0 if c and not any('PARTIAL' in x['value'] for x in c) else 1)" \
   && ok "a scan that covered the tree is not labelled partial" \
   || bad "the partial label fires unconditionally" "$DOC_FULL"
 
+. "$SKILL/tests/test_secrets.sh"
 . "$SKILL/tests/test_roundtrip.sh"
 . "$SKILL/tests/test_bin.sh"
 . "$SKILL/tests/test_collision.sh"

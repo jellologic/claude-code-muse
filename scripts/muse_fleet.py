@@ -138,11 +138,28 @@ def run_task(task: dict, repo: Path, out: Path, args) -> dict:
     if seeded:
         rec["seeded"] = seeded
 
+    pf = core.preflight_secrets([wt], {"allow_secrets": getattr(args, "allow_secrets", False),
+                                       "no_secret_scan": getattr(args, "no_secret_scan", False)})
+    rec["secret_scan"] = {"certain": len(pf["certain"]), "possible": len(pf["possible"]),
+                          "files_scanned": pf["files_scanned"],
+                          "truncated": pf["truncated"], "skipped": pf["skipped"]}
+    if pf["refuse"]:
+        drop_worktree(repo, wt, branch)
+        rec["status"] = "refused"
+        rec["reason"] = pf["reason"]
+        rec["secrets"] = pf["certain"][:20]
+        return rec
+    if pf["certain"] or pf["possible"] or pf["truncated"]:
+        print("muse_fleet[{}]: secret scan — {} certain, {} possible across {} files{}"
+              .format(tid, len(pf["certain"]), len(pf["possible"]), pf["files_scanned"],
+                      " (PARTIAL — hit the file cap, the rest of the tree was not "
+                      "scanned)" if pf["truncated"] else ""), file=sys.stderr)
+
     cmd = core.muse_cmd(model, effort, wt, schema=args.schema,
                         max_steps=task.get("max_steps") or args.max_steps,
                         inherit_skills=args.inherit_skills)
 
-    res = core.run_muse(cmd, task["prompt"], repo, tdir / "events.jsonl",
+    res = core.run_muse(cmd, task["prompt"], wt, tdir / "events.jsonl",
                         tdir / "stderr.log", timeout)
     rec["elapsed_s"] = res["elapsed_s"]
     rec["status"] = res["status"]
@@ -266,6 +283,11 @@ def main() -> int:
                     help="flag patches larger than this as oversized")
     ap.add_argument("--inherit-skills", action="store_true",
                     help="let workers load your Claude Code personal skills (off by default)")
+    ap.add_argument("--no-secret-scan", action="store_true",
+                    help="skip the pre-delegation credential scan")
+    ap.add_argument("--allow-secrets", action="store_true",
+                    default=not core.user_option("refuse_on_secrets", True),
+                    help="scan, report, but do not refuse on a confirmed credential")
     args = ap.parse_args()
 
     if args.exclude is None:
