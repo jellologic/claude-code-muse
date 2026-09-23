@@ -133,5 +133,7 @@ a speculative patch.
 | `workflows/muse-supervised-fleet.js` | The registered fleet workflow — run by name, never pasted |
 | `references/` | Long-form: why the workflow is shaped that way, the CLI surface, routing, field notes |
 | `hooks/preflight.sh` | SessionStart; silent unless delegation would fail |
-| `hooks/supervisor_stop.py` | SubagentStop (muse-supervisor); what the artifacts say |
-| `hooks/session_end.py` | SessionEnd; worktrees still open, or silence |
+| `hooks/supervisor_stop.py` | SubagentStop (^muse:muse-supervisor$); blocks an owner leaving unfinished work |
+| `hooks/supervisor_result.py` | PostToolUse on Agent; what the artifacts say |
+| `hooks/leftover_worktrees.py` | SessionStart leftover report; recorded muse/fleet worktrees only |
+| `hooks/_artifacts.py` | Shared recent-task scan for the hooks; never raises |

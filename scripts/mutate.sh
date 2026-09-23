@@ -15,7 +15,7 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # Later PRs append their fixed mutant ids here as their checks land, and never remove
 # one, so a regression that re-opens a once-killed hole fails the run again.
-MUST_KILL="M01 M02 M03 M04 M05 M08 M09 M11 M12 M13 M15 M17 M18"
+MUST_KILL="M01 M02 M03 M04 M05 M06 M07 M08 M09 M10 M11 M12 M13 M15 M17 M18"
 if [ -n "${MUTATE_MUST_KILL:-}" ]; then
   # Self-tests stage a failing run through the environment without touching this file.
   echo "mutate: MUST_KILL overridden by environment: $MUTATE_MUST_KILL" >&2
@@ -35,11 +35,11 @@ M = [
  ("M03", "scripts/muse_task.py", '    verified = passed and certified', '    verified = passed', "accept gate ignores certification"),
  ("M04", "scripts/muse_core.py", '    refuse = bool(scan["certain"]) and not opts.get("allow_secrets")', '    refuse = bool(scan["certain"]) and bool(opts.get("allow_secrets"))', "secret refusal inverted"),
  ("M05", "scripts/muse_core.py", '    for f in _expand_paths(root, paths):', '    for f in [p for p in _expand_paths(root, paths) if not p.name.startswith(".")]:', "secret scan skips dotfiles, so .env is never scanned"),
- ("M06", "hooks/supervisor_stop.py", '        print("  - " + n)', '        print("  - " + n, file=sys.stderr)', "SubagentStop hook writes to stderr instead of stdout"),
- ("M07", "hooks/supervisor_stop.py", '        if task.get("verdict") == "accept" and not task.get("verified_by_supervisor"):', '        if False:', 'SubagentStop drops the "accepted without a passing check" note'),
+ ("M06", "hooks/supervisor_result.py", '    print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": "\\n".join(lines)}}))', '    print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": "\\n".join(lines)}}), file=sys.stderr)', "PostToolUse hook writes its JSON to stderr instead of stdout"),
+ ("M07", "hooks/supervisor_result.py", '            if task.get("verdict") == "accept" and not task.get("verified_by_supervisor"):', '            if False:', 'PostToolUse drops the "accepted without a passing check" note'),
  ("M08", "scripts/muse_task.py", '        "max_rounds": args.max_rounds,', '        "max_rounds": DEFAULT_MAX_ROUNDS,', "--max-rounds parsed but a constant stored"),
  ("M09", "hooks/preflight.sh", '  if [ ! -s "$MUSE_CONFIG/auth.json" ]; then', '  if [ -s "$MUSE_CONFIG/auth.json" ]; then', "preflight auth check inverted"),
- ("M10", "hooks/session_end.py", 'OURS = re.compile(r"^refs/heads/(muse|fleet)/")', 'OURS = re.compile(r"^refs/heads/(muse)/")', "SessionEnd ignores fleet/ worktrees"),
+ ("M10", "hooks/leftover_worktrees.py", 'OURS = re.compile(r"^refs/heads/(muse|fleet)/")', 'OURS = re.compile(r"^refs/heads/(muse)/")', "SessionStart worktree report ignores fleet/ worktrees"),
  ("M11", "scripts/muse_cleanup.py", '    if rp == cwd or rp in cwd.parents:', '    if False:', "cleanup stops refusing the cwd or its ancestors"),
  ("M12", "scripts/muse_task.py", '    if used >= int(st["max_rounds"]):', '    if used > int(st["max_rounds"]):', "round breaker off by one (>= changed to >)"),
  ("M13", "scripts/muse_task.py", '        core.kill_process_tree(p)', '        p.kill()', "verify timeout kills only the shell"),

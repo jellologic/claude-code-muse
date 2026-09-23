@@ -1,117 +1,145 @@
 #!/usr/bin/env python3
-"""SubagentStop (matcher: muse-supervisor): the backstop for the central claim.
+"""SubagentStop (matcher: ^muse:muse-supervisor$): stop a supervisor that owns unfinished work.
 
-The thesis of this plugin is one sentence -- a verdict means someone looked -- and
-`finish` now enforces it: `--verdict accept` is refused unless a check ran, the final one
-passed, and it ran against the patch being harvested. That closes the path where a bad
-verdict gets WRITTEN. It cannot close the path where the record is never written at all:
-a supervisor that runs out of turns, is interrupted, or simply stops and reports from
-memory leaves a worktree holding real work and no artifact saying what happened to it.
-
-This reads what is already on disk when the supervisor stops. No model call, no
-heuristic, no new state -- which is why it is worth having.
-
-It reports and does not block. Exit 2 on SubagentStop would send the supervisor back,
-and that is the wrong instrument here: this hook cannot see the brief, so it cannot tell
-a supervisor stopping too early from one the user interrupted on purpose, and blocking
-the second is worse than reporting the first. What it prints goes to the orchestrating
-agent -- which is exactly where the verdict gets turned into a sentence for the user, and
-the only place the correction matters.
+The old version of this hook never fired and never blocked: its matcher was
+an exact-name list that plugin agent types never equal, and its plain stdout
+reached nobody on SubagentStop. Blocking is safe now for two reasons it did
+not have before. First, ownership: the supervisor's own transcript names the
+branch `muse_task.py run` printed, so a fleet of sibling supervisors blocks
+only over the task it actually owns instead of every in-flight task in the
+project. Second, a per-task cap of two blocks: a supervisor that cannot or
+will not finish is sent back twice, then let go rather than looped forever.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import shlex
 import sys
-import time
 from pathlib import Path
 
-# Only tasks this session plausibly touched. Without a window, every stale task in the
-# repo shouts on every subagent stop and the hook trains its reader to ignore it.
-RECENT_SECONDS = 6 * 60 * 60
-MAX_REPORTED = 10
-ROOTS = (".muse-fleet/tasks", ".muse-fleet/supervised")
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _artifacts as A
+
+MAX_BLOCKS_PER_TASK = 2
+BLOCKS_FILE = "stop_hook_blocks.json"
 
 
-def task_dirs(project: Path):
-    for rel in ROOTS:
-        root = project / rel
-        if not root.is_dir():
-            continue
-        # <root>/<id>/ for the single-task path, <root>/<stamp>/<id>/ for the fleet's.
-        for d in sorted(root.iterdir()):
-            if (d / "state.json").exists():
-                yield d
-            elif d.is_dir():
-                for sub in sorted(d.iterdir()):
-                    if (sub / "state.json").exists():
-                        yield sub
+def read_transcript_text(payload: dict) -> str:
+    parts = []
+    tp = payload.get("agent_transcript_path")
+    if isinstance(tp, str) and tp:
+        try:
+            # open() rather than Path.read_text: the errors= parameter of
+            # read_text exists only on 3.10+, and CI still runs 3.9.
+            with open(tp, encoding="utf-8", errors="replace") as f:
+                parts.append(f.read())
+        except (OSError, ValueError):
+            pass
+    lam = payload.get("last_assistant_message")
+    if isinstance(lam, str) and lam:
+        parts.append(lam)
+    return "\n".join(parts)
 
 
-def read(p: Path):
+def block_count(taskdir: Path):
     try:
-        return json.loads(p.read_text(encoding="utf-8"))
+        val = json.loads((taskdir / BLOCKS_FILE).read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return None
+        return 0
+    if isinstance(val, dict) and isinstance(val.get("count"), int):
+        return val["count"]
+    if isinstance(val, int):
+        return val
+    return 0
+
+
+def bump_count(taskdir: Path) -> bool:
+    try:
+        n = block_count(taskdir) + 1
+        (taskdir / BLOCKS_FILE).write_text(json.dumps({"count": n}), encoding="utf-8")
+        return True
+    except (OSError, ValueError):
+        return False
 
 
 def main() -> int:
     try:
-        sys.stdin.read()
+        payload = json.loads(sys.stdin.read())
     except (OSError, ValueError):
-        pass
-
-    project = Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
-    cutoff = time.time() - RECENT_SECONDS
-    notes = []
-
-    for d in task_dirs(project):
-        st = read(d / "state.json")
-        if not isinstance(st, dict):
-            continue
-        try:
-            if (d / "state.json").stat().st_mtime < cutoff:
-                continue
-        except OSError:
-            continue
-
-        task = read(d / "task.json")
-        tid = st.get("id", d.name)
-
-        if not st.get("done") and not (task or {}).get("verdict"):
-            rounds = len(st.get("rounds") or [])
-            if rounds:
-                notes.append(
-                    "{}: {} round(s) ran and no verdict was recorded. The patch is at "
-                    "{} and the worktree is still there; nothing else will mention it."
-                    .format(tid, rounds, d / "patch.diff"))
-            continue
-
-        if not isinstance(task, dict):
-            continue
-        if task.get("verdict") == "accept" and not task.get("verified_by_supervisor"):
-            why = task.get("accepted_unverified")
-            notes.append(
-                "{}: accepted WITHOUT a passing check{}. Report that in those words "
-                "rather than as a plain accept.".format(
-                    tid, ", by explicit override: " + str(why) if why else ""))
-        if task.get("out_of_band_edit"):
-            notes.append(
-                "{}: the harvested patch is not what muse produced -- something wrote "
-                "into the worktree afterwards.".format(tid))
-
-    if not notes:
+        return 0
+    if not isinstance(payload, dict):
+        return 0
+    agent_type = payload.get("agent_type")
+    if agent_type is not None and agent_type != "muse:muse-supervisor":
+        return 0
+    # stop_hook_active means this hook already blocked the current stop, so
+    # blocking again would loop; stay silent and leave the counts alone.
+    if payload.get("stop_hook_active") is True:
         return 0
 
-    print("muse plugin: what the artifacts say about the task(s) that just finished. "
-          "Use this over the supervisor's summary where they disagree.")
-    for n in notes[:MAX_REPORTED]:
-        print("  - " + n)
-    if len(notes) > MAX_REPORTED:
-        print("  ... and {} more; `/muse:status` has the rest.".format(len(notes) - MAX_REPORTED))
+    project = A.project_dir()
+    text = read_transcript_text(payload)
+    if not text:
+        return 0
+
+    blocking = []
+    for d, st, task in A.recent_tasks(project):
+        if not A.is_unfinished(st, task):
+            continue
+        branch = st.get("branch")
+        if not isinstance(branch, str) or not branch:
+            continue
+        if not A.mentions_branch(text, branch):
+            continue
+        if block_count(d) >= MAX_BLOCKS_PER_TASK:
+            continue
+        tid = st.get("id", d.name)
+        blocking.append((d, tid, A.rounds_count(st)))
+        if len(blocking) >= 10:
+            break
+
+    if not blocking:
+        return 0
+
+    # A count file that cannot be written fails open: an unbounded loop is
+    # worse than letting one task go, so uncountable tasks are dropped.
+    named = []
+    for d, tid, n in blocking:
+        if bump_count(d):
+            named.append((d, tid, n))
+    if not named:
+        return 0
+
+    # One runnable finish command per owned task: finish takes a single
+    # --id, a fleet task needs its stamp dir as --out rather than the
+    # default tasks root, and the only verdicts are accept|revise|reject.
+    # shlex.quote keeps an odd id runnable; as_posix keeps a Windows C:/...
+    # out usable from Git Bash instead of losing backslashes to shlex.
+    summaries = []
+    commands = []
+    for d, tid, n in named:
+        summaries.append("task {} has {} round(s) and no verdict".format(tid, n))
+        out = Path(os.path.abspath(d.parent)).as_posix()
+        commands.append(
+            "muse-task finish --id {} --out {} --verdict accept|revise|reject --summary \"...\"".format(
+                shlex.quote(str(tid)), shlex.quote(out)
+            )
+        )
+    reason = "{}: run one finish command per task before stopping.\n{}".format(
+        "; ".join(summaries), "\n".join(commands)
+    )
+    print(json.dumps({"decision": "block", "reason": reason}))
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except BaseException:
+        try:
+            sys.stdout.write("")
+        except BaseException:
+            pass
+        sys.exit(0)
