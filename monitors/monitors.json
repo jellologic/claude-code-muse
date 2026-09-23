@@ -1,0 +1,7 @@
+[
+  {
+    "name": "muse-events",
+    "description": "muse task rounds, checks and verdicts",
+    "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/muse_monitor.py\" --project \"${CLAUDE_PROJECT_DIR}\" --config \"${CLAUDE_PLUGIN_DATA}/monitor.json\""
+  }
+]

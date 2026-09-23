@@ -159,6 +159,10 @@ def run_task(task: dict, repo: Path, out: Path, args) -> dict:
                         max_steps=task.get("max_steps") or args.max_steps,
                         inherit_skills=args.inherit_skills)
 
+    # repo, not out: an absolute --out still reports into the repository.
+    core.append_event(Path(repo), {"event": "round_started", "task": tid,
+                                   "round": 1, "max_rounds": 1, "kind": "initial",
+                                   "fleet": out.name})
     res = core.run_muse(cmd, task["prompt"], wt, tdir / "events.jsonl",
                         tdir / "stderr.log", timeout)
     rec["elapsed_s"] = res["elapsed_s"]
@@ -197,6 +201,15 @@ def run_task(task: dict, repo: Path, out: Path, args) -> dict:
         rec["status"] = "harvest_failed"
         rec["reason"] = ("harvest failed ({}); the work exists only in "
                          "worktree {}".format(h["harvest_error"], wt))
+    # rec["status"] is final here, after the harvest_failed adjustment above.
+    fin_ev = {"event": "round_finished", "task": tid,
+              "round": 1, "max_rounds": 1,
+              "status": rec["status"],
+              "patch_lines": rec.get("patch_lines", 0),
+              "fleet": out.name}
+    if h["harvest_error"]:
+        fin_ev["harvest_error"] = h["harvest_error"]
+    core.append_event(Path(repo), fin_ev)
     # muse_status and muse_cleanup both key on state.json/task.json. Without them a
     # fleet's worktrees are unreapable (cleanup sees no record and refuses as
     # "unfinished") and status reports this path as having produced nothing at all.

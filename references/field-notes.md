@@ -165,6 +165,55 @@ be removed from the supervisor.
 - Emphasis that an executable acceptance check in each prompt is the load-bearing quality
   gate, not a nicety.
 
+## Adopted capabilities
+
+The monitor reads the repo event stream (scripts/muse_monitor.py tailing
+.muse-fleet/events.jsonl) and turns each new line into a one-line notification
+to Claude. Monitors get no user_config and no plugin-option environment, so the
+monitor owns its own small config file for the enabled flag and the event-kind
+filter — that file is the only per-install knob it has.
+
+Measured on 2.1.280: strict validation ignores a path-referenced monitors file
+and ignores settings.json entirely, so the CI check inlines the parsed monitors
+array into a copy of the manifest before validating — validating the file as
+shipped would pass no matter what it contained.
+
+The status-line command uses CLAUDE_PLUGIN_ROOT substitution in plugin
+settings.json, which the docs do not say is supported there — that is
+unverified and may silently stop resolving on a future CLI.
+
+Concurrent sessions in one repo share one stream file, so each sees the
+other's events; the monitor starts at the current EOF so a new session is not
+replayed the older session's history.
+
+The issue's acceptance wording ("`claude plugin details muse` shows the
+component") cannot be met for monitors or plugin settings on 2.1.280, because
+`plugin details` lists neither — a zero count there proves nothing for those
+two. The substitute proofs are `tests/claude_validate_monitors.sh`
+(strict-validates the inlined monitors array, with a negative control) plus the
+`caps:` checks in `tests/test_caps.sh`.
+
+The monitor's own config lives at `${CLAUDE_PLUGIN_DATA}/monitor.json`
+(monitors/monitors.json passes it as --config). It is a JSON object with keys
+`enabled` (bool, default true; false makes the monitor exit without notifying)
+and `events` (a list of event kinds to deliver, default all). The valid kinds
+are `round_started`, `round_finished`, `verify`, `verdict` (ALL_KINDS in
+scripts/muse_monitor.py). A missing, unparsable or misshapen file falls back to
+the defaults, with one stderr line. It exists because monitors receive no
+user_config. The project dir resolves from --project, then $CLAUDE_PROJECT_DIR,
+then the cwd (first non-empty existing directory without an unsubstituted '${');
+outside any repo the monitor prints one stdout line naming the directory and
+exits 0 instead of watching nothing silently.
+
+## Considered, not adopted
+
+- LSP servers: muse ships no language, so there is nothing for a server to index.
+- Output styles: they would restyle the user's whole session for a delegation tool.
+- Themes: no fit — a worktree runner has no surface a theme could paint.
+- Channels: no inbound message source; nothing outside the session talks to muse.
+- dependencies: no shared plugin to depend on.
+- WorktreeCreate / WorktreeRemove hooks: they fire for Claude's own worktrees, not the git worktrees muse_task creates, so they can neither observe nor clean up after muse runs.
+
 ## Sources
 
 - [5 Lessons from Running AI Coding Agents in Parallel](https://dev.to/battyterm/5-lessons-from-running-ai-coding-agents-in-parallel-53on)

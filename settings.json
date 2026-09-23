@@ -1,0 +1,1 @@
+{"subagentStatusLine": {"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/muse_statusline.py\""}}

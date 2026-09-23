@@ -16,6 +16,7 @@ CLI did", which is exactly the class of bug nobody debugs quickly.
 
 from __future__ import annotations
 
+import datetime as dt
 import fnmatch
 import glob
 import hashlib
@@ -1343,3 +1344,38 @@ def commit_worktree(wt: Path, message: str) -> None:
          "commit", "-qm", message],
         capture_output=True,
     )
+
+
+def events_path(repo) -> Path:
+    """The one place the capability event stream path lives.
+
+    The monitor and the status-line script import this rather than rebuilding
+    the path, so a relocation changes one line instead of three files."""
+    return Path(repo) / ".muse-fleet" / "events.jsonl"
+
+
+def append_event(repo, event: dict) -> None:
+    """Append one event to the repo's capability event stream, never raising.
+
+    One json.dumps line in one os.write on an O_APPEND fd: parallel fleet
+    tasks append at the same time, and anything less atomic interleaves.
+    A full disk or a directory squatting on the path must never fail a paid
+    round or stop it being recorded, so every failure is one stderr line.
+    """
+    try:
+        ev = dict(event)
+        ev["v"] = 1
+        ev["ts"] = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
+        data = (json.dumps(ev, separators=(",", ":")) + "\n").encode("utf-8")
+        events_path(repo).parent.mkdir(parents=True, exist_ok=True)
+        flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT
+        if hasattr(os, "O_BINARY"):
+            flags |= os.O_BINARY
+        fd = os.open(str(events_path(repo)), flags, 0o666)
+        try:
+            os.write(fd, data)
+        finally:
+            os.close(fd)
+    except (OSError, ValueError) as e:
+        print("muse: could not append event ({}); continuing".format(e),
+              file=sys.stderr)

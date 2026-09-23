@@ -111,6 +111,14 @@ jobs:
             echo "::endgroup::"
           done
 
+      # The strict validator ignores the path-referenced monitors file (measured:
+      # it passes even when that file holds [{"name":"x"}]), so validating the
+      # manifest as shipped proves nothing about the monitors. Inline the parsed
+      # array into a copy first -- tests/claude_validate_monitors.sh does that,
+      # plus a negative control that must stay red.
+      - name: Validate the monitors config
+        run: bash tests/claude_validate_monitors.sh
+
       # The local CLI and the runner's can disagree -- 2.1.263 reported "Validation
       # passed" on the same files this step rejected -- so record which one spoke.
       - name: Which validator said that
