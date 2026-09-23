@@ -7,6 +7,7 @@
 <meta name="description" content="Offload bulk coding work from Claude Code to Muse Code workers in isolated git worktrees. A Claude supervisor runs your check and re-prompts until it passes.">
 <link rel="canonical" href="https://jellologic.github.io/claude-code-muse/">
 <meta name="robots" content="index,follow">
+<meta name="keywords" content="Claude Code plugin, Claude Code plugins, Claude Code marketplace, Claude Code subagents, Claude Code skills, delegate coding tasks, Muse Code, git worktree, AI coding agent, agentic coding, multi-agent, agent orchestration, supervised code generation, acceptance check, LLM cost optimization, Anthropic Claude">
 <meta name="theme-color" content="#0f1117" media="(prefers-color-scheme: dark)">
 <meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
 <meta name="color-scheme" content="dark light">
@@ -131,6 +132,7 @@ footer ul{display:flex;flex-wrap:wrap;gap:1.25rem;list-style:none;margin:0;paddi
 footer p{margin:0}
 @media (max-width:900px){.hero .hw,.two,.faq{grid-template-columns:1fr}.steps{grid-template-columns:1fr 1fr}.stats{grid-template-columns:1fr 1fr}.hero{padding-top:3rem}}
 @media (max-width:640px){header.top nav{display:none}.steps,.cards{grid-template-columns:1fr}section{padding:3.25rem 0}.lead{font-size:1.08rem}.install li{font-size:.8rem}tbody th{white-space:normal}.stack thead{display:none}.stack tr{display:block;padding:.8rem 1rem;border-bottom:1px solid var(--line)}.stack tr:last-child{border-bottom:0}.stack th,.stack td{display:block;padding:.15rem 0;border:0}.stack td:nth-child(2):not(:last-child)::before{content:"Default: ";color:var(--mu)}}
+.tags{list-style:none;padding:0;margin:1.25rem 0 0;display:flex;flex-wrap:wrap;gap:.5rem}.tags a{display:inline-block;font:500 .85rem/1 var(--mono);padding:.5rem .75rem;border-radius:999px;border:1px solid var(--line);color:inherit;text-decoration:none}.tags a:hover,.tags a:focus-visible{border-color:#c084fc;color:#c084fc}
 </style>
 <script type="application/ld+json">
 {
@@ -143,6 +145,8 @@ footer p{margin:0}
       "alternateName": "muse — Muse Code delegation for Claude Code",
       "description": "A Claude Code plugin that offloads bulk coding work to Muse Code workers in isolated git worktrees, each supervised by an Opus agent that reads the patch, runs the acceptance check and re-prompts until the work is right.",
       "applicationCategory": "DeveloperApplication",
+      "applicationSubCategory": "Claude Code plugin",
+      "keywords": "claude-code, claude-code-plugin, claude-code-plugins, claude-code-marketplace, claude-code-skills, claude, anthropic, subagents, multi-agent, agent-orchestration, ai-agents, agentic-ai, agentic-coding, coding-agent, ai-coding, code-generation, git-worktree, cost-optimization, developer-tools, muse-code",
       "operatingSystem": "macOS, Linux",
       "softwareVersion": "1.4.0",
       "datePublished": "2026-09-23",
@@ -428,6 +432,35 @@ ran the check itself and it passed.
       <article><h3>What is the difference between completed and accepted?</h3><p>Completed means the worker stopped. Accept means a supervisor ran a check and the final one passed. finish --verdict accept refuses unless the final check passed against the tree being harvested; --accept-unverified with a reason is the deliberate way past it, and /muse:status prints that reason.</p></article>
       <article><h3>How much context does the plugin cost when installed?</h3><p>About 625 always-on tokens, against a 750-token ceiling the project holds itself to. The seven slash commands are opt-in and never invoked by the model, and the hooks add context only when they have something to report.</p></article>
     </div>
+  </div>
+</section>
+<section id="topics" class="alt" aria-labelledby="topics-h">
+  <div class="w">
+    <p class="k">08 · Topics</p>
+    <h2 id="topics-h">Claude Code plugin topics</h2>
+    <p class="intro">muse is a Claude Code plugin and marketplace for supervised delegation: Claude Code subagents that drive Muse Code workers in isolated git worktrees, for agentic coding without paying full-rate models to type boilerplate. Browse related projects by topic on GitHub:</p>
+    <ul class="tags">
+      <li><a href="https://github.com/topics/claude-code" rel="tag">claude-code</a></li>
+      <li><a href="https://github.com/topics/claude-code-plugin" rel="tag">claude-code-plugin</a></li>
+      <li><a href="https://github.com/topics/claude-code-plugins" rel="tag">claude-code-plugins</a></li>
+      <li><a href="https://github.com/topics/claude-code-marketplace" rel="tag">claude-code-marketplace</a></li>
+      <li><a href="https://github.com/topics/claude-code-skills" rel="tag">claude-code-skills</a></li>
+      <li><a href="https://github.com/topics/claude" rel="tag">claude</a></li>
+      <li><a href="https://github.com/topics/anthropic" rel="tag">anthropic</a></li>
+      <li><a href="https://github.com/topics/subagents" rel="tag">subagents</a></li>
+      <li><a href="https://github.com/topics/multi-agent" rel="tag">multi-agent</a></li>
+      <li><a href="https://github.com/topics/agent-orchestration" rel="tag">agent-orchestration</a></li>
+      <li><a href="https://github.com/topics/ai-agents" rel="tag">ai-agents</a></li>
+      <li><a href="https://github.com/topics/agentic-ai" rel="tag">agentic-ai</a></li>
+      <li><a href="https://github.com/topics/agentic-coding" rel="tag">agentic-coding</a></li>
+      <li><a href="https://github.com/topics/coding-agent" rel="tag">coding-agent</a></li>
+      <li><a href="https://github.com/topics/ai-coding" rel="tag">ai-coding</a></li>
+      <li><a href="https://github.com/topics/code-generation" rel="tag">code-generation</a></li>
+      <li><a href="https://github.com/topics/git-worktree" rel="tag">git-worktree</a></li>
+      <li><a href="https://github.com/topics/cost-optimization" rel="tag">cost-optimization</a></li>
+      <li><a href="https://github.com/topics/developer-tools" rel="tag">developer-tools</a></li>
+      <li><a href="https://github.com/topics/muse-code" rel="tag">muse-code</a></li>
+    </ul>
   </div>
 </section>
 </main>
