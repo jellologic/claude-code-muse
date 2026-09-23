@@ -1,0 +1,28 @@
+# muse — Claude Code plugin for supervised delegation to Muse Code
+
+> muse is an MIT-licensed Claude Code plugin (v1.4.0) that offloads bulk, mechanical coding work to Muse Code workers running in isolated git worktrees. Each task is owned by a Claude supervisor agent that reads the patch, runs the acceptance check itself, and re-prompts the worker until the final check passes. No command applies a patch: every run stops at a verdict and a patch path.
+
+Install inside Claude Code with `/plugin marketplace add jellologic/claude-code-muse` then `/plugin install muse@claude-code-muse`, start a new session, and run `muse login` once. Requires the Muse Code CLI (`muse`) on PATH, git, Python 3.9+ and Claude Code.
+
+## Docs
+
+- [README](https://github.com/jellologic/claude-code-muse/blob/main/README.md): what the plugin does, install, commands, the three rules, configuration and guardrails
+- [CHANGELOG](https://github.com/jellologic/claude-code-muse/blob/main/CHANGELOG.md): what changed in each release, including claims corrected from earlier versions
+- [SECURITY.md](https://github.com/jellologic/claude-code-muse/blob/main/SECURITY.md): trust model — --yolo in throwaway worktrees, host-side acceptance checks, what is sent where, the credential scan
+- [Field notes](https://github.com/jellologic/claude-code-muse/blob/main/references/field-notes.md): what practitioners learned running parallel coding agents, and measured Claude Code behaviour
+
+## Commands
+
+- [/muse:delegate](https://github.com/jellologic/claude-code-muse/blob/main/commands/delegate.md): one task, supervised end to end — run, verify, revise, verdict
+- [/muse:fleet](https://github.com/jellologic/claude-code-muse/blob/main/commands/fleet.md): decompose a job and fan out, one supervisor per task
+- [/muse:ask](https://github.com/jellologic/claude-code-muse/blob/main/commands/ask.md): one question or one contained edit, no worktree, answer on stdout
+- [/muse:status](https://github.com/jellologic/claude-code-muse/blob/main/commands/status.md): what every task did, and whether a check actually ran
+- [/muse:model](https://github.com/jellologic/claude-code-muse/blob/main/commands/model.md): which contributor model delegation will use
+- [/muse:doctor](https://github.com/jellologic/claude-code-muse/blob/main/commands/doctor.md): whether this machine can delegate, and what would break
+- [/muse:cleanup](https://github.com/jellologic/claude-code-muse/blob/main/commands/cleanup.md): reap worktrees, branches and artifacts a run left behind
+
+## Optional
+
+- [Repository](https://github.com/jellologic/claude-code-muse): source, issues and pull requests
+- [Releases](https://github.com/jellologic/claude-code-muse/releases): tagged versions
+- [License (MIT)](https://github.com/jellologic/claude-code-muse/blob/main/LICENSE)

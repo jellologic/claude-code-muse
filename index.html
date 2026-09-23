@@ -1,0 +1,450 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>muse — Claude Code plugin to delegate coding to Muse Code</title>
+<meta name="description" content="Offload bulk coding work from Claude Code to Muse Code workers in isolated git worktrees. A Claude supervisor runs your check and re-prompts until it passes.">
+<link rel="canonical" href="https://jellologic.github.io/claude-code-muse/">
+<meta name="robots" content="index,follow">
+<meta name="theme-color" content="#0f1117" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
+<meta name="color-scheme" content="dark light">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="muse for Claude Code">
+<meta property="og:title" content="muse — Claude Code plugin to delegate coding to Muse Code">
+<meta property="og:description" content="Offload bulk coding work from Claude Code to Muse Code workers in isolated git worktrees. A Claude supervisor runs your check and re-prompts until it passes.">
+<meta property="og:url" content="https://jellologic.github.io/claude-code-muse/">
+<meta property="og:image" content="https://jellologic.github.io/claude-code-muse/og.png">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="640">
+<meta property="og:image:alt" content="muse, a Claude Code plugin: delegate bulk coding work, a supervisor checks every patch. Install with /plugin install muse@claude-code-muse.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="muse — Claude Code plugin to delegate coding to Muse Code">
+<meta name="twitter:description" content="Offload bulk coding work from Claude Code to Muse Code workers in isolated git worktrees. A Claude supervisor runs your check and re-prompts until it passes.">
+<meta name="twitter:image" content="https://jellologic.github.io/claude-code-muse/og.png">
+<meta name="twitter:image:alt" content="muse, a Claude Code plugin: delegate bulk coding work, a supervisor checks every patch.">
+<style>
+:root{color-scheme:dark light;--bg:#0f1117;--bg2:#151320;--card:#18181b;--line:#2e2e36;--fg:#e4e4e7;--hi:#fafafa;--mu:#a1a1aa;--a1:#c084fc;--a2:#f472b6;--at:#d8b4fe;--ok:#86efac;--code:#101014;--sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;--mono:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono",monospace}
+@media (prefers-color-scheme:light){:root{--bg:#fafafa;--bg2:#f4f0fb;--card:#fff;--line:#e4e4e7;--fg:#27272a;--hi:#09090b;--mu:#52525b;--a1:#9333ea;--a2:#db2777;--at:#7e22ce;--ok:#15803d;--code:#f4f4f5}}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+body{margin:0;background:var(--bg);color:var(--fg);font:1.0625rem/1.65 var(--sans);-webkit-text-size-adjust:100%}
+a{color:var(--at);text-underline-offset:.18em}
+a:hover{color:var(--a2)}
+:focus-visible{outline:2px solid var(--a2);outline-offset:3px;border-radius:4px}
+code,kbd,pre{font-family:var(--mono);font-size:.9em}
+:not(pre)>code{background:var(--code);border:1px solid var(--line);border-radius:5px;padding:.05em .35em;white-space:nowrap}
+.skip{position:absolute;left:1rem;top:-4rem;background:var(--hi);color:var(--bg);padding:.6rem 1rem;border-radius:8px;z-index:9;font-weight:600}
+.skip:focus{top:1rem}
+.w{max-width:68rem;margin:0 auto;padding:0 1.25rem}
+header.top{border-bottom:1px solid var(--line)}
+header.top .w{display:flex;align-items:center;justify-content:space-between;gap:1rem;height:3.5rem}
+.brand{display:flex;align-items:center;gap:.55rem;color:var(--hi);text-decoration:none;font-weight:700;letter-spacing:.01em}
+.brand img{width:26px;height:26px}
+header.top nav ul{display:flex;gap:1.25rem;list-style:none;margin:0;padding:0;font-size:.92rem}
+nav a{color:var(--mu);text-decoration:none}
+nav a:hover{color:var(--hi)}
+.grad{background:linear-gradient(90deg,var(--a1),var(--a2));-webkit-background-clip:text;background-clip:text;color:transparent}
+.hero{background:radial-gradient(60rem 30rem at 85% -10%,color-mix(in srgb,var(--a1) 18%,transparent),transparent 70%),radial-gradient(40rem 24rem at -10% 20%,color-mix(in srgb,var(--a2) 10%,transparent),transparent 70%);padding:4.5rem 0 3.5rem}
+.hero .hw{display:grid;grid-template-columns:1.1fr .9fr;gap:3rem;align-items:start}
+.eyebrow{font:600 .8rem/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--mu);margin:0 0 1rem}
+h1{font-size:clamp(2.2rem,5.4vw,3.6rem);line-height:1.05;letter-spacing:-.025em;color:var(--hi);margin:0 0 1.25rem}
+h1 small{display:block;font-size:.42em;letter-spacing:0;font-weight:600;color:var(--mu);margin-top:.9rem;line-height:1.3}
+.lead{font-size:1.2rem;color:var(--fg);max-width:36rem;margin:0 0 1.75rem}
+.lead strong{color:var(--hi)}
+.install{background:var(--code);border:1px solid var(--line);border-radius:12px;padding:1rem 1.1rem;margin:0 0 .75rem;overflow-x:auto}
+.install ol{list-style:none;margin:0;padding:0;counter-reset:s}
+.install li{counter-increment:s;display:flex;gap:.75rem;font-family:var(--mono);font-size:.92rem;color:var(--hi);white-space:nowrap;padding:.15rem 0}
+.hero .hw>*,.two>*,.faq>*{min-width:0}
+.install code{background:none;border:0;padding:0}
+.install li::before{content:"$";color:var(--mu)}
+.note{font-size:.92rem;color:var(--mu);margin:0 0 1.5rem}
+.cta{display:flex;flex-wrap:wrap;gap:.75rem}
+.btn{display:inline-block;padding:.6rem 1.1rem;border-radius:999px;font-weight:600;text-decoration:none;border:1px solid var(--line);color:var(--hi)}
+.btn.p{background:linear-gradient(90deg,#c084fc,#f472b6);color:#18051f;border:0}
+.btn:hover{border-color:var(--a1);color:var(--hi)}
+.btn.p:hover{color:#18051f;filter:brightness(1.08)}
+.term{background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden;box-shadow:0 20px 60px -30px color-mix(in srgb,var(--a1) 45%,transparent)}
+.term .bar{display:flex;gap:.4rem;align-items:center;padding:.6rem .9rem;border-bottom:1px solid var(--line);font:.75rem var(--mono);color:var(--mu)}
+.term .bar i{width:.6rem;height:.6rem;border-radius:50%;background:var(--line)}
+.term .bar span{margin-left:.5rem}
+.term pre{margin:0;padding:1rem 1.1rem;white-space:pre-wrap;word-break:break-word;font-size:.82rem;line-height:1.6;color:var(--fg)}
+.term .c{color:var(--at)}.term .m{color:var(--mu)}.term .g{color:var(--ok);font-weight:700}
+.term figcaption{padding:0 1.1rem 1rem;font-size:.8rem;color:var(--mu)}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin:3rem 0 0;padding:0;list-style:none}
+.stats li{background:var(--bg);padding:1.1rem 1.2rem}
+.stats b{display:block;font:700 1.6rem/1.1 var(--mono);color:var(--hi)}
+.stats span{font-size:.85rem;color:var(--mu)}
+section{padding:4.5rem 0;border-top:1px solid var(--line)}
+section.alt{background:var(--bg2)}
+.k{font:600 .78rem/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--at);margin:0 0 .75rem}
+h2{font-size:clamp(1.6rem,3.4vw,2.3rem);line-height:1.15;letter-spacing:-.02em;color:var(--hi);margin:0 0 1rem}
+h3{font-size:1.1rem;color:var(--hi);margin:0 0 .4rem;line-height:1.35}
+.intro{max-width:44rem;color:var(--fg);margin:0 0 2rem}
+.diagram{margin:0 0 2.5rem}
+.diagram svg{display:block;width:100%;height:auto}
+.diagram .v{display:none;max-width:22rem;margin:0 auto}
+@media (max-width:760px){.diagram .h{display:none}.diagram .v{display:block}}
+.diagram text{font-family:var(--mono);font-size:15px;fill:var(--hi)}
+.diagram .lbl{fill:var(--mu);font-size:13px}
+.diagram .n{fill:var(--card);stroke:var(--line);stroke-width:1.5}
+.diagram .s{fill:var(--card);stroke:url(#dg);stroke-width:2}
+.diagram .fr{fill:none;stroke:var(--mu);stroke-width:1;stroke-dasharray:5 5;opacity:.6}
+.diagram .ar{stroke:var(--mu);stroke-width:1.5;fill:none}
+.diagram .lp{stroke:url(#dg);stroke-width:2;fill:none}
+.diagram .vd{fill:url(#dg)}
+.diagram .vt{fill:#18051f;font-weight:700}
+.diagram .hd{fill:var(--mu)}
+.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;list-style:none;margin:0;padding:0;counter-reset:st}
+.steps li{counter-increment:st;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:1.1rem 1.2rem}
+.steps li::before{content:"0" counter(st);display:block;font:700 .8rem var(--mono);color:var(--at);margin-bottom:.4rem}
+.steps p,.cards p{margin:0;font-size:.97rem}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:2.5rem;align-items:start}
+.tw{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--card)}
+table{border-collapse:collapse;width:100%;font-size:.95rem}
+caption{text-align:left;padding:.8rem 1rem;color:var(--mu);font-size:.85rem;border-bottom:1px solid var(--line)}
+th,td{text-align:left;vertical-align:top;padding:.75rem 1rem;border-bottom:1px solid var(--line)}
+tr:last-child>*{border-bottom:0}
+thead th{font:600 .75rem var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--mu)}
+tbody th{color:var(--hi);white-space:nowrap}
+tbody th code{white-space:nowrap}
+blockquote{margin:0 0 1.5rem;padding:.2rem 0 .2rem 1.1rem;border-left:3px solid;border-image:linear-gradient(var(--a1),var(--a2)) 1;font-size:1.2rem;color:var(--hi)}
+.cards{display:grid;grid-template-columns:repeat(2,1fr);gap:1rem;list-style:none;margin:0;padding:0}
+.cards li{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:1.2rem 1.3rem}
+.warn{margin:1.5rem 0 0;padding:1rem 1.2rem;border:1px solid color-mix(in srgb,var(--a2) 55%,var(--line));border-radius:12px;background:color-mix(in srgb,var(--a2) 7%,var(--card))}
+.warn p{margin:0}
+.yn{list-style:none;margin:0;padding:0}
+.yn li{position:relative;padding:.55rem 0 .55rem 1.9rem;border-bottom:1px solid var(--line)}
+.yn li:last-child{border-bottom:0}
+.yn li::before{position:absolute;left:0;top:.55rem;font:700 1rem var(--mono)}
+.yes li::before{content:"+";color:var(--ok)}
+.no li::before{content:"\2212";color:var(--a2)}
+.faq{display:grid;grid-template-columns:1fr 1fr;gap:1rem 2.5rem}
+.faq article{padding:1.2rem 0;border-top:1px solid var(--line)}
+.faq p{margin:0;font-size:.97rem}
+footer{border-top:1px solid var(--line);padding:2.5rem 0 3rem;font-size:.92rem;color:var(--mu)}
+footer .w{display:flex;flex-wrap:wrap;justify-content:space-between;gap:1rem}
+footer ul{display:flex;flex-wrap:wrap;gap:1.25rem;list-style:none;margin:0;padding:0}
+footer p{margin:0}
+@media (max-width:900px){.hero .hw,.two,.faq{grid-template-columns:1fr}.steps{grid-template-columns:1fr 1fr}.stats{grid-template-columns:1fr 1fr}.hero{padding-top:3rem}}
+@media (max-width:640px){header.top nav{display:none}.steps,.cards{grid-template-columns:1fr}section{padding:3.25rem 0}.lead{font-size:1.08rem}.install li{font-size:.8rem}tbody th{white-space:normal}.stack thead{display:none}.stack tr{display:block;padding:.8rem 1rem;border-bottom:1px solid var(--line)}.stack tr:last-child{border-bottom:0}.stack th,.stack td{display:block;padding:.15rem 0;border:0}.stack td:nth-child(2):not(:last-child)::before{content:"Default: ";color:var(--mu)}}
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": ["SoftwareApplication", "SoftwareSourceCode"],
+      "@id": "https://jellologic.github.io/claude-code-muse/#software",
+      "name": "muse",
+      "alternateName": "muse — Muse Code delegation for Claude Code",
+      "description": "A Claude Code plugin that offloads bulk coding work to Muse Code workers in isolated git worktrees, each supervised by an Opus agent that reads the patch, runs the acceptance check and re-prompts until the work is right.",
+      "applicationCategory": "DeveloperApplication",
+      "operatingSystem": "macOS, Linux",
+      "softwareVersion": "1.4.0",
+      "datePublished": "2026-09-23",
+      "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"},
+      "license": "https://github.com/jellologic/claude-code-muse/blob/main/LICENSE",
+      "codeRepository": "https://github.com/jellologic/claude-code-muse",
+      "downloadUrl": "https://github.com/jellologic/claude-code-muse/releases",
+      "url": "https://jellologic.github.io/claude-code-muse/",
+      "image": "https://jellologic.github.io/claude-code-muse/og.png",
+      "programmingLanguage": "Python",
+      "author": {"@type": "Person", "name": "jellologic", "url": "https://github.com/jellologic"}
+    },
+    {
+      "@type": "WebSite",
+      "@id": "https://jellologic.github.io/claude-code-muse/#website",
+      "name": "muse for Claude Code",
+      "url": "https://jellologic.github.io/claude-code-muse/",
+      "inLanguage": "en",
+      "about": {"@id": "https://jellologic.github.io/claude-code-muse/#software"}
+    },
+    {
+      "@type": "FAQPage",
+      "@id": "https://jellologic.github.io/claude-code-muse/#faq",
+      "mainEntity": [
+        {"@type": "Question", "name": "How do I delegate coding tasks from Claude Code to a cheaper model?", "acceptedAnswer": {"@type": "Answer", "text": "Install the muse plugin, start a new session, run muse login once, then run /muse:delegate with a brief that names the exact files, says what must not change and gives a runnable acceptance check. A Muse Code worker makes the edit in its own git worktree, and a Claude supervisor runs the check itself and sends the worker back until the final check passes. For a batch of independent tasks, /muse:fleet decomposes the job and runs one supervisor per task."}},
+        {"@type": "Question", "name": "What is Muse Code?", "acceptedAnswer": {"@type": "Answer", "text": "Muse Code is the coding agent behind Meta's Muse Code API, driven through the muse command-line tool. This plugin needs muse on your PATH and credentials from muse login. By default delegated work uses the newest contributor-tier model, resolved from muse's own catalog at run time; you can pin a full-rate model such as muse-spark-1.3 instead."}},
+        {"@type": "Question", "name": "Does the plugin send my code or secrets anywhere?", "acceptedAnswer": {"@type": "Answer", "text": "Prompts, the files the worker reads and its patches go to Meta's Muse Code API under the model you selected, and contributor-tier models state that content may be used for product improvement. Nothing is sent anywhere else: there is no telemetry, no analytics and no network call in the plugin outside the muse CLI. Before a worker starts, the worktree is scanned and delegation is refused on a PEM private-key block, an AWS key id, or a GitHub, Slack, Stripe or Anthropic-format token. For proprietary code, pin muse-spark-1.3 at full rate or do not delegate it."}},
+        {"@type": "Question", "name": "How is this different from Claude Code subagents?", "acceptedAnswer": {"@type": "Answer", "text": "The supervisor is a Claude Code subagent (muse-supervisor, on Opus), but it does not write the code. A cheaper Muse Code worker does the typing in an isolated git worktree; the supervisor reads the patch, runs your acceptance check itself and re-prompts the worker with specific defects. A PreToolUse hook denies the supervisor's Write, Edit and NotebookEdit calls, and a SubagentStop hook blocks it from stopping while its task has no verdict."}},
+        {"@type": "Question", "name": "Does it apply patches automatically?", "acceptedAnswer": {"@type": "Answer", "text": "No. No command applies a patch: every run stops at a verdict and a patch path, because an accepted patch is still a patch you have not read. Worktrees and branches stay until you remove them with /muse:cleanup, which is a dry run unless you pass --yes."}},
+        {"@type": "Question", "name": "Does it work on Windows?", "acceptedAnswer": {"@type": "Answer", "text": "The free offline suite runs in CI on Linux under Python 3.9, 3.11 and 3.13, and on Windows under Git Bash as a blocking job; development is on macOS. You need the muse CLI, git, Python 3.9 or later and Claude Code."}},
+        {"@type": "Question", "name": "What is the difference between completed and accepted?", "acceptedAnswer": {"@type": "Answer", "text": "Completed means the worker stopped. Accept means a supervisor ran a check and the final one passed. finish --verdict accept refuses unless the final check passed against the tree being harvested; --accept-unverified with a reason is the deliberate way past it, and /muse:status prints that reason."}},
+        {"@type": "Question", "name": "How much context does the plugin cost when installed?", "acceptedAnswer": {"@type": "Answer", "text": "About 625 always-on tokens, against a 750-token ceiling the project holds itself to. The seven slash commands are opt-in and never invoked by the model, and the hooks add context only when they have something to report."}}
+      ]
+    }
+  ]
+}
+</script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top">
+  <div class="w">
+    <a class="brand" href="./"><img src="favicon.svg" alt="" width="26" height="26">muse</a>
+    <nav aria-label="Sections">
+      <ul>
+        <li><a href="#how">How it works</a></li>
+        <li><a href="#commands">Commands</a></li>
+        <li><a href="#safety">Safety</a></li>
+        <li><a href="#faq">FAQ</a></li>
+        <li><a href="https://github.com/jellologic/claude-code-muse">GitHub</a></li>
+      </ul>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<div class="hero">
+  <div class="w hw">
+    <div>
+      <p class="eyebrow">v1.4.0 · MIT · open source</p>
+      <h1><span class="grad">muse</span>, the Claude Code plugin that delegates bulk coding work<small>and has a supervisor that actually checks it.</small></h1>
+      <p class="lead"><strong>muse types, Claude judges.</strong> Push repetitive work to cheap Muse Code workers in isolated git worktrees. A Claude supervisor reads each patch, runs your acceptance check itself, and sends the worker back until the final check passes.</p>
+      <div class="install" aria-label="Install commands, run inside Claude Code">
+        <ol>
+          <li><code>/plugin marketplace add jellologic/claude-code-muse</code></li>
+          <li><code>/plugin install muse@claude-code-muse</code></li>
+        </ol>
+      </div>
+      <p class="note">Then start a new session (or <code>/clear</code>) so <code>/muse:*</code> registers, and run <code>muse login</code> once. Needs the <code>muse</code> CLI, git, Python 3.9+ and Claude Code.</p>
+      <div class="cta">
+        <a class="btn p" href="https://github.com/jellologic/claude-code-muse">View on GitHub</a>
+        <a class="btn" href="#how">How it works</a>
+      </div>
+    </div>
+    <figure class="term" style="margin:0">
+      <div class="bar" aria-hidden="true"><i></i><i></i><i></i><span>claude code</span></div>
+      <pre><span class="c">/muse:delegate</span> Create tests/test_ratio.py covering
+  percent() in ratio.py. Do not modify ratio.py.
+  <span class="m">Check:</span> python3 -m pytest tests/test_ratio.py -q
+
+<span class="g">Verdict: accept</span> — 1 round of 3. The supervisor
+ran the check itself and it passed.
+<span class="m">Check:</span> python3 -m pytest tests/test_ratio.py -q
+  → exit 0, 3 passed, 1 xfailed
+<span class="m">Patch not applied — your call.</span></pre>
+      <figcaption>Real output, quoted from the project README.</figcaption>
+    </figure>
+  </div>
+  <div class="w">
+    <ul class="stats" aria-label="Measured facts">
+      <li><b>625</b><span>offline checks, run on Linux and Windows CI</span></li>
+      <li><b>28/28</b><span>planted bugs killed by the mutation harness</span></li>
+      <li><b>~625</b><span>always-on tokens, under a 750 ceiling</span></li>
+      <li><b>7</b><span>slash commands, all opt-in</span></li>
+    </ul>
+  </div>
+</div>
+
+<section id="how" aria-labelledby="how-h">
+  <div class="w">
+    <p class="k">01 · How it works</p>
+    <h2 id="how-h">One supervisor, one task, looped until the check passes</h2>
+    <p class="intro">Each delegated task is owned end to end by a supervisor agent. The worker does the typing; the supervisor decides whether what it typed is right. The loop is capped at <code>max_rounds</code> (3 by default) so a confused worker cannot run up a bill.</p>
+    <figure class="diagram">
+      <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+        <defs>
+          <linearGradient id="dg" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#c084fc"/><stop offset="1" stop-color="#f472b6"/></linearGradient>
+          <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="hd" d="M0 0L10 5L0 10z"/></marker>
+        </defs>
+      </svg>
+      <svg class="h" viewBox="0 0 960 240" role="img" aria-labelledby="dh-t">
+        <title id="dh-t">The loop: plan, then muse run, read patch, verify and revise repeat inside one supervisor until the check passes, then a verdict.</title>
+        <rect class="fr" x="140" y="28" width="620" height="190" rx="16"/>
+        <text class="lbl" x="450" y="52" text-anchor="middle">one supervisor, one task</text>
+        <rect class="n" x="10" y="80" width="104" height="50" rx="10"/><text x="62" y="110" text-anchor="middle">plan</text>
+        <rect class="s" x="162" y="80" width="126" height="50" rx="10"/><text x="225" y="110" text-anchor="middle">muse run</text>
+        <rect class="s" x="310" y="80" width="126" height="50" rx="10"/><text x="373" y="110" text-anchor="middle">read patch</text>
+        <rect class="s" x="458" y="80" width="126" height="50" rx="10"/><text x="521" y="110" text-anchor="middle">verify</text>
+        <rect class="s" x="606" y="80" width="126" height="50" rx="10"/><text x="669" y="110" text-anchor="middle">revise</text>
+        <rect class="vd" x="790" y="80" width="160" height="50" rx="25"/><text class="vt" x="870" y="110" text-anchor="middle">verdict</text>
+        <path class="ar" d="M114 105H158" marker-end="url(#ah)"/>
+        <path class="ar" d="M288 105H306" marker-end="url(#ah)"/>
+        <path class="ar" d="M436 105H454" marker-end="url(#ah)"/>
+        <path class="ar" d="M584 105H602" marker-end="url(#ah)"/>
+        <path class="ar" d="M732 105H786" marker-end="url(#ah)"/>
+        <path class="lp" d="M669 130V180H225V134" marker-end="url(#ah)"/>
+        <text class="lbl" x="447" y="202" text-anchor="middle">until right · at most max_rounds</text>
+      </svg>
+      <svg class="v" viewBox="0 0 340 510" role="img" aria-labelledby="dv-t">
+        <title id="dv-t">The loop: plan, then muse run, read patch, verify and revise repeat inside one supervisor until the check passes, then a verdict.</title>
+        <rect class="fr" x="20" y="70" width="300" height="344" rx="16"/>
+        <text class="lbl" x="305" y="242" text-anchor="middle" transform="rotate(90 305 242)">one supervisor, one task</text>
+        <rect class="n" x="95" y="10" width="200" height="44" rx="10"/><text x="195" y="37" text-anchor="middle">plan</text>
+        <rect class="s" x="95" y="110" width="200" height="44" rx="10"/><text x="195" y="137" text-anchor="middle">muse run</text>
+        <rect class="s" x="95" y="190" width="200" height="44" rx="10"/><text x="195" y="217" text-anchor="middle">read patch</text>
+        <rect class="s" x="95" y="270" width="200" height="44" rx="10"/><text x="195" y="297" text-anchor="middle">verify</text>
+        <rect class="s" x="95" y="350" width="200" height="44" rx="10"/><text x="195" y="377" text-anchor="middle">revise</text>
+        <rect class="vd" x="95" y="446" width="200" height="44" rx="22"/><text class="vt" x="195" y="473" text-anchor="middle">verdict</text>
+        <path class="ar" d="M195 54V106" marker-end="url(#ah)"/>
+        <path class="ar" d="M195 154V186" marker-end="url(#ah)"/>
+        <path class="ar" d="M195 234V266" marker-end="url(#ah)"/>
+        <path class="ar" d="M195 314V346" marker-end="url(#ah)"/>
+        <path class="ar" d="M195 394V442" marker-end="url(#ah)"/>
+        <path class="lp" d="M95 372H50V132H91" marker-end="url(#ah)"/>
+        <text class="lbl" x="40" y="252" text-anchor="middle" transform="rotate(-90 40 252)">until right</text>
+      </svg>
+    </figure>
+    <ol class="steps">
+      <li><h3>Plan</h3><p>A brief that names the exact files, says what must not change, and gives a runnable acceptance check. <code>/muse:fleet</code> splits a bigger job into disjoint tasks.</p></li>
+      <li><h3>muse run</h3><p>A Muse Code worker edits in its own git worktree on a throwaway branch, created beside the repository. The worktree is scanned for credentials first.</p></li>
+      <li><h3>Read patch</h3><p>The supervisor reads the diff the worker produced, not the worker's summary of it.</p></li>
+      <li><h3>Verify</h3><p>The supervisor runs the acceptance check itself and the exit code is recorded. That is the evidence, not the worker's confidence.</p></li>
+      <li><h3>Revise</h3><p>On a defect, the worker is sent back with specific problems, in the round where fixing is still cheap.</p></li>
+      <li><h3>Verdict</h3><p><code>accept</code>, <code>revise</code> or <code>reject</code>, plus a patch path. Nothing is applied to your repository.</p></li>
+    </ol>
+  </div>
+</section>
+
+<section id="why" class="alt" aria-labelledby="why-h">
+  <div class="w two">
+    <div>
+      <p class="k">02 · Why a supervisor</p>
+      <h2 id="why-h">Completed is not accepted</h2>
+      <blockquote>Cheap delegation fails in exactly one place: a model grading its own homework.</blockquote>
+      <p>A reviewer that can only file a report is strictly weaker than one that can re-prompt the author while fixing is still cheap. So the grading moves into the agent that owns the task, and the cheap model's last word is never the deliverable.</p>
+      <p><code>finish --verdict accept</code> refuses unless the final check passed <em>and</em> ran against the tree being harvested, so a green check from before something touched the worktree does not certify the patch that ships. <code>--accept-unverified "&lt;reason&gt;"</code> is the deliberate way past it; the reason is recorded and <code>/muse:status</code> prints it.</p>
+    </div>
+    <div>
+      <div class="tw">
+        <table>
+          <caption>Two words the design depends on keeping apart</caption>
+          <thead><tr><th scope="col">Word</th><th scope="col">Means</th></tr></thead>
+          <tbody>
+            <tr><th scope="row"><code>completed</code></th><td>the worker stopped</td></tr>
+            <tr><th scope="row"><code>accept</code></th><td>a supervisor ran a check and the <strong>final</strong> one passed</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="note" style="margin-top:1rem"><code>/muse:status</code> flags <code>ACCEPTED WITHOUT AN EXECUTED CHECK</code> and <code>ACCEPTED WITHOUT A PASSING FINAL CHECK</code>, so an unproven patch cannot pass as a proven one.</p>
+    </div>
+  </div>
+</section>
+
+<section id="commands" aria-labelledby="cmd-h">
+  <div class="w">
+    <p class="k">03 · Commands</p>
+    <h2 id="cmd-h">Seven slash commands, every one opt-in</h2>
+    <p class="intro">No command is invoked by the model on its own. The plugin also puts seven shims on <code>PATH</code> (<code>muse-task</code>, <code>muse-fleet</code>, <code>muse-ask</code> and friends) so the same command runs in a supervisor, a workflow or your own terminal.</p>
+    <div class="tw">
+      <table class="stack">
+        <thead><tr><th scope="col">Command</th><th scope="col">Does</th></tr></thead>
+        <tbody>
+          <tr><th scope="row"><code>/muse:delegate &lt;task&gt;</code></th><td>One task, supervised end to end: run, verify, revise, verdict</td></tr>
+          <tr><th scope="row"><code>/muse:fleet &lt;job&gt;</code></th><td>Decompose a job and fan out, one supervisor per task</td></tr>
+          <tr><th scope="row"><code>/muse:ask &lt;question&gt;</code></th><td>One question or one contained edit, no worktree, answer on stdout</td></tr>
+          <tr><th scope="row"><code>/muse:status</code></th><td>What every task did, and whether a check actually ran</td></tr>
+          <tr><th scope="row"><code>/muse:model</code></th><td>Which contributor model delegation will use</td></tr>
+          <tr><th scope="row"><code>/muse:doctor</code></th><td>Whether this machine can delegate, and what would break, with a fix on every failing line</td></tr>
+          <tr><th scope="row"><code>/muse:cleanup</code></th><td>Reap worktrees, branches and artifacts a run left behind (dry run unless <code>--yes</code>)</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section id="safety" class="alt" aria-labelledby="safe-h">
+  <div class="w">
+    <p class="k">04 · Safety</p>
+    <h2 id="safe-h">Guards that are enforced, not described</h2>
+    <p class="intro">Every guard in the offline suite is negative-controlled: broken on purpose and confirmed to go red, because a check that inspects nothing passes exactly like one that found nothing.</p>
+    <ul class="cards">
+      <li><h3>It refuses to send your credentials</h3><p>Before a worker spawns, the worktree is scanned (after seeding, so it sees the <code>.env</code> you asked it to copy) and delegation is refused on a PEM private-key block, an AWS key id, or a GitHub, Slack, Stripe or Anthropic-format token. Findings record file, line and kind, never the matched text. <code>/muse:doctor --scan</code> runs it on demand.</p></li>
+      <li><h3>The supervisor cannot write</h3><p>The supervisor agent has no <code>Write</code> or <code>Edit</code> tool, and a PreToolUse hook denies its Write, Edit and NotebookEdit calls and any Bash beyond the muse shims, read-only git, readers and the recorded check. A SubagentStop hook blocks it from stopping while its task has no verdict.</p></li>
+      <li><h3>Worktree isolation</h3><p>Workers run with <code>--yolo</code>, defensible only because the blast radius is a throwaway worktree on a throwaway branch, outside your repository. The drivers refuse a dirty working copy, and a worktree root inside the repo is refused.</p></li>
+      <li><h3>Nothing applied by default</h3><p>No command applies a patch. Runs stop at a verdict and a patch path. <code>/muse:cleanup</code> is a dry run unless you pass <code>--yes</code>, and skips unfinished tasks unless you pass <code>--all</code>.</p></li>
+    </ul>
+    <div class="warn"><p><strong>The sharpest edge:</strong> your acceptance check runs on the host, with your privileges. In the fleet path the check is written by a model, so the workflow prints every planned check before running it. Read those the way you would read a command you are about to type. See <a href="https://github.com/jellologic/claude-code-muse/blob/main/SECURITY.md">SECURITY.md</a>.</p></div>
+  </div>
+</section>
+
+<section id="fit" aria-labelledby="fit-h">
+  <div class="w">
+    <p class="k">05 · Fit</p>
+    <h2 id="fit-h">When to use it, and when not to</h2>
+    <p class="intro">Fan-out pays when tasks are independent and mechanical. The deciding question: could a competent contractor do this task knowing only this one prompt and the repo?</p>
+    <div class="two">
+      <div>
+        <h3>Use it for</h3>
+        <ul class="yn yes">
+          <li>A test file per module</li>
+          <li>One migration pattern applied repo-wide</li>
+          <li>Type hints across a package</li>
+          <li>Bulk lint fixes</li>
+          <li>Tasks partitioned by file, each with a runnable check</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Skip it for</h3>
+        <ul class="yn no">
+          <li>One coherent change threaded through many files: that is one edit, not N</li>
+          <li>Debugging, which needs the whole picture</li>
+          <li>Anything needing a design decision: there is no oracle</li>
+          <li>Several tasks that rewrite the same file, or conflict magnets like lockfiles and registries</li>
+          <li>A task with no runnable check: review that one by hand</li>
+          <li>Proprietary code on the contributor tier: pin <code>muse-spark-1.3</code> or keep it local</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="config" class="alt" aria-labelledby="cfg-h">
+  <div class="w">
+    <p class="k">06 · Configuration</p>
+    <h2 id="cfg-h">Five settings, prompted at install</h2>
+    <p class="intro">Each default is exactly what the plugin did before configuration existed, so skipping every prompt changes nothing. A set-but-invalid value is refused rather than silently replaced, every flag still overrides for one run, and <code>/muse:doctor</code> shows where each value came from.</p>
+    <div class="tw">
+      <table class="stack">
+        <thead><tr><th scope="col">Option</th><th scope="col">Default</th><th scope="col">What it controls</th></tr></thead>
+        <tbody>
+          <tr><th scope="row"><code>default_effort</code></th><td><code>low</code></td><td>Reasoning effort every round starts at (none to max). Higher costs more per task; lower means more revision rounds.</td></tr>
+          <tr><th scope="row"><code>max_rounds</code></th><td><code>3</code></td><td>Revision rounds per task, bounded 1 to 10. The runaway-cost breaker.</td></tr>
+          <tr><th scope="row"><code>worktree_root</code></th><td>empty</td><td>Where worktrees go. Empty means beside the repository; a path inside it is refused.</td></tr>
+          <tr><th scope="row"><code>refuse_on_secrets</code></th><td>on</td><td>Refuse to delegate a tree containing a credential. Turn off only where credential-shaped content is entirely test fixtures.</td></tr>
+          <tr><th scope="row"><code>default_model</code></th><td><code>latest-contributor</code></td><td>Resolves the newest contributor-tier model from muse's catalog at run time. Pin <code>muse-spark-1.3</code> for proprietary code.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section id="faq" aria-labelledby="faq-h">
+  <div class="w">
+    <p class="k">07 · FAQ</p>
+    <h2 id="faq-h">Questions people ask</h2>
+    <div class="faq">
+      <article><h3>How do I delegate coding tasks from Claude Code to a cheaper model?</h3><p>Install the muse plugin, start a new session, run muse login once, then run /muse:delegate with a brief that names the exact files, says what must not change and gives a runnable acceptance check. A Muse Code worker makes the edit in its own git worktree, and a Claude supervisor runs the check itself and sends the worker back until the final check passes. For a batch of independent tasks, /muse:fleet decomposes the job and runs one supervisor per task.</p></article>
+      <article><h3>What is Muse Code?</h3><p>Muse Code is the coding agent behind Meta's Muse Code API, driven through the muse command-line tool. This plugin needs muse on your PATH and credentials from muse login. By default delegated work uses the newest contributor-tier model, resolved from muse's own catalog at run time; you can pin a full-rate model such as muse-spark-1.3 instead.</p></article>
+      <article><h3>Does the plugin send my code or secrets anywhere?</h3><p>Prompts, the files the worker reads and its patches go to Meta's Muse Code API under the model you selected, and contributor-tier models state that content may be used for product improvement. Nothing is sent anywhere else: there is no telemetry, no analytics and no network call in the plugin outside the muse CLI. Before a worker starts, the worktree is scanned and delegation is refused on a PEM private-key block, an AWS key id, or a GitHub, Slack, Stripe or Anthropic-format token. For proprietary code, pin muse-spark-1.3 at full rate or do not delegate it.</p></article>
+      <article><h3>How is this different from Claude Code subagents?</h3><p>The supervisor is a Claude Code subagent (muse-supervisor, on Opus), but it does not write the code. A cheaper Muse Code worker does the typing in an isolated git worktree; the supervisor reads the patch, runs your acceptance check itself and re-prompts the worker with specific defects. A PreToolUse hook denies the supervisor's Write, Edit and NotebookEdit calls, and a SubagentStop hook blocks it from stopping while its task has no verdict.</p></article>
+      <article><h3>Does it apply patches automatically?</h3><p>No. No command applies a patch: every run stops at a verdict and a patch path, because an accepted patch is still a patch you have not read. Worktrees and branches stay until you remove them with /muse:cleanup, which is a dry run unless you pass --yes.</p></article>
+      <article><h3>Does it work on Windows?</h3><p>The free offline suite runs in CI on Linux under Python 3.9, 3.11 and 3.13, and on Windows under Git Bash as a blocking job; development is on macOS. You need the muse CLI, git, Python 3.9 or later and Claude Code.</p></article>
+      <article><h3>What is the difference between completed and accepted?</h3><p>Completed means the worker stopped. Accept means a supervisor ran a check and the final one passed. finish --verdict accept refuses unless the final check passed against the tree being harvested; --accept-unverified with a reason is the deliberate way past it, and /muse:status prints that reason.</p></article>
+      <article><h3>How much context does the plugin cost when installed?</h3><p>About 625 always-on tokens, against a 750-token ceiling the project holds itself to. The seven slash commands are opt-in and never invoked by the model, and the hooks add context only when they have something to report.</p></article>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="w">
+    <p>muse v1.4.0 · a Claude Code plugin by <a href="https://github.com/jellologic">jellologic</a> · MIT licensed</p>
+    <nav aria-label="Project links">
+      <ul>
+        <li><a href="https://github.com/jellologic/claude-code-muse">GitHub</a></li>
+        <li><a href="https://github.com/jellologic/claude-code-muse/releases">Releases</a></li>
+        <li><a href="https://github.com/jellologic/claude-code-muse/blob/main/CHANGELOG.md">Changelog</a></li>
+        <li><a href="https://github.com/jellologic/claude-code-muse/blob/main/SECURITY.md">Security</a></li>
+        <li><a href="https://github.com/jellologic/claude-code-muse/blob/main/LICENSE">MIT License</a></li>
+      </ul>
+    </nav>
+  </div>
+</footer>
+</body>
+</html>

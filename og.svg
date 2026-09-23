@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0f1117"/><stop offset="1" stop-color="#1b1530"/>
+    </linearGradient>
+    <linearGradient id="acc" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#c084fc"/><stop offset="1" stop-color="#f472b6"/>
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="640" fill="url(#bg)"/>
+  <g font-family="Helvetica Neue, Helvetica, Arial, sans-serif">
+    <text x="80" y="118" font-size="30" fill="#a1a1aa" letter-spacing="3">CLAUDE CODE PLUGIN</text>
+    <text x="80" y="220" font-size="112" font-weight="700" fill="#fafafa">muse</text>
+    <rect x="80" y="248" width="170" height="8" rx="4" fill="url(#acc)"/>
+    <text x="80" y="330" font-size="44" font-weight="600" fill="#fafafa">Delegate bulk coding work.</text>
+    <text x="80" y="386" font-size="44" font-weight="600" fill="#fafafa">A supervisor checks every patch.</text>
+    <text x="80" y="450" font-size="26" fill="#a1a1aa">Cheap Muse Code workers in isolated git worktrees. Claude runs your</text>
+    <text x="80" y="486" font-size="26" fill="#a1a1aa">acceptance check itself and re-prompts until the patch passes.</text>
+  </g>
+  <g font-family="Menlo, Monaco, monospace" font-size="22">
+    <rect x="80" y="530" width="1120" height="58" rx="10" fill="#18181b" stroke="#3f3f46"/>
+    <text x="104" y="567" fill="#71717a">$</text>
+    <text x="130" y="567" fill="#e4e4e7">/plugin install muse@claude-code-muse</text>
+    <text x="1176" y="567" fill="#a1a1aa" text-anchor="end">jellologic/claude-code-muse</text>
+  </g>
+</svg>
