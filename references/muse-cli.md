@@ -205,12 +205,19 @@ Two consequences that bite if you miss them:
 **Agents create build junk, and `git add -A` harvests it.** An agent told to verify with
 pytest built a `.venv` inside its worktree; the harvest swept in **1,057 files and a 14MB
 patch** around a single-file change. Nothing was wrong with the work — the signal was just
-buried. Exclude build artifacts at harvest time with pathspecs:
+buried. Exclude build artifacts at harvest time without touching tracked fixes: stage
+tracked changes unconditionally, then add only the untracked files no exclude matches:
 
 ```bash
-git -C "$WT" add -A -- ':(exclude,glob).venv' ':(exclude,glob)**/__pycache__' …
-git -C "$WT" diff --cached "$BASE" -- ':(exclude,glob).venv' …
+git -C "$WT" add -u
+git -C "$WT" ls-files --others --exclude-standard -z | filter-out-excluded | xargs -0 git -C "$WT" add --
+git -C "$WT" diff --cached --binary --full-index "$BASE"
 ```
+
+Excludes use git glob rules: `*` stays within a segment, `**` spans segments; a bare
+name matches any path component; a pattern that matches a directory covers its contents.
+Tracked files are always harvested even when an exclude matches them, so a fix under an
+excluded directory still reaches the patch.
 
 Cover at minimum `.venv venv __pycache__ .pytest_cache .mypy_cache node_modules dist build
 target *.pyc`. Treat any unexpectedly large patch as artifacts until proven otherwise.

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import datetime as dt
 import fnmatch
+import functools
 import glob
 import hashlib
 import json
@@ -1269,6 +1270,84 @@ def run_muse(cmd, prompt: str, cwd: Path, events: Path, stderr: Path, timeout: i
     return out
 
 
+def _translate_segment(seg):
+    # One glob segment -> regex fragment. fnmatch's * crosses "/", so * and ?
+    # are confined to [^/] here; a ** inside a segment is just a * (git rules).
+    out = []
+    i = 0
+    while i < len(seg):
+        c = seg[i]
+        if c == "*":
+            while i + 1 < len(seg) and seg[i + 1] == "*":
+                i += 1
+            out.append("[^/]*")
+        elif c == "?":
+            out.append("[^/]")
+        elif c == "[":
+            j = seg.find("]", i + 1)
+            if j < 0 or j == i + 1:
+                out.append(re.escape("["))
+            else:
+                inner = seg[i + 1:j]
+                if inner[0] in ("!", "^"):
+                    # Negated classes never match "/" either.
+                    out.append("[^/" + inner[1:].replace("\\", "\\\\") + "]")
+                else:
+                    out.append("[" + inner.replace("\\", "\\\\") + "]")
+                i = j
+        else:
+            out.append(re.escape(c))
+        i += 1
+    return "".join(out)
+
+
+@functools.lru_cache(maxsize=512)
+def _exclude_regex(pat):
+    # Git glob rules for a slash pattern, anchored. A whole "**" segment spans
+    # zero or more whole segments; anything else stays inside one segment.
+    segs = pat.split("/")
+    if all(s == "**" for s in segs):
+        return re.compile(r".*")
+    rx = ""
+    saw_real = False
+    i = 0
+    while i < len(segs) and segs[i] == "**":
+        i += 1
+    if i > 0:
+        # Leading "**/": any number of leading dirs, including none.
+        rx += "(?:.*/)?"
+    first = True
+    n = len(segs)
+    while i < n:
+        s = segs[i]
+        last = i == n - 1
+        if s == "**":
+            # Collapse consecutive "**".
+            while i + 1 < n and segs[i + 1] == "**":
+                i += 1
+            if last:
+                # Trailing "/**": this path or anything under it.
+                rx += "(?:/.*)?"
+            else:
+                # Middle "/**/": "/" or "/any/dirs/".
+                rx += "(?:/.*)?/"
+            first = False
+        else:
+            frag = _translate_segment(s)
+            if first and not saw_real and rx in ("", "(?:.*/)?"):
+                rx += frag
+            elif rx.endswith("/"):
+                rx += frag
+            else:
+                rx += "/" + frag
+            first = False
+            saw_real = True
+        i += 1
+    return re.compile(rx)
+
+
+# fnmatch's * crosses "/", so a/*.py used to silently drop new files in
+# subdirectories; slash patterns are translated to git glob regexes instead.
 def _excluded(path, excludes) -> bool:
     parts = path.split("/")
     prefixes = ["/".join(parts[:i]) for i in range(1, len(parts) + 1)]
@@ -1281,21 +1360,10 @@ def _excluded(path, excludes) -> bool:
                 if fnmatch.fnmatchcase(component, pat):
                     return True
         else:
-            cands = {pat}
-            s = pat
-            while s.startswith("**/"):
-                s = s[3:]
-                cands.add(s)
-            expanded = set(cands)
-            for cand in list(cands):
-                t = cand
-                while t.endswith("/**"):
-                    t = t[:-3]
-                    expanded.add(t)
+            rx = _exclude_regex(pat)
             for prefix in prefixes:
-                for cand in expanded:
-                    if cand and fnmatch.fnmatchcase(prefix, cand):
-                        return True
+                if rx.fullmatch(prefix):
+                    return True
     return False
 
 

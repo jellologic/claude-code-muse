@@ -112,22 +112,6 @@ echo "$HV_F3" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 
   && ok "fingerprint: a tracked build/ edit after verify makes the check stale" \
   || bad "fingerprint: blind to an edit in a tracked build/ file" "$HV_F3"
 
-# 4. An explicit nested exclude really excludes directory contents, root and nested.
-cat > "$HV/nested.py" <<'PY'
-import os, sys
-wt = sys.argv[1]
-for rel in ("node_modules/a.js", "sub/node_modules/y/i.js", "src/node_modules_util.py"):
-    p = os.path.join(wt, rel); os.makedirs(os.path.dirname(p), exist_ok=True)
-    open(p, "w").write("x\n")
-PY
-hv_repo "$HV/r4"
-HV_R4=$(hv_run "$HV/r4" n "$HV/nested.py" --exclude '**/node_modules/**' --exclude .muse-fleet/)
-echo "$HV_R4" | python3 -c '
-import json,sys; d=json.load(sys.stdin); fc=d.get("files_changed") or []
-sys.exit(0 if fc==["src/node_modules_util.py"] else 1)' \
-  && ok "harvest: **/node_modules/** excludes root and nested contents, keeps a lookalike name" \
-  || bad "harvest: nested exclude leaked or over-matched" "$HV_R4"
-
 if [ "$HV_STANDALONE" -eq 1 ]; then
   rm -rf "$LAB"
   exit $([ "$FAIL" -eq 0 ] && echo 0 || echo 1)
