@@ -342,6 +342,30 @@ def do_round(st: dict, tdir: Path, prompt: str, args, kind: str,
 
 def cmd_run(args) -> int:
     repo = Path(args.repo).resolve()
+    # Effective configuration: an explicit CLI flag wins, then the userConfig value
+    # the runtime supplied, then the historical built-in default. Resolved here, before
+    # anything is created or muse is spawned, so a refused value leaves no worktree,
+    # branch or directory behind and never spends a round.
+    try:
+        args.max_rounds, _ = core.option_with_source(
+            "max_rounds", args.max_rounds, DEFAULT_MAX_ROUNDS)
+        args.effort, _ = core.option_with_source(
+            "default_effort", args.effort, core.DEFAULT_EFFORT)
+        args.model, _ = core.option_with_source(
+            "default_model", args.model, core.LATEST)
+        raw, _ = core.option_with_source("worktree_root", args.worktree_root, "")
+        # An explicit --allow-secrets always allows: it is the per-invocation
+        # override. Otherwise a --refuse-on-secrets flag wins, then userConfig,
+        # then refusing.
+        if not args.allow_secrets:
+            refuse, _ = core.option_with_source(
+                "refuse_on_secrets", args.refuse_on_secrets, True)
+            args.allow_secrets = not refuse
+        # Fail fast on a root inside the repo, before the artifact dir below exists.
+        raw = str(core.resolve_worktree_root(repo, raw))
+    except core.ConfigError as e:
+        emit({"id": args.id, "status": "refused", "reason": str(e)})
+        return 1
     # A relative --out is resolved against the repository it belongs to. `run` knows
     # which one that is; `verify` and `finish` have only the cwd. When those two are
     # different repositories the later commands cannot find the task, and the failure
@@ -448,8 +472,7 @@ def cmd_run(args) -> int:
     stamp = args.stamp or "{}-{}".format(
         dt.datetime.now().strftime("%Y%m%d-%H%M%S"), secrets.token_hex(4))
     branch = "{}/{}/{}".format(args.branch_prefix, stamp, args.id)
-    wt_root = Path(args.worktree_root) if args.worktree_root \
-        else repo.parent / ".muse-fleet-wt-{}".format(repo.name)
+    wt_root = core.resolve_worktree_root(repo, raw)
     wt_root.mkdir(parents=True, exist_ok=True)
     wt = wt_root / "{}-{}".format(stamp, args.id)
 
@@ -916,18 +939,26 @@ def main() -> int:
     # Defaults come from userConfig where the runtime supplied it, and are otherwise
     # exactly what they have always been -- an install that skipped the prompts must
     # behave identically to one from before there was any configuration.
-    p.add_argument("--model", default=core.user_option("default_model", core.LATEST))
-    p.add_argument("--effort", default=core.user_option("default_effort", core.DEFAULT_EFFORT),
-                   choices=core.EFFORTS)
+    p.add_argument("--model", default=None,
+                   help="model id, or 'latest-contributor' to resolve the newest "
+                        "contributor model (default: userConfig default_model)")
+    # No choices: an empty substitution means "not given" and a bad value must
+    # refuse as JSON, not as an argparse usage error. option_with_source and
+    # coerce_option validate against EFFORTS instead.
+    p.add_argument("--effort", default=None,
+                   help="reasoning effort, one of %s (default: userConfig default_effort)"
+                   % ", ".join(core.EFFORTS))
     p.add_argument("--timeout", type=int, default=core.DEFAULT_TIMEOUT)
     p.add_argument("--max-steps", type=int, default=0)
-    p.add_argument("--max-rounds", type=int,
-                   default=core.user_option("max_rounds", DEFAULT_MAX_ROUNDS),
-                   help="hard cap on revision rounds (runaway-cost breaker)")
+    p.add_argument("--max-rounds", type=str, default=None,
+                   help="hard cap on revision rounds (runaway-cost breaker; "
+                        "default: userConfig max_rounds)")
     p.add_argument("--base", default="HEAD")
     p.add_argument("--schema")
     p.add_argument("--branch-prefix", default="muse")
-    p.add_argument("--worktree-root", default=core.user_option("worktree_root", None))
+    p.add_argument("--worktree-root", default=None,
+                   help="where worktrees live (default: userConfig worktree_root, "
+                        "else beside the repo)")
     p.add_argument("--stamp", default=None,
                    help="shared run stamp so sibling tasks land under one namespace")
     p.add_argument("--allow-dirty", action="store_true")
@@ -941,8 +972,10 @@ def main() -> int:
     p.add_argument("--no-secret-scan", action="store_true",
                    help="skip the pre-delegation credential scan")
     p.add_argument("--allow-secrets", action="store_true",
-                   default=not core.user_option("refuse_on_secrets", True),
                    help="scan, report, but do not refuse on a confirmed credential")
+    p.add_argument("--refuse-on-secrets", default=None,
+                   help="true/false: refuse on a confirmed credential "
+                        "(default: userConfig refuse_on_secrets)")
     p.set_defaults(fn=cmd_run)
 
     p = sub.add_parser("revise", help="run muse again in the same worktree with feedback")

@@ -9,13 +9,14 @@ model: haiku
 # Can this machine delegate?
 
 ```bash
-muse-doctor [--repo <path>] [--scan] [--json]
+muse-doctor --effort "${user_config.default_effort}" --max-rounds "${user_config.max_rounds}" --model "${user_config.default_model}" --refuse-on-secrets "${user_config.refuse_on_secrets}" --worktree-root "${user_config.worktree_root}" [--repo <path>] [--scan] [--json]
 ```
 
 Checks the muse binary and version, stored credentials (existence only, never contents),
 the model catalog and what it resolves to, the interactive model pin, Python and git, the
 plugin's own scripts, the repo's git state, and the worktree root. Exits non-zero if
-anything is blocking, so it can gate a script.
+anything is blocking, so it can gate a script. The userConfig row shows where each value
+came from — flag, env or default — because the Bash tool never sees the option variables directly.
 
 `--scan` adds a credential scan of the repo. It is slower on a large tree, which is why
 it is opt-in here — but run it before a first delegation from an unfamiliar repo.

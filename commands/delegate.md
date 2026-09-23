@@ -44,7 +44,7 @@ Produce four things:
   **not** change. Keep it to one sitting; if it needs three paragraphs it is two tasks.
 - **check** — one shell command, run from the repo root, exiting 0 only when the task is
   genuinely done (`pytest tests/test_parser.py -q`, `mypy utils.py`, `node -e "require('./dist')"`)
-- **effort** — `low` for mechanical work (the default and the common case), `medium` where
+- **effort** — `${user_config.default_effort}` for mechanical work (the default and the common case), `medium` where
   local design judgment is needed, `xhigh` only for a genuinely hard fix
 
 Read the relevant files first if you need them to name targets precisely. Cheap, and it is
@@ -74,7 +74,9 @@ Launch the `muse-supervisor` agent with one task. The supervisor calls `muse-tas
 
 The brief you hand the agent must contain: the task id, the artifact root, the repo path,
 the prompt, the acceptance check, the effort, any `--seed`/`--link` flags, and the round
-cap (3 unless told otherwise). Tell it to return a verdict, the check it ran with its exit
+cap ${user_config.max_rounds}. The brief also carries the model `${user_config.default_model}`,
+the worktree root `${user_config.worktree_root}` and refuse_on_secrets `${user_config.refuse_on_secrets}`.
+Tell it to return a verdict, the check it ran with its exit
 code, the patch path, and any residual concerns — and that it must not apply the patch.
 
 Give both paths **absolute**. `run` resolves a relative `--out` against the repository, so

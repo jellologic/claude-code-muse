@@ -257,18 +257,24 @@ def main() -> int:
     ap.add_argument("--repo", default=".")
     ap.add_argument("--out")
     ap.add_argument("--concurrency", type=int, default=3)
-    ap.add_argument("--model", default=LATEST,
-                    help=f"model id, or '{LATEST}' (default) to resolve the newest "
-                         "contributor model from the live catalog")
-    ap.add_argument("--effort", default=DEFAULT_EFFORT,
-                    choices=["none", "minimal", "low", "medium", "high", "xhigh", "max"])
+    ap.add_argument("--model", default=None,
+                    help=f"model id, or '{LATEST}' to resolve the newest "
+                         "contributor model from the live catalog "
+                         "(default: userConfig default_model)")
+    # No choices: an empty substitution means "not given" and a bad value must
+    # refuse cleanly, not as an argparse usage error. option_with_source and
+    # coerce_option validate the value instead.
+    ap.add_argument("--effort", default=None,
+                    help="reasoning effort, one of none, minimal, low, medium, high, "
+                         "xhigh, max (default: userConfig default_effort)")
     ap.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT, help="per-task seconds")
     ap.add_argument("--max-steps", type=int, default=0, help="cap agent loop length")
     ap.add_argument("--base", default="HEAD", help="ref each worktree branches from")
     ap.add_argument("--schema", help="JSON Schema file for structured answers")
     ap.add_argument("--branch-prefix", default="fleet")
     ap.add_argument("--worktree-root", default=None,
-                    help="where worktrees live (default: sibling of repo, keeps repo clean)")
+                    help="where worktrees live (default: userConfig worktree_root, "
+                         "else sibling of repo, keeps repo clean)")
     ap.add_argument("--commit", action="store_true", help="commit inside each worktree")
     ap.add_argument("--cleanup", action="store_true", help="remove worktrees+branches after harvest")
     ap.add_argument("--allow-dirty", action="store_true")
@@ -286,14 +292,38 @@ def main() -> int:
     ap.add_argument("--no-secret-scan", action="store_true",
                     help="skip the pre-delegation credential scan")
     ap.add_argument("--allow-secrets", action="store_true",
-                    default=not core.user_option("refuse_on_secrets", True),
                     help="scan, report, but do not refuse on a confirmed credential")
+    ap.add_argument("--refuse-on-secrets", default=None,
+                    help="true/false: refuse on a confirmed credential "
+                         "(default: userConfig refuse_on_secrets)")
     args = ap.parse_args()
 
     if args.exclude is None:
         args.exclude = DEFAULT_EXCLUDES
+    # Effective configuration: a CLI flag wins, then the userConfig value, then the
+    # historical built-in default. Resolved before the artifact dir or any worktree
+    # exists, so a refused value leaves nothing behind.
+    try:
+        args.effort, _ = core.option_with_source(
+            "default_effort", args.effort, DEFAULT_EFFORT)
+        args.model, _ = core.option_with_source(
+            "default_model", args.model, LATEST)
+        # An explicit --allow-secrets always allows; otherwise a
+        # --refuse-on-secrets flag wins, then userConfig, then refusing.
+        if not args.allow_secrets:
+            refuse, _ = core.option_with_source(
+                "refuse_on_secrets", args.refuse_on_secrets, True)
+            args.allow_secrets = not refuse
+    except core.ConfigError as e:
+        sys.exit("muse_fleet: refused: " + str(e))
     args.model, how = resolve_model(args.model)
     repo = Path(args.repo).resolve()
+    try:
+        raw, _ = core.option_with_source(
+            "worktree_root", args.worktree_root, "")
+        args.worktree_root = str(core.resolve_worktree_root(repo, raw))
+    except core.ConfigError as e:
+        sys.exit("muse_fleet: refused: " + str(e))
     if args.schema:
         try:
             check_schema(args.schema)
@@ -307,8 +337,6 @@ def main() -> int:
     stamp = new_stamp()
     out = Path(args.out).resolve() if args.out else repo / ".muse-fleet" / stamp
     out.mkdir(parents=True, exist_ok=True)
-    if args.worktree_root is None:
-        args.worktree_root = str(repo.parent / f".muse-fleet-wt-{repo.name}")
     Path(args.worktree_root).mkdir(parents=True, exist_ok=True)
 
     tasks = json.loads(Path(args.tasks).read_text(encoding="utf-8"))

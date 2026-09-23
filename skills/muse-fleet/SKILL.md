@@ -158,7 +158,7 @@ surfaced as a throw after the planning agents had already been paid for.
 Workflow({ name: "muse-supervised-fleet",
            args: { job: "...", repo: "<absolute path>",
                    pluginRoot: "<echo ${CLAUDE_PLUGIN_ROOT}>",
-                   stamp: "<YYYYmmdd-HHMM>", maxRounds: 3 } })
+                   stamp: "<YYYYmmdd-HHMM>", maxRounds: ${user_config.max_rounds}, defaultEffort: "${user_config.default_effort}", model: "${user_config.default_model}", worktreeRoot: "${user_config.worktree_root}", refuseOnSecrets: ${user_config.refuse_on_secrets} } })
 ```
 
 `${CLAUDE_PLUGIN_ROOT}/references/workflow.md` is the reasoning behind its shape; the code
@@ -177,7 +177,9 @@ loop; every one prints a single JSON object on stdout.
 
 ```bash
 # --out defaults to .muse-fleet/tasks; pass it only to override.
-muse-task run    --id tests-auth --repo . --effort low \
+muse-task run    --id tests-auth --repo . --effort "${user_config.default_effort}" \
+                 --max-rounds "${user_config.max_rounds}" --model "${user_config.default_model}" \
+                 --worktree-root "${user_config.worktree_root}" --refuse-on-secrets "${user_config.refuse_on_secrets}" \
                  --prompt "Create tests/test_auth.py covering login() and logout(). Do not modify auth.py."
 muse-task verify --id tests-auth --command "pytest tests/test_auth.py -q"
 muse-task revise --id tests-auth --feedback-file /tmp/review.txt
@@ -190,7 +192,7 @@ muse-task finish --id tests-auth --verdict accept --summary "..."
 
 Rounds share one worktree, so `revise` edits the previous round's output rather than
 starting over, and the harvested patch is always the cumulative diff against base — the
-thing you would actually merge. `--max-rounds` (default 3) is a hard ceiling: the script
+thing you would actually merge. `--max-rounds` (${user_config.max_rounds}) is a hard ceiling: the script
 refuses past it rather than letting a supervisor loop up a bill. It is accepted **only on
 `run`**, where it goes into `state.json` and is then enforced on every later `revise` —
 passing it to `revise` is an argparse error. Use `--feedback-file` for a review longer than
@@ -215,6 +217,8 @@ buying a pile of unreviewed patches.
 ```bash
 muse-fleet \
   --tasks tasks.json --repo . --concurrency 3 \
+  --effort "${user_config.default_effort}" --model "${user_config.default_model}" \
+  --worktree-root "${user_config.worktree_root}" --refuse-on-secrets "${user_config.refuse_on_secrets}" \
   --schema "${CLAUDE_PLUGIN_ROOT}/assets/result-schema.json"
 ```
 
@@ -395,7 +399,7 @@ supervised task is overkill. `muse-ask` is one question, one answer on stdout:
 ```bash
 muse-ask "List every file importing requests, with line numbers"
 muse-ask --effort xhigh "Why does connect() return None after a timeout?"
-muse-ask --write --effort low "Add a docstring to add() in calc.py"
+muse-ask --write --effort "${user_config.default_effort}" --model "${user_config.default_model}" --refuse-on-secrets "${user_config.refuse_on_secrets}" "Add a docstring to add() in calc.py"
 ```
 
 Read-only by default (writes disabled, sandbox on), so it is safe against a dirty working

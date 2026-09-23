@@ -53,7 +53,7 @@ Workflow({ name: "muse-supervised-fleet",
                    repo: "<the absolute path you echoed>",
                    pluginRoot: "<the echoed CLAUDE_PLUGIN_ROOT>",
                    stamp: "<the date you just ran>",
-                   maxRounds: 3 } })
+                   maxRounds: ${user_config.max_rounds}, defaultEffort: "${user_config.default_effort}", model: "${user_config.default_model}", worktreeRoot: "${user_config.worktree_root}", refuseOnSecrets: ${user_config.refuse_on_secrets} } })
 ```
 
 If that name does not resolve, the plugin was installed before workflows were registered —

@@ -215,19 +215,92 @@ def check_repo(out, core, repo: Path):
     return True
 
 
-def check_worktree_root(out, repo: Path):
-    root = repo.parent / ".muse-fleet-wt-{}".format(repo.name)
-    target = root if root.exists() else repo.parent
-    if not os.access(str(target), os.W_OK):
-        out.append(("FAIL", "worktree root", "%s is not writable" % target,
+def check_worktree_root(out, core, repo: Path, cli_value):
+    # `cli_value` is the --worktree-root flag (None when absent, "" when the
+    # userConfig value was empty); the shared helper folds flag, env and default.
+    try:
+        raw, source = core.option_with_source("worktree_root", cli_value, "")
+        root = core.resolve_worktree_root(repo, raw)
+    except core.ConfigError as e:
+        out.append(("FAIL", "worktree root", str(e),
+                    "Set userConfig worktree_root to a path outside the repository, "
+                    "or leave it empty for the default beside the repo."))
+        return
+    origin = source
+    # Probe the nearest existing ancestor: a configured root typically does not
+    # exist yet, and checking the repo's parent for that case answers nothing.
+    probe = root
+    while not probe.exists():
+        parent = probe.parent
+        if parent == probe:
+            break
+        probe = parent
+    if not os.access(str(probe), os.W_OK):
+        out.append(("FAIL", "worktree root", "%s is not writable" % probe,
                     "Worktrees are created beside the repo. Pass --worktree-root to move them."))
         return
-    existing = len([d for d in root.iterdir() if d.is_dir()]) if root.exists() else 0
+    try:
+        existing = len([d for d in root.iterdir() if d.is_dir()]) if root.exists() else 0
+    except OSError:
+        existing = 0
     if existing:
-        out.append(("WARN", "worktree root", "%s holds %d worktree(s)" % (root, existing),
+        out.append(("WARN", "worktree root", "%s holds %d worktree(s) (%s)" % (root, existing, origin),
                     "Left over from earlier runs. `/muse:cleanup` reaps them."))
     else:
-        out.append(("OK", "worktree root", "%s (writable)" % target, ""))
+        out.append(("OK", "worktree root", "%s (%s, writable)" % (root, origin), ""))
+
+
+def check_user_config(out, core, repo: Path, flags):
+    # A set-but-invalid value refuses at run time rather than silently running
+    # on defaults, so surface it here before it stops a delegation. Each value
+    # is tagged with where it came from: the Bash tool never sees
+    # CLAUDE_PLUGIN_OPTION_*, so without the flags the doctor would report bare
+    # defaults in a live session. `flags` maps userConfig key to CLI value/None.
+    resolved = {}
+    for key, default in (("default_effort", core.DEFAULT_EFFORT),
+                         ("max_rounds", 3),
+                         ("default_model", core.LATEST),
+                         ("refuse_on_secrets", True),
+                         ("worktree_root", "")):
+        cli = flags.get(key)
+        try:
+            resolved[key] = core.option_with_source(key, cli, default)
+        except core.ConfigError as e:
+            # The helper validates the flag first and the env second, so the
+            # rejected raw is the non-empty flag when there is one, else env.
+            if cli is not None and cli != "":
+                raw, source = cli, "flag"
+            else:
+                raw = os.environ.get("CLAUDE_PLUGIN_OPTION_" + key.upper())
+                source = "env"
+            out.append(("FAIL", "userConfig",
+                        "%s=%r (%s): %s" % (key, raw, source, e),
+                        "Fix the value in the plugin configuration and re-run."))
+            return
+    try:
+        wt_root = core.resolve_worktree_root(repo, resolved["worktree_root"][0])
+    except core.ConfigError as e:
+        cli = flags.get("worktree_root")
+        if cli is not None and cli != "":
+            raw, source = cli, "flag"
+        else:
+            raw = os.environ.get("CLAUDE_PLUGIN_OPTION_WORKTREE_ROOT")
+            source = "env"
+        out.append(("FAIL", "userConfig",
+                    "worktree_root=%r (%s): %s" % (raw, source, e),
+                    "Set userConfig worktree_root to a path outside the repository, "
+                    "or leave it empty for the default beside the repo."))
+        return
+    (effort, effort_src), (rounds, rounds_src), (model, model_src), \
+        (refuse, refuse_src), (_, wt_src) = (
+            resolved["default_effort"], resolved["max_rounds"],
+            resolved["default_model"], resolved["refuse_on_secrets"],
+            resolved["worktree_root"])
+    out.append(("OK", "userConfig",
+                "effort=%s (%s), max_rounds=%s (%s), model=%s (%s), "
+                "refuse_on_secrets=%s (%s), worktree_root=%s (%s)"
+                % (effort, effort_src, rounds, rounds_src, model, model_src,
+                   refuse, refuse_src, wt_root, wt_src), ""))
 
 
 def check_scripts(out):
@@ -272,6 +345,15 @@ def check_secrets(out, core, repo: Path):
 def main() -> int:
     ap = argparse.ArgumentParser(description="Report whether this machine can delegate to muse.")
     ap.add_argument("--repo", default=".")
+    # Plain strings, no choices: a bad value must become a FAIL row, not an
+    # argparse exit. The command passes ${user_config.*} into these flags
+    # because the Bash tool never sees CLAUDE_PLUGIN_OPTION_*.
+    ap.add_argument("--effort", default=None)
+    ap.add_argument("--max-rounds", default=None)
+    ap.add_argument("--model", default=None)
+    ap.add_argument("--refuse-on-secrets", default=None)
+    ap.add_argument("--worktree-root", default=None,
+                    help="check this worktree root instead of the configured one")
     ap.add_argument("--scan", action="store_true",
                     help="also scan the repo for credentials (slower on large trees)")
     ap.add_argument("--json", action="store_true")
@@ -304,9 +386,16 @@ def main() -> int:
     guarded("python/git", check_python_git, out)
     guarded("plugin scripts", check_scripts, out)
     if guarded("repo", check_repo, out, core, repo):
-        guarded("worktree root", check_worktree_root, out, repo)
+        guarded("worktree root", check_worktree_root, out, core, repo, args.worktree_root)
         if args.scan:
             guarded("credential scan", check_secrets, out, core, repo)
+    guarded("userConfig", check_user_config, out, core, repo, {
+        "default_effort": args.effort,
+        "max_rounds": args.max_rounds,
+        "default_model": args.model,
+        "refuse_on_secrets": args.refuse_on_secrets,
+        "worktree_root": args.worktree_root,
+    })
 
     fails = [r for r in out if r[0] == "FAIL"]
     warns = [r for r in out if r[0] == "WARN"]

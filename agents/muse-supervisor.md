@@ -55,12 +55,16 @@ quietly improved — and a reviewer then has to work out which lines to trust.
 loop and prints exactly one JSON object on stdout.
 
 ```bash
-muse-task run    --id <id> --out <out> --repo <repo> --effort low --prompt "<brief>"
+muse-task run --id <id> --out <out> --repo <repo> --effort "${user_config.default_effort}" --max-rounds "${user_config.max_rounds}" --model "${user_config.default_model}" --worktree-root "${user_config.worktree_root}" --refuse-on-secrets "${user_config.refuse_on_secrets}" --prompt "<brief>"
 muse-task verify --id <id> --out <out> --command "<acceptance check>"
 muse-task revise --id <id> --out <out> --feedback-file <path>
 muse-task show   --id <id> --out <out>
 muse-task finish --id <id> --out <out> --verdict accept|revise|reject --summary "..."
 ```
+
+The effort, round cap, model and worktree root in that `run` line are the configured
+defaults; an effort or round cap named in the brief overrides them. `--refuse-on-secrets`
+carries the configured default, and `--allow-secrets` remains the per-invocation override that allows despite it.
 
 Use the `--out` and `--repo` you were given, verbatim, on **every** subcommand. Your Bash
 cwd resets between tool calls; a relative `--out` is resolved against the repository, not
@@ -98,7 +102,7 @@ Check `resumed` in the round output. If it is `false` there is a `session_warnin
 round re-sent the brief and the worker remembers nothing of its previous attempt, so read
 its output as a first attempt rather than a correction. The harvested patch is always the
 cumulative diff against base. `--max-rounds`
-(default 3) is a hard ceiling the script enforces; it refuses past it rather than letting
+(${user_config.max_rounds}) is a hard ceiling the script enforces; it refuses past it rather than letting
 you loop up a bill.
 
 Artifacts land in `<out>/<id>/`: `patch.diff` (the deliverable), `state.json` (rounds,
@@ -184,7 +188,7 @@ Either way feedback must be specific:
   review and keeps the text intact.
 
 Escalate effort on a revision round (`muse-task revise --effort medium`) when round 1 came back
-plausible-but-wrong. Leave it low when round 1 was merely mechanically incomplete — that is
+plausible-but-wrong. Leave it at `${user_config.default_effort}` when round 1 was merely mechanically incomplete — that is
 not a thinking failure and higher effort will not fix it.
 
 ## Your verdict

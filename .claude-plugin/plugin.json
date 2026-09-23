@@ -34,7 +34,8 @@
       "type": "string",
       "title": "Default reasoning effort",
       "description": "Effort every delegated round starts at: none, minimal, low, medium, high, xhigh or max. Teams differ on whether low is right for their codebase. Raise it and every task costs more; lower it and more tasks come back needing a revision round.",
-      "default": "low"
+      "default": "low",
+      "options": ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
     },
     "max_rounds": {
       "type": "number",

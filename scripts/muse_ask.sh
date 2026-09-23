@@ -33,12 +33,16 @@
 set -uo pipefail
 
 SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-EFFORT="low"
+# Unset sentinels: an empty value means the flag was not given, so the effective
+# value comes from userConfig (CLAUDE_PLUGIN_OPTION_*) with the historical default
+# behind that. A literal here would silently override a configured value.
+EFFORT=""
 SESSION=""
 CONTINUE=0
-MODEL="latest-contributor"
+MODEL=""
 SCHEMA=""
 REPO="."
+REFUSE_ON_SECRETS=""
 WRITE=0
 TIMEOUT=600
 MAX_STEPS=""
@@ -60,6 +64,7 @@ while [[ $# -gt 0 ]]; do
     --max-steps) MAX_STEPS="$2"; shift 2 ;;
     --write)     WRITE=1; shift ;;
     --allow-secrets) ALLOW_SECRETS=1; shift ;;
+    --refuse-on-secrets) REFUSE_ON_SECRETS="$2"; shift 2 ;;
     --no-secret-scan) NO_SECRET_SCAN=1; shift ;;
     --session)   SESSION="$2"; shift 2 ;;
     --continue)  CONTINUE=1; shift ;;
@@ -72,6 +77,36 @@ done
 
 PROMPT="${*:-}"
 [[ -z "$PROMPT" ]] && { echo "no prompt given" >&2; usage 1; }
+
+# One Python call resolves all three values: the CLI flag wins, then userConfig,
+# then the historical default. A CLI value is validated the same way a configured
+# one is, so a typo refuses rather than billing a run on a fallback. Prints the
+# effective effort, model and refuse_on_secrets, one per line; on ConfigError it
+# names the refusal on stderr and exits nonzero.
+ASK_CFG="$(python3 -c '
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("mc", sys.argv[1])
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+try:
+    eff, _ = m.option_with_source("default_effort", sys.argv[2], "low")
+    mod, _ = m.option_with_source("default_model", sys.argv[3], "latest-contributor")
+    refuse, _ = m.option_with_source("refuse_on_secrets", sys.argv[4], True)
+    sys.stdout.write("%s\n%s\n%s\n" % (eff, mod, refuse))
+except m.ConfigError as e:
+    sys.stderr.write("muse_ask: refused: %s\n" % e)
+    sys.exit(2)
+' "$SKILL_DIR/scripts/muse_core.py" "$EFFORT" "$MODEL" "$REFUSE_ON_SECRETS" | tr -d '\r')"
+if [ "$?" -ne 0 ]; then exit 1; fi
+EFFORT="$(printf '%s\n' "$ASK_CFG" | sed -n '1p')"
+MODEL="$(printf '%s\n' "$ASK_CFG" | sed -n '2p')"
+ASK_REFUSE="$(printf '%s\n' "$ASK_CFG" | sed -n '3p')"
+if [[ -z "$EFFORT" || -z "$MODEL" || -z "$ASK_REFUSE" ]]; then
+  echo "muse_ask: refused: could not resolve effort/model/refuse_on_secrets from userConfig" >&2
+  exit 1
+fi
+# An explicit --allow-secrets always allows; otherwise refusing is the default and
+# a false here (from the flag or userConfig) opts out of the --write refusal.
+if [[ "$ASK_REFUSE" == "False" ]]; then ALLOW_SECRETS=1; fi
 
 command -v muse >/dev/null || { echo "muse not found on PATH" >&2; exit 1; }
 
@@ -112,7 +147,10 @@ if [[ "$WRITE" -eq 1 && "$NO_SECRET_SCAN" -eq 0 ]]; then
 import importlib.util, sys
 spec = importlib.util.spec_from_file_location("mc", sys.argv[1])
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
-allow = sys.argv[3] == "1" or not m.user_option("refuse_on_secrets", True)
+# ALLOW_SECRETS already folds the flag, userConfig and the default together
+# (resolved above), so the scan takes it as given rather than re-reading env —
+# a --refuse-on-secrets flag must beat a differently-set userConfig value.
+allow = sys.argv[3] == "1"
 pf = m.preflight_secrets([sys.argv[2]], {"allow_secrets": allow, "no_secret_scan": False})
 if pf["refuse"]:
     sys.stderr.write("muse_ask: refused: %s\n" % (pf["reason"] or ""))

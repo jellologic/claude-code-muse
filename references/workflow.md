@@ -59,8 +59,14 @@ Invoke it by name, with the job and the repo as `args`:
 Workflow({ name: "muse-supervised-fleet",
            args: { job: "add pytest coverage to the four untested modules",
                    repo: "<absolute path>", pluginRoot: "<echo ${CLAUDE_PLUGIN_ROOT}>",
-                   stamp: "20260919-1430", maxRounds: 3 } })
+                   stamp: "20260919-1430", maxRounds: 3, defaultEffort: "low",
+                   model: "latest-contributor", worktreeRoot: "", refuseOnSecrets: true } })
 ```
+
+The fleet-wide defaults come from userConfig (round cap, default effort, model,
+worktree root and whether to refuse on a confirmed credential); the values above
+are the built-in defaults the plugin uses when nothing is configured. The skill
+and the fleet command substitute the configured values into the args above.
 
 `pluginRoot` is optional. Pass it so the script can fall back to the absolute
 `bin/muse-task` when the plugin is not enabled in the session running the workflow;

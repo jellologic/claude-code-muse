@@ -39,6 +39,17 @@ const REPO  = ARGS.repo || '.'
 const STAMP = ARGS.stamp
 const OUT   = ARGS.out  || `${REPO}/.muse-fleet/supervised/${STAMP}`
 const ROUNDS = ARGS.maxRounds || 3
+// Fleet-wide userConfig values, substituted into the args by the caller (the
+// skill and the fleet command). Absent means unconfigured, so each takes the
+// built-in default the plugin used before there was any configuration.
+const DEFAULT_EFFORT = (ARGS.defaultEffort === undefined || ARGS.defaultEffort === null)
+  ? 'low' : ARGS.defaultEffort
+const MODEL = (ARGS.model === undefined || ARGS.model === null)
+  ? 'latest-contributor' : ARGS.model
+const WORKTREE_ROOT = (ARGS.worktreeRoot === undefined || ARGS.worktreeRoot === null)
+  ? '' : ARGS.worktreeRoot
+const REFUSE_ON_SECRETS = (ARGS.refuseOnSecrets === undefined || ARGS.refuseOnSecrets === null)
+  ? true : ARGS.refuseOnSecrets
 
 // The model can also invoke this workflow with missing or hostile args, and several of
 // these values are interpolated inside double quotes in generated shell -- where a `"`,
@@ -57,7 +68,9 @@ if (typeof ARGS.job !== 'string' || !ARGS.job.trim()) {
 if (typeof ARGS.stamp !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(ARGS.stamp)) {
   WF_PROBLEMS.push('stamp is missing or unsafe (pass args.stamp starting with a letter or digit, with only letters, digits, dot, underscore or hyphen, max 64 chars, taken from date +%Y%m%d-%H%M%S)')
 }
-for (const k of ['pluginRoot', 'repo', 'out']) {
+// model and worktreeRoot ride in the same loop: both are interpolated inside
+// double quotes in the run line below, so the same metacharacters escape there.
+for (const k of ['pluginRoot', 'repo', 'out', 'model', 'worktreeRoot']) {
   const v = ARGS[k]
   if (v !== undefined && v !== null && (typeof v !== 'string' || /["$`\\\n\r]/.test(v))) {
     WF_PROBLEMS.push(k + ' is present but not a plain shell-safe path (pass a string with no double quote, dollar, backtick, backslash, newline or carriage return, since it is interpolated inside double quotes in generated shell)')
@@ -66,6 +79,15 @@ for (const k of ['pluginRoot', 'repo', 'out']) {
 if (ARGS.maxRounds !== undefined && ARGS.maxRounds !== null &&
     (!Number.isInteger(ARGS.maxRounds) || ARGS.maxRounds < 1 || ARGS.maxRounds > 10)) {
   WF_PROBLEMS.push('maxRounds is present but not an integer from 1 to 10 (pass 1-10 or omit it)')
+}
+if (ARGS.defaultEffort !== undefined && ARGS.defaultEffort !== null &&
+    ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].indexOf(ARGS.defaultEffort) === -1) {
+  WF_PROBLEMS.push('defaultEffort is present but not one of none, minimal, low, medium, high, xhigh, max (pass one of those or omit it)')
+}
+if (ARGS.refuseOnSecrets !== undefined && ARGS.refuseOnSecrets !== null &&
+    ARGS.refuseOnSecrets !== true && ARGS.refuseOnSecrets !== false &&
+    ARGS.refuseOnSecrets !== 'true' && ARGS.refuseOnSecrets !== 'false') {
+  WF_PROBLEMS.push('refuseOnSecrets is present but not true or false (pass a boolean or omit it)')
 }
 if (WF_PROBLEMS.length) {
   const WF_REASON = 'workflow refused: ' + WF_PROBLEMS.join('; ') + '.'
@@ -87,7 +109,7 @@ const PLAN_SCHEMA = {
           prompt: { type: 'string' },
           files:  { type: 'array', items: { type: 'string' } },
           check:  { type: 'string' },   // shell command; the supervisor runs this itself
-          effort: { type: 'string', enum: ['low', 'medium', 'xhigh'] },
+          effort: { type: 'string', enum: [...new Set([DEFAULT_EFFORT, 'low', 'medium', 'xhigh'])] },
         },
       },
     },
@@ -115,7 +137,7 @@ const plan = await agent(
    use only letters, digits, dot, underscore or hyphen (max 64). "tests-parser" is fine,
    "tests: parser.py" is refused before the task runs.
 
-   Set effort per task: "low" for mechanical edits, "medium" where local design
+   Set effort per task: "${DEFAULT_EFFORT}" for mechanical edits, "medium" where local design
    judgment is needed, "xhigh" only for genuinely hard fixes.`,
   { label: 'plan', phase: 'Plan', effort: 'medium', schema: PLAN_SCHEMA },
 )
@@ -132,7 +154,7 @@ for (let ti = 0; ti < plan.tasks.length; ti++) {
     tp.push('is not an object')
   } else {
     if (typeof t.id !== 'string' || !TASK_ID_RE.test(t.id)) tp.push('has a bad id (must start with a letter or digit, letters, digits, dot, underscore or hyphen only, max 64)')
-    if (t.effort !== 'low' && t.effort !== 'medium' && t.effort !== 'xhigh') tp.push('has effort ' + JSON.stringify(t.effort) + ' (must be low, medium or xhigh)')
+    if (t.effort !== DEFAULT_EFFORT && t.effort !== 'low' && t.effort !== 'medium' && t.effort !== 'xhigh') tp.push('has effort ' + JSON.stringify(t.effort) + ' (must be the configured default, low, medium or xhigh)')
     if (typeof t.prompt !== 'string' || !t.prompt) tp.push('has an empty brief')
     if (typeof t.check !== 'string' || !t.check) tp.push('has an empty check')
   }
@@ -223,7 +245,7 @@ const supervise = t => agent(
 
    Spawn muse (run verbatim):
    \`\`\`bash
-   ${TASK} run --id ${t.id} --out "${OUT}" --repo "${REPO}" --stamp ${STAMP} --effort ${t.effort} --max-rounds ${ROUNDS} --prompt-file "${OUT}/briefs/${t.id}.prompt.txt"
+   ${TASK} run --id ${t.id} --out "${OUT}" --repo "${REPO}" --stamp ${STAMP} --effort ${t.effort} --max-rounds ${ROUNDS} --model "${MODEL}" --worktree-root "${WORKTREE_ROOT}" --refuse-on-secrets ${REFUSE_ON_SECRETS} --prompt-file "${OUT}/briefs/${t.id}.prompt.txt"
    \`\`\`
    Read the .patch file from its JSON, then verify the patch yourself (run verbatim):
    \`\`\`bash
