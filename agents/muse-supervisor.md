@@ -44,10 +44,12 @@ supervisor patches the worktree by hand, the next round starts from a tree muse 
 produce, `finish` folds the hand-edit into the harvested patch and misattributes it, and
 Opus rates get paid for typing. Your leverage is judgment and a re-prompt, not a keystroke.
 
-You do have `Bash`, so nothing stops you from writing into the worktree with a redirect.
-Do not. `finish` fingerprints what muse produced and reports the difference as
-`out_of_band_edit`, so the result is a patch flagged as partly yours rather than a patch
-quietly improved — and a reviewer then has to work out which lines to trust.
+You do have `Bash`, but a PreToolUse hook denies your writes: Write/Edit/NotebookEdit
+and any Bash beyond muse shims, read-only git, readers and the recorded check are
+refused. Do not try a redirect either. `finish` fingerprints what muse produced and
+reports the difference as `out_of_band_edit`, so the result is a patch flagged as partly
+yours rather than a patch quietly improved — and a reviewer then has to work out which
+lines to trust.
 
 ## Your instrument
 
@@ -184,8 +186,9 @@ Either way feedback must be specific:
 - Quote the failing output and name the file and line.
 - State what is wrong and what correct looks like — not "fix the test".
 - Say what must not change, again.
-- Use `--feedback-file` for anything longer than a sentence; it avoids shell-quoting a
-  review and keeps the text intact.
+- The guard denies creating files, so pass feedback inline with
+  `--feedback '<text>'` in SINGLE quotes (escape a ' as '\''). Use `--feedback-file`
+  only for a file someone else wrote.
 
 Escalate effort on a revision round (`muse-task revise --effort medium`) when round 1 came back
 plausible-but-wrong. Leave it at `${user_config.default_effort}` when round 1 was merely mechanically incomplete — that is

@@ -73,7 +73,7 @@ PASS=0; FAIL=0; SKIP=0
 # compares PASS+FAIL against this, so a removed block lowers the tally. Skips do
 # not count -- a SKIP is a check that did not run, and counting it lets a machine
 # without node stay green with fewer executed checks.
-EXPECTED_OFFLINE=383
+EXPECTED_OFFLINE=414
 
 ok()   { PASS=$((PASS+1)); printf '  \033[32mPASS\033[0m  %s\n' "$1"; }
 bad()  { FAIL=$((FAIL+1)); printf '  \033[31mFAIL\033[0m  %s\n' "$1"; [ -n "${2:-}" ] && echo "        $2"; }
@@ -382,8 +382,19 @@ else:
 skill = front("skills/muse-fleet/SKILL.md")
 if skill is None or "allowed-tools" not in skill:
     problems.append("the auto-triggering skill declares no allowed-tools")
-elif re.search(r"\b(Write|Edit)\b", skill["allowed-tools"]):
-    problems.append("the skill grants Write or Edit: %r" % skill["allowed-tools"])
+else:
+    # allowed-tools PRE-APPROVES what it lists: an auto-triggering skill may only
+    # pre-approve the read-only status/doctor shims, never a writer, an agent or
+    # a workflow.
+    for _e in [x.strip() for x in skill["allowed-tools"].split(",")]:
+        if _e in ("Bash", "Agent", "Task", "Workflow", "Write", "Edit",
+                  "MultiEdit", "NotebookEdit"):
+            problems.append("the auto-triggering skill pre-approves %r: an "
+                            "inferred trigger must prompt for that" % _e)
+        elif _e.startswith("Bash(") and _e not in ("Bash(muse-status:*)",
+                                                   "Bash(muse-doctor:*)"):
+            problems.append("the auto-triggering skill pre-approves %r: an "
+                            "inferred trigger must prompt for that" % _e)
 
 CHEAP = {"commands/status.md", "commands/doctor.md", "commands/model.md",
          "commands/cleanup.md"}
@@ -416,6 +427,7 @@ if problems:
     sys.exit(1)
 PY
 
+. "$SKILL/tests/test_grants.sh"
 . "$(dirname "${BASH_SOURCE[0]}")/../tests/test_frontmatter.sh"
 . "$SKILL/tests/test_count_guard.sh"
 # The workflow script in references/workflow.md is the skill's primary path and is copied
