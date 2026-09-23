@@ -178,9 +178,9 @@ loop; every one prints a single JSON object on stdout.
 
 ```bash
 # --out defaults to .muse-fleet/tasks; pass it only to override.
-muse-task run    --id tests-auth --repo . --effort "${user_config.default_effort}" \
-                 --max-rounds "${user_config.max_rounds}" --model "${user_config.default_model}" \
-                 --worktree-root "${user_config.worktree_root}" --refuse-on-secrets "${user_config.refuse_on_secrets}" \
+muse-task run    --id tests-auth --repo . --effort '${user_config.default_effort}' \
+                 --max-rounds '${user_config.max_rounds}' --model '${user_config.default_model}' \
+                 --worktree-root '${user_config.worktree_root}' --refuse-on-secrets '${user_config.refuse_on_secrets}' \
                  --prompt "Create tests/test_auth.py covering login() and logout(). Do not modify auth.py."
 muse-task verify --id tests-auth --command "pytest tests/test_auth.py -q"
 muse-task revise --id tests-auth --feedback-file /tmp/review.txt
@@ -218,8 +218,8 @@ buying a pile of unreviewed patches.
 ```bash
 muse-fleet \
   --tasks tasks.json --repo . --concurrency 3 \
-  --effort "${user_config.default_effort}" --model "${user_config.default_model}" \
-  --worktree-root "${user_config.worktree_root}" --refuse-on-secrets "${user_config.refuse_on_secrets}" \
+  --effort '${user_config.default_effort}' --model '${user_config.default_model}' \
+  --worktree-root '${user_config.worktree_root}' --refuse-on-secrets '${user_config.refuse_on_secrets}' \
   --schema "${CLAUDE_PLUGIN_ROOT}/assets/result-schema.json"
 ```
 
@@ -400,7 +400,7 @@ supervised task is overkill. `muse-ask` is one question, one answer on stdout:
 ```bash
 muse-ask "List every file importing requests, with line numbers"
 muse-ask --effort xhigh "Why does connect() return None after a timeout?"
-muse-ask --write --effort "${user_config.default_effort}" --model "${user_config.default_model}" --refuse-on-secrets "${user_config.refuse_on_secrets}" "Add a docstring to add() in calc.py"
+muse-ask --write --effort '${user_config.default_effort}' --model '${user_config.default_model}' --refuse-on-secrets '${user_config.refuse_on_secrets}' "Add a docstring to add() in calc.py"
 ```
 
 Read-only by default (writes disabled, sandbox on), so it is safe against a dirty working

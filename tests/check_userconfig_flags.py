@@ -5,9 +5,12 @@ The runtime substitutes ${user_config.KEY} into agent, skill and command bodies
 only — references/ never get values, and a hard-coded flag silently overrides
 whatever the user configured. So each `muse-task run`, `muse-fleet` and
 `muse-ask --write` command line inside a fenced code block must carry every
-required flag with exactly ${user_config.<mapped key>} as its value (double
-quotes allowed), and the workflow's single ${TASK} run line must carry every
-run flag as a JS interpolation (${...}, optionally quoted), never a literal.
+required flag with exactly '${user_config.<mapped key>}' as its value, in
+single quotes: an unsubstituted placeholder must reach the shell literally,
+and double quotes make the shell fail with `bad substitution` before the
+scripts ever see it. A double-quoted or bare placeholder is a miss, and the
+workflow's single ${TASK} run line must carry every run flag as a JS
+interpolation (${...}, optionally quoted), never a literal.
 
 Run: python3 tests/check_userconfig_flags.py <repo-root>
   --self-test also fires the checker at mutated copies of REAL extracted lines
@@ -94,18 +97,27 @@ def iter_md_commands(root):
 
 
 def check_md_line(kind, line):
-    """Missing flags or non-substituted values on one md command line."""
+    """Missing flags or wrongly quoted values on one md command line.
+
+    Each value must be exactly '${user_config.<key>}' with single quotes: the
+    FLAG_RE quote group captures an optional double quote, so a single-quoted
+    value arrives as val WITH its quotes while a double-quoted one arrives
+    without them — comparing against the single-quoted want separates the
+    two cases, and a bare placeholder never matches either.
+    """
     required = {"run": RUN_FLAGS, "fleet": FLEET_FLAGS, "ask": ASK_FLAGS}[kind]
     found = {}
     for m in FLAG_RE.finditer(line):
-        found["--" + m.group(1)] = m.group("val")
+        q, val = m.group("q"), m.group("val")
+        found["--" + m.group(1)] = (q + val + q) if q else val
     misses = []
     for flag, key in required.items():
-        want = "${user_config.%s}" % key
+        want = "'${user_config.%s}'" % key
         if flag not in found:
             misses.append("missing %s (want %s)" % (flag, want))
         elif found[flag] != want:
-            misses.append("%s=%r is not %s" % (flag, found[flag], want))
+            misses.append("%s=%s must be single-quoted %s"
+                          % (flag, found[flag], want))
     return misses
 
 
@@ -178,6 +190,14 @@ def self_test(root):
     cut_f = re.sub(r"\s*--model(\s*=\s*|\s+)(?:\"[^\"]*\"|\S+)", "", fleet)
     if cut_f == fleet or not check_md_line("fleet", cut_f):
         problems.append("deleting --model from a real fleet line was not flagged")
+    # Probe 4: a double-quoted placeholder on a real run line must be flagged.
+    dq = re.sub(r"'(\$\{user_config\.[A-Za-z0-9_]+\})'", r'"\1"', run)
+    if dq == run or not check_md_line("run", dq):
+        problems.append("a double-quoted placeholder on a real run line was not flagged")
+    # Probe 5: a bare placeholder on a real run line must be flagged.
+    bare = re.sub(r"'(\$\{user_config\.[A-Za-z0-9_]+\})'", r"\1", run)
+    if bare == run or not check_md_line("run", bare):
+        problems.append("a bare placeholder on a real run line was not flagged")
     return problems
 
 
@@ -192,7 +212,7 @@ def main(argv):
         if problems:
             sys.stdout.write("\n".join(problems) + "\n")
             return 1
-        sys.stdout.write("self-test: 3 probes fired on real lines "
+        sys.stdout.write("self-test: 5 probes fired on real lines "
                          "(run=%d fleet=%d ask=%d workflow=%d)\n" % (
                              counts["run"], counts["fleet"],
                              counts["ask"], counts["workflow"]))

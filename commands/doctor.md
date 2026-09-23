@@ -9,7 +9,7 @@ model: haiku
 # Can this machine delegate?
 
 ```bash
-muse-doctor --effort "${user_config.default_effort}" --max-rounds "${user_config.max_rounds}" --model "${user_config.default_model}" --refuse-on-secrets "${user_config.refuse_on_secrets}" --worktree-root "${user_config.worktree_root}" [--repo <path>] [--scan] [--json]
+muse-doctor --effort '${user_config.default_effort}' --max-rounds '${user_config.max_rounds}' --model '${user_config.default_model}' --refuse-on-secrets '${user_config.refuse_on_secrets}' --worktree-root '${user_config.worktree_root}' [--repo <path>] [--scan] [--json]
 ```
 
 Checks the muse binary and version, stored credentials (existence only, never contents),

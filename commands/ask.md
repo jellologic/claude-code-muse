@@ -13,7 +13,7 @@ explanation, or one small contained edit — anything where the orchestration of
 `/muse:delegate` would cost more than the task.
 
 ```bash
-muse-ask --effort "${user_config.default_effort}" --model "${user_config.default_model}" --refuse-on-secrets "${user_config.refuse_on_secrets}" [--write] [--schema <file>] \
+muse-ask --effort '${user_config.default_effort}' --model '${user_config.default_model}' --refuse-on-secrets '${user_config.refuse_on_secrets}' [--write] [--schema <file>] \
   [--continue | --session <id>] "<prompt>"
 ```
 
@@ -24,7 +24,7 @@ reason to stderr. The model is resolved to the newest contributor tier at run ti
 
 ## Reading the request
 
-- Default `--effort ${user_config.default_effort}`. An effort the user names overrides the configured one: raise to `medium` for something needing local design judgment, or
+- Default `--effort '${user_config.default_effort}'`. An effort the user names overrides the configured one: raise to `medium` for something needing local design judgment, or
   `xhigh` for one genuinely hard analysis question. Effort is a difficulty dial, not a speed
   dial — muse latency is dominated by service contention, and the same trivial prompt has
   taken 15s and 216s. Keep timeouts generous and do not read a slow run as a stuck one.
