@@ -51,15 +51,20 @@ else
   bad "--check should exit 0 and report all N mutants" "rc=$RC out=$OUT"
 fi
 
-# 1b. The total is derived from the table, not typed: a 19th row moves it to 19.
+# 1b. The total is derived from the table, not typed: one more row moves it by one.
 S="$T/derived"; fresh_repo "$S"
+OUT="$(bash "$S/scripts/mutate.sh" --check 2>&1)"; RC=$?
+N="$(printf '%s' "$OUT" | sed -n 's/^mutate: all \([0-9][0-9]*\) mutants apply cleanly$/\1/p')"
+if [ "$RC" -ne 0 ] || [ -z "$N" ]; then
+  bad "derived total follows the table" "no baseline total to derive from: rc=$RC out=$OUT"
+else
 cp "$S/scripts/mutate.sh" "$T/derived.orig"
 python3 - "$S/scripts/mutate.sh" "$S/scripts/muse_status.py" <<'PY'
 import sys
 mp, sp = sys.argv[1], sys.argv[2]
 old = '        out.append("empty patch")'
 assert open(sp, encoding="utf-8").read().count(old) == 1, "probe snippet not found exactly once"
-row = (' ("M18", "scripts/muse_status.py", %r, %r, "probe row"),\n'
+row = (' ("M19", "scripts/muse_status.py", %r, %r, "probe row"),\n'
        % (old, old + "  # probe"))
 text = open(mp, encoding="utf-8").read()
 anchor = ' ("M17",'
@@ -71,13 +76,14 @@ PY
 if cmp -s "$T/derived.orig" "$S/scripts/mutate.sh"; then
   bad "derived total follows the table" "insertion left mutate.sh byte-identical -- the test measured nothing"
 else
-  git -C "$S" -c user.email=t@l -c user.name=t commit -qam row19
+  git -C "$S" -c user.email=t@l -c user.name=t commit -qam row20
   OUT="$(bash "$S/scripts/mutate.sh" --check 2>&1)"; RC=$?
-  if [ "$RC" -eq 0 ] && printf '%s' "$OUT" | grep -q "all 19 mutants"; then
+  if [ "$RC" -eq 0 ] && printf '%s' "$OUT" | grep -q "all $((N+1)) mutants"; then
     ok "derived total follows the table"
   else
-    bad "derived total should say all 19 mutants" "rc=$RC out=$OUT"
+    bad "derived total should say all $((N+1)) mutants" "rc=$RC out=$OUT"
   fi
+fi
 fi
 
 # 1c. An unknown MUTATE_ONLY id fails fast, before any validate runs.
@@ -98,7 +104,7 @@ fi
 
 # 2. A mutant whose snippet drifted is stale, and the run stops before validate.
 S="$T/stale"; fresh_repo "$S"
-if grep -Fq 'key.upper()' "$S/scripts/muse_core.py"; then
+if grep -Fq '    raw = os.environ.get("CLAUDE_PLUGIN_OPTION_" + key.upper())' "$S/scripts/muse_core.py"; then
   ok "stale-test precondition: M17 snippet present"
 else
   bad "stale-test precondition: M17 snippet present" "harness would report stale on an empty input"
@@ -107,8 +113,8 @@ python3 - "$S/scripts/muse_core.py" <<'PY'
 import sys
 p = sys.argv[1]
 t = open(p, encoding="utf-8").read()
-assert t.count("key.upper()") == 1
-open(p, "w", encoding="utf-8").write(t.replace("key.upper()", "key.casefold()", 1))
+assert t.count('    raw = os.environ.get("CLAUDE_PLUGIN_OPTION_" + key.upper())') == 1
+open(p, "w", encoding="utf-8").write(t.replace('    raw = os.environ.get("CLAUDE_PLUGIN_OPTION_" + key.upper())', '    raw = os.environ.get("CLAUDE_PLUGIN_OPTION_" + key.casefold())', 1))
 PY
 git -C "$S" -c user.email=t@l -c user.name=t commit -qam drift
 OUT="$(bash "$S/scripts/mutate.sh" --check 2>&1)"; RC=$?
@@ -128,14 +134,14 @@ else
   bad "stale mutant should fail without running validate" "rc=$RC elapsed=${ELAPSED}s out=$OUT"
 fi
 
-# 3. A MUST_KILL survivor fails the run (M02 survives today; pick a still-surviving
-# id if a later PR kills it).
-S2="$T/mustkill"; fresh_repo "$S2"
-OUT="$(MUTATE_ONLY=M02 MUTATE_MUST_KILL="M02" bash "$S2/scripts/mutate.sh" 2>&1)"; RC=$?
-if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -q "MUST_KILL M02"; then
-  ok "a MUST_KILL survivor fails the run"
+# 3. A MUST_KILL survivor fails the run. The real suite now kills all 18, so
+# only a stub -- green for every tree -- can stage a survivor.
+S2="$T/mustkill"; stub_repo "$S2"
+OUT="$(MUTATE_JOBS=2 MUTATE_ONLY=M03 MUTATE_MUST_KILL="M03" bash "$S2/scripts/mutate.sh" 2>&1)"; RC=$?
+if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -q "MUST_KILL M03"; then
+  ok "a MUST_KILL survivor (M03) fails the run"
 else
-  bad "a MUST_KILL survivor should fail naming M02" "rc=$RC out=$(printf '%s' "$OUT" | tail -5)"
+  bad "a MUST_KILL survivor should fail naming M03" "rc=$RC out=$(printf '%s' "$OUT" | tail -5)"
 fi
 
 # 4. A red control fails the run even for a mutant the suite would kill.
