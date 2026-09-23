@@ -318,19 +318,26 @@ check. A Claude supervisor hands the typing to a Muse Code worker in its own git
 runs your check itself, and returns a verdict and a patch path. For many independent tasks,
 `/muse:fleet <job>` plans them and runs one supervisor per task.
 
-### What is Muse Code?
+### What is Muse Code, and how does it compare with Claude Code?
 
 Muse Code is a coding-agent CLI (`muse`) backed by Meta's Muse Code API, with
 contributor-tier models that cost a fraction of full-rate models. This plugin drives it headlessly and treats its output as untrusted
-until a check proves otherwise. `references/muse-cli.md` records the CLI surface this plugin
-was verified against.
+until a check proves otherwise. It does not replace Claude Code here: muse does the typing,
+and Claude Code plans, reviews and runs your check. `references/muse-cli.md` records the CLI
+surface this plugin was verified against.
 
-### How is this different from Claude Code subagents?
+### Can a Claude Code subagent use a different, cheaper model?
 
-A Claude Code subagent runs on a Claude model inside your session. Here the *typing* moves
-to a cheaper external model in an isolated worktree, and a Claude subagent does only the
-judging: it reads the patch, runs the check, and re-prompts. The expensive model spends its
-tokens on review, not on generating boilerplate.
+A Claude Code subagent can run on a smaller Claude model, but it still types the code
+itself. muse routes the *typing* to a different model entirely: a Muse Code worker edits in
+an isolated worktree, and a Claude subagent does only the judging. It reads the patch, runs
+the check, and re-prompts.
+
+### Does it save Claude Code tokens?
+
+It moves the typing off Claude. The Muse Code worker generates the code, and Claude spends
+its tokens reviewing the patch and running the check rather than writing boilerplate. The
+plugin itself adds about 625 always-on tokens.
 
 ### Does it apply patches to my repository automatically?
 
