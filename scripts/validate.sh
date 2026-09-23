@@ -73,7 +73,7 @@ PASS=0; FAIL=0; SKIP=0
 # compares PASS+FAIL against this, so a removed block lowers the tally. Skips do
 # not count -- a SKIP is a check that did not run, and counting it lets a machine
 # without node stay green with fewer executed checks.
-EXPECTED_OFFLINE=620
+EXPECTED_OFFLINE=625
 
 ok()   { PASS=$((PASS+1)); printf '  \033[32mPASS\033[0m  %s\n' "$1"; }
 bad()  { FAIL=$((FAIL+1)); printf '  \033[31mFAIL\033[0m  %s\n' "$1"; [ -n "${2:-}" ] && echo "        $2"; }
@@ -1730,6 +1730,7 @@ HELP=$(bash "$SKILL/scripts/muse_ask.sh" --help 2>/dev/null)
 . "$SKILL/tests/test_evals.sh"
 . "$SKILL/tests/test_evals_guards.sh"
 . "$SKILL/tests/test_eval_judge.sh"
+. "$SKILL/tests/test_eval_envblock.sh"
 . "$SKILL/tests/test_worktree_resolution.sh"
 
 head_ "3c. Data-loss and process guards"
