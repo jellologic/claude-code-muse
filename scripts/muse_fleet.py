@@ -204,6 +204,19 @@ def run_task(task: dict, repo: Path, out: Path, args) -> dict:
     return rec
 
 
+# A 1-second stamp is not a unique namespace. Two fleets started in the same second
+# computed identical branch names AND identical worktree paths, and run_task opens
+# with drop_worktree -- so the second run force-removed the first's LIVE worktrees,
+# destroying in-flight work silently. Add entropy; the stamp stays human-readable
+# and still sorts chronologically.
+# 4 bytes, not 2. Two bytes is 65536 values, and the birthday bound puts a collision
+# at ~1.9% across only 50 runs -- which a probabilistic test in the suite duly hit.
+# Four bytes takes that to ~0.0005% across 200.
+def new_stamp() -> str:
+    return "{}-{}".format(dt.datetime.now().strftime("%Y%m%d-%H%M%S"),
+                          secrets.token_hex(4))
+
+
 # ---------------------------------------------------------------------- main
 
 def main() -> int:
@@ -254,16 +267,7 @@ def main() -> int:
     except core.PreflightError as e:
         sys.exit(str(e))
 
-    # A 1-second stamp is not a unique namespace. Two fleets started in the same second
-    # computed identical branch names AND identical worktree paths, and run_task opens
-    # with drop_worktree -- so the second run force-removed the first's LIVE worktrees,
-    # destroying in-flight work silently. Add entropy; the stamp stays human-readable
-    # and still sorts chronologically.
-    # 4 bytes, not 2. Two bytes is 65536 values, and the birthday bound puts a collision
-    # at ~1.9% across only 50 runs -- which a probabilistic test in the suite duly hit.
-    # Four bytes takes that to ~0.0005% across 200.
-    stamp = "{}-{}".format(dt.datetime.now().strftime("%Y%m%d-%H%M%S"),
-                           secrets.token_hex(4))
+    stamp = new_stamp()
     out = Path(args.out).resolve() if args.out else repo / ".muse-fleet" / stamp
     out.mkdir(parents=True, exist_ok=True)
     if args.worktree_root is None:

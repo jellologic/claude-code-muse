@@ -34,6 +34,9 @@ jobs:
         with:
           python-version: "${{ matrix.python }}"
 
+      - name: Install PyYAML (the frontmatter parse fails under CI=true without it)
+        run: python -m pip install pyyaml
+
       - name: Git identity for the throwaway test repos
         run: |
           git config --global user.email "ci@example.invalid"
@@ -146,6 +149,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
+      - name: Install PyYAML (the frontmatter parse fails under CI=true without it)
+        shell: bash
+        run: python -m pip install pyyaml
 
       - name: What the environment actually provides
         shell: bash
