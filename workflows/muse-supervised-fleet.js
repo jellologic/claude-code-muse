@@ -37,6 +37,10 @@ const PH_RE = /^\$\{user_config\.([A-Za-z0-9_]+)\}$/
 const PH_PROBLEMS = []
 function phNorm(value, ownKey, argName) {
   if (typeof value !== 'string') return value
+  // An empty string is not given either: the scripts' flag_given treats "" as
+  // absent, so an empty userConfig value falls back to the built-in default
+  // instead of refusing at the enum check below.
+  if (!value.trim()) return undefined
   const m = PH_RE.exec(value.trim())
   if (!m) return value
   if (m[1] === ownKey) return undefined

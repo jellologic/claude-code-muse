@@ -50,7 +50,7 @@ _spec = importlib.util.spec_from_file_location(
 core = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(core)
 
-DEFAULT_MAX_ROUNDS = 3
+DEFAULT_MAX_ROUNDS = core.DEFAULT_MAX_ROUNDS
 
 
 def state_path(tdir: Path) -> Path:

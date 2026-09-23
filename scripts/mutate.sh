@@ -15,7 +15,7 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # Every known mutant is held: a regression that re-opens a once-killed hole
 # fails the run again. A new mutant row appends its id here with its checks.
-MUST_KILL="M01 M02 M03 M04 M05 M06 M07 M08 M09 M10 M11 M12 M13 M14 M15 M16 M17 M18"
+MUST_KILL="M01 M02 M03 M04 M05 M06 M07 M08 M09 M10 M11 M12 M13 M14 M15 M16 M17 M18 M19 M20 M21 M22 M23 M24 M25 M26 M27 M28"
 if [ -n "${MUTATE_MUST_KILL:-}" ]; then
   # Self-tests stage a failing run through the environment without touching this file.
   echo "mutate: MUST_KILL overridden by environment: $MUTATE_MUST_KILL" >&2
@@ -48,6 +48,16 @@ M = [
  ("M16", "scripts/muse_status.py", '        out.append("last check exited {}".format(r["last_exit"]))', '        pass', 'status drops the "last check exited N" flag'),
  ("M17", "scripts/muse_core.py", '    raw = os.environ.get("CLAUDE_PLUGIN_OPTION_" + key.upper())', '    raw = os.environ.get("CLAUDE_PLUGIN_OPTION_" + key)', "userConfig env var name case bug"),
  ("M18", "scripts/muse_core.py", '            os.killpg(os.getpgid(p.pid), signal.SIGKILL)', '            raise OSError("mutate.sh: killpg removed")', "worker timeout kills only the direct child, not its process group"),
+ ("M19", "hooks/supervisor_result.py", '        tool_input = {}', '        return 0', "a non-dict or missing tool_input returns instead of falling through to the agentType check"),
+ ("M20", "hooks/_artifacts.py", '    if st.get("done"):', '    if False:', "is_unfinished ignores done"),
+ ("M21", "hooks/_artifacts.py", '    if isinstance(task, dict) and task.get("verdict"):', '    if False:', "is_unfinished ignores a recorded verdict"),
+ ("M22", "hooks/supervisor_stop.py", '    if agent_type is not None and agent_type != "muse:muse-supervisor":', '    if False:', "SubagentStop blocks any agent type, not only the supervisor"),
+ ("M23", "hooks/supervisor_result.py", '            if task.get("out_of_band_edit"):', '            if False:', "PostToolUse drops the out_of_band_edit note"),
+ ("M24", "hooks/_artifacts.py", 'RECENT_SECONDS = 6 * 60 * 60', 'RECENT_SECONDS = 600 * 60 * 60', "recent window widened, so stale tasks shout"),
+ ("M25", "hooks/leftover_worktrees.py", '        verdict = "verdict recorded" if records.get(branch) else "no verdict yet"', '        verdict = "no verdict yet"', "leftover report loses the verdict label"),
+ ("M26", "scripts/muse_doctor.py", '                given = core.flag_given(key, cli)', '                given = cli is not None and cli != ""', "doctor blames a same-key placeholder flag with an invalid env value on flag instead of env"),
+ ("M27", "scripts/muse_ask.sh", 'if [[ "$ASK_REFUSE" == "False" ]]; then ALLOW_SECRETS=1; fi', 'if [[ "$ASK_REFUSE" == "False" && -z "$REFUSE_ON_SECRETS" ]]; then ALLOW_SECRETS=1; fi', "only the env var can opt out of the --write secret refusal"),
+ ("M28", "tests/frontmatter_contract.py", '        if _e in ("Bash", "Agent", "Task", "Workflow", "Write", "Edit",', '        if _e in ("Agent", "Task", "Workflow", "Write", "Edit",', "the auto-triggering skill may pre-approve bare Bash"),
 ]
 
 def lookup(mid):

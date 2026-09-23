@@ -215,6 +215,17 @@ def check_repo(out, core, repo: Path):
     return True
 
 
+def worktree_root_fix(message):
+    # A single quote in the value needs the quote removed, not the directory
+    # moved: the generic outside-the-repository fix answers the wrong question.
+    if "single quote" in str(message):
+        return ("Remove the single quote from userConfig worktree_root: the "
+                "command lines pass it inside single quotes, so a quote in "
+                "the value would end the quoting early.")
+    return ("Set userConfig worktree_root to a path outside the repository, "
+            "or leave it empty for the default beside the repo.")
+
+
 def check_worktree_root(out, core, repo: Path, cli_value):
     # `cli_value` is the --worktree-root flag (None when absent, "" when the
     # userConfig value was empty); the shared helper folds flag, env and default.
@@ -222,9 +233,7 @@ def check_worktree_root(out, core, repo: Path, cli_value):
         raw, source = core.option_with_source("worktree_root", cli_value, "")
         root = core.resolve_worktree_root(repo, raw)
     except core.ConfigError as e:
-        out.append(("FAIL", "worktree root", str(e),
-                    "Set userConfig worktree_root to a path outside the repository, "
-                    "or leave it empty for the default beside the repo."))
+        out.append(("FAIL", "worktree root", str(e), worktree_root_fix(e)))
         return
     origin = source
     # Probe the nearest existing ancestor: a configured root typically does not
@@ -258,7 +267,7 @@ def check_user_config(out, core, repo: Path, flags):
     # defaults in a live session. `flags` maps userConfig key to CLI value/None.
     resolved = {}
     for key, default in (("default_effort", core.DEFAULT_EFFORT),
-                         ("max_rounds", 3),
+                         ("max_rounds", core.DEFAULT_MAX_ROUNDS),
                          ("default_model", core.LATEST),
                          ("refuse_on_secrets", True),
                          ("worktree_root", "")):
@@ -297,8 +306,7 @@ def check_user_config(out, core, repo: Path, flags):
             source = "env"
         out.append(("FAIL", "userConfig",
                     "worktree_root=%r (%s): %s" % (raw, source, e),
-                    "Set userConfig worktree_root to a path outside the repository, "
-                    "or leave it empty for the default beside the repo."))
+                    worktree_root_fix(e)))
         return
     (effort, effort_src), (rounds, rounds_src), (model, model_src), \
         (refuse, refuse_src), (_, wt_src) = (

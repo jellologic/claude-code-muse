@@ -305,6 +305,9 @@ def _fs_compare_key(path: Path, fold_case: bool) -> str:
 MAX_ROUNDS_MIN = 1
 MAX_ROUNDS_MAX = 10
 DEFAULT_EFFORT = "low"
+# The default round cap, kept here so the doctor reports the same default the
+# task runs on instead of a second literal that can drift from it.
+DEFAULT_MAX_ROUNDS = 3
 # Must stay below the Bash tool's 600s ceiling. Otherwise the tool kills the parent
 # mid-round and the worker outlives it. Long rounds belong in `run_in_background`.
 DEFAULT_TIMEOUT = 540
