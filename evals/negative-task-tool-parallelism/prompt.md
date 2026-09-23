@@ -1,6 +1,1 @@
----
-name: negative-task-tool-parallelism
-tags: [negative]
-runs: 3
----
-Can you fan this out across several subagents in parallel so it finishes faster? I want each one looking at a different part of the codebase.
+Can you fan this bug hunt out across several subagents in parallel so it finishes faster? I want each one reading a different part of the codebase (api/, db/, ui/) and reporting any correctness bugs it finds. Don't edit anything.

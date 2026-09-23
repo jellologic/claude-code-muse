@@ -73,7 +73,7 @@ PASS=0; FAIL=0; SKIP=0
 # compares PASS+FAIL against this, so a removed block lowers the tally. Skips do
 # not count -- a SKIP is a check that did not run, and counting it lets a machine
 # without node stay green with fewer executed checks.
-EXPECTED_OFFLINE=460
+EXPECTED_OFFLINE=501
 
 ok()   { PASS=$((PASS+1)); printf '  \033[32mPASS\033[0m  %s\n' "$1"; }
 bad()  { FAIL=$((FAIL+1)); printf '  \033[31mFAIL\033[0m  %s\n' "$1"; [ -n "${2:-}" ] && echo "        $2"; }
@@ -1250,17 +1250,20 @@ TMPLEAK=$(grep -nE "$TMPPAT" "$SKILL/scripts/validate.sh" || true)
   && ok "the suite writes no fixed scratch path (all of it is under \$LAB)" \
   || bad "a fixed scratch path crept back in" "$TMPLEAK"
 
-# The converted eval suite cannot be RUN here -- `claude plugin eval` is early access --
-# so these checks hold what can be held without it: the layout the CLI's own --help
-# documents, and consistency with the legacy evals.json that is still the source of
-# truth until someone runs the new suite green.
+# The suite runs with `claude plugin eval . --scaffold ...` (see evals/README.md
+# and .github/workflows/evals.yml); this offline block holds only the structure:
+# every case dir carries its own case.yaml, and consistency with the legacy
+# evals.json that is still the source of truth for the case list.
 python3 - <<'PY' && ok "eval cases are well-formed and consistent with evals.json" || bad "eval suite"
 import glob, json, os, pathlib, sys
 root = pathlib.Path(os.environ["PLUGIN_ROOT"]) / "evals"
 legacy = json.loads((root / "evals.json").read_text(encoding="utf-8"))["evals"]
 problems = []
 
-dirs = sorted(p for p in root.iterdir() if p.is_dir())
+# Only dirs holding a case.yaml are cases: helpers like _lib/ and the CLI's own
+# results/ output are ignored, so adding one must not turn this check red.
+dirs = sorted(p for p in root.iterdir()
+              if p.is_dir() and (p / "case.yaml").exists())
 if len(dirs) != len(legacy):
     problems.append("%d case dirs vs %d in evals.json" % (len(dirs), len(legacy)))
 
@@ -1280,13 +1283,19 @@ def frontmatter(path):
             out[k.strip()] = v.strip()
     return out
 
+def case_name(path):
+    # case.yaml holds `name:` at column 0; prompt.md is body-only since the
+    # conversion, so there is no frontmatter left to read it from.
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line and not line[0] in " \t#" and ":" in line:
+            k, v = line.split(":", 1)
+            if k.strip() == "name":
+                return v.strip()
+    return None
+
 for d in dirs:
-    pm = d / "prompt.md"
-    if not pm.exists():
-        problems.append("%s: no prompt.md" % d.name); continue
-    fm = frontmatter(pm)
-    if not fm or "name" not in fm:
-        problems.append("%s: prompt.md frontmatter missing or nameless" % d.name); continue
+    if case_name(d / "case.yaml") != d.name:
+        problems.append("%s: case.yaml name does not match the dir" % d.name)
     graders = sorted((d / "graders").glob("*.md")) if (d / "graders").is_dir() else []
     if not graders:
         problems.append("%s: no graders" % d.name); continue
@@ -1304,10 +1313,15 @@ for d in dirs:
         continue
     tg = tool_graders[0]
     if negative:
-        # A negative case whose bounds are not both zero asserts nothing useful.
+        # A negative case whose bounds are not both zero asserts nothing useful,
+        # and without `arm: both` the tool_used check is display-only under the
+        # default with-without ablation -- shown, but adding nothing to the score.
         if tg.get("min") != "0" or tg.get("max") != "0":
             problems.append("%s: negative case must bound the skill at min 0 max 0, got "
                             "min=%s max=%s" % (d.name, tg.get("min"), tg.get("max")))
+        if tg.get("arm") != "both":
+            problems.append("%s: negative tool_used grader needs `arm: both` "
+                            "to be scored" % d.name)
     else:
         if tg.get("min") in (None, "0"):
             problems.append("%s: positive case must require the skill (min >= 1)" % d.name)
@@ -1794,6 +1808,8 @@ HELP=$(bash "$SKILL/scripts/muse_ask.sh" --help 2>/dev/null)
 
 . "$SKILL/tests/test_hooks.sh"
 . "$SKILL/tests/test_preflight.sh"
+. "$SKILL/tests/test_evals.sh"
+. "$SKILL/tests/test_evals_guards.sh"
 . "$SKILL/tests/test_worktree_resolution.sh"
 
 head_ "3c. Data-loss and process guards"
