@@ -45,6 +45,8 @@ jobs:
 
       # No muse calls, no credentials, no cost. The suite stubs the muse binary for the
       # preflight section so the repo guards stay testable on a runner without it.
+      - name: zsh for the quoting check
+        run: sudo apt-get update -q && sudo apt-get install -y -q zsh
       - name: Offline suite
         run: bash scripts/validate.sh --offline
 

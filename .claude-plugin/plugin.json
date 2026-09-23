@@ -49,7 +49,7 @@
     "worktree_root": {
       "type": "directory",
       "title": "Where worktrees are created",
-      "description": "Leave empty to create them beside the repository, which is the default and keeps them outside it. Set a path if your setup forbids writing next to a checkout. A path INSIDE the repository removes the isolation that makes --yolo defensible.",
+      "description": "Leave empty to create them beside the repository, which is the default and keeps them outside it. Set a path if your setup forbids writing next to a checkout. A path INSIDE the repository removes the isolation that makes --yolo defensible. A path containing a single quote is not supported and is refused.",
       "default": ""
     },
     "refuse_on_secrets": {

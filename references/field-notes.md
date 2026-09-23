@@ -224,7 +224,10 @@ plugin.json default (source "default"). A placeholder naming a different key is
 a wiring bug in prose and refuses loudly, before any worktree exists or muse
 is spawned. A placeholder embedded in a longer value is not a placeholder at
 all and keeps the old behaviour. The workflow applies the same rule to its
-fleet args, falling back to its built-in defaults.
+fleet args, falling back to its built-in defaults. The prose command lines
+single-quote every placeholder so an unset key reaches the scripts literally
+instead of failing the shell; a worktree root containing a single quote would
+end that quoting early, so such a value is refused.
 
 <!-- The placeholder text above is described in words rather than written out,
 because tests/test_userconfig.sh check 14 fails any literal user_config

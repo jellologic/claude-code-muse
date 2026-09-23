@@ -100,6 +100,8 @@ def flag_given(key, cli_value):
     ("${user_config.KEY}" naming the key being resolved, after strip()): the
     runtime leaves unset keys as literal text, so the flag carries no value
     and resolution falls through to the environment and then the default.
+    The prose command lines single-quote their placeholders, so an unset key
+    arrives here literally instead of killing the shell first.
     A placeholder naming a DIFFERENT key is a wiring bug in prose and raises
     ConfigError naming both keys. Any other value (including a partial match
     like "/x/${user_config.KEY}/y") counts as given.
@@ -150,7 +152,9 @@ def option_with_source(key, cli_value, default):
     the built-in default (source "default"). An empty-string flag counts as not
     given, because that is what an empty userConfig value substitutes to in the
     supervisor's `run` line. A same-key "${user_config.KEY}" placeholder also
-    counts as not given, because the runtime leaves unset keys as literal text;
+    counts as not given, because the runtime leaves unset keys as literal text
+    (the prose lines single-quote their placeholders so the literal survives
+    the shell and reaches this check);
     a placeholder naming a different key raises ConfigError. Flag and env values
     are validated with coerce_option, so a bad value raises ConfigError naming
     the key.
@@ -201,6 +205,11 @@ def coerce_option(key, raw, default=None):
         raise ConfigError(
             "userConfig refuse_on_secrets={!r} is not a boolean: use true or false".format(raw))
     if key in ("default_model", "worktree_root"):
+        if key == "worktree_root" and "'" in text:
+            raise ConfigError(
+                "userConfig worktree_root={!r} contains a single quote, which is "
+                "not supported: the command lines pass it inside single quotes, "
+                "so a quote in the value would end the quoting early".format(raw))
         return text
     # Unknown keys keep the historical type-based behaviour, except a bad int now
     # refuses instead of silently keeping the default.
@@ -226,6 +235,11 @@ def resolve_worktree_root(repo: Path, raw) -> Path:
     then shows up as dirt -- so it is refused rather than created.
     """
     repo = Path(repo)
+    if isinstance(raw, str) and "'" in raw:
+        raise ConfigError(
+            "userConfig worktree_root={!r} contains a single quote, which is "
+            "not supported: the command lines pass it inside single quotes, "
+            "so a quote in the value would end the quoting early".format(raw))
     if raw is None or (isinstance(raw, str) and raw.strip() == ""):
         return repo.parent / ".muse-fleet-wt-{}".format(repo.name)
     text = raw.strip() if isinstance(raw, str) else str(raw).strip()

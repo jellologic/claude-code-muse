@@ -29,7 +29,7 @@ lines to trust.
 loop and prints exactly one JSON object on stdout.
 
 ```bash
-muse-task run --id <id> --out <out> --repo <repo> --effort "${user_config.default_effort}" --max-rounds "${user_config.max_rounds}" --model "${user_config.default_model}" --worktree-root "${user_config.worktree_root}" --refuse-on-secrets "${user_config.refuse_on_secrets}" --prompt "<brief>"
+muse-task run --id <id> --out <out> --repo <repo> --effort '${user_config.default_effort}' --max-rounds '${user_config.max_rounds}' --model '${user_config.default_model}' --worktree-root '${user_config.worktree_root}' --refuse-on-secrets '${user_config.refuse_on_secrets}' --prompt "<brief>"
 muse-task verify --id <id> --out <out> --command "<acceptance check>"
 muse-task revise --id <id> --out <out> --feedback-file <path>
 muse-task show   --id <id> --out <out>
