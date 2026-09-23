@@ -89,14 +89,47 @@ EV_TERMINAL = "run_terminal"          # the single authoritative record of a rou
 EV_MODEL_CONFIGURED = "run_model_configured"
 EV_MODEL_ID = "model_id"
 
+PLACEHOLDER_RE = re.compile(r"^\$\{user_config\.([A-Za-z0-9_]+)\}$")
+
+
+def flag_given(key, cli_value):
+    """Whether a CLI flag value counts as explicitly given.
+
+    False for None and "": the flag was absent or substituted from an empty
+    userConfig value. Also False for an unsubstituted same-key placeholder
+    ("${user_config.KEY}" naming the key being resolved, after strip()): the
+    runtime leaves unset keys as literal text, so the flag carries no value
+    and resolution falls through to the environment and then the default.
+    A placeholder naming a DIFFERENT key is a wiring bug in prose and raises
+    ConfigError naming both keys. Any other value (including a partial match
+    like "/x/${user_config.KEY}/y") counts as given.
+    """
+    if cli_value is None:
+        return False
+    if isinstance(cli_value, str):
+        if cli_value == "":
+            return False
+        m = PLACEHOLDER_RE.match(cli_value.strip())
+        if m:
+            if m.group(1) == key:
+                return False
+            raise ConfigError(
+                "userConfig {}={!r} is an unsubstituted placeholder for a "
+                "different key ({})".format(key, cli_value, m.group(1)))
+    return True
+
+
 def user_option(key, default):
     """A `userConfig` value if the runtime supplied one, else the built-in default.
 
     The mechanism is Claude Code substituting ${user_config.KEY} into the agent,
     skill and command markdown bodies (non-sensitive values), which then reach the
-    scripts as CLI flags. The CLAUDE_PLUGIN_OPTION_<KEY> environment variable is the
-    hook/test path: the runtime exports it to HOOKS, so hooks and the offline suite
-    use it to observe the same values without a live substitution.
+    scripts as CLI flags. A key the user never set stays as the literal text
+    ${user_config.KEY} even when plugin.json declares a default; option_with_source
+    treats that same-key placeholder as not given. The CLAUDE_PLUGIN_OPTION_<KEY>
+    environment variable is the hook/test path: the runtime exports it to HOOKS,
+    so hooks and the offline suite use it to observe the same values without a
+    live substitution.
 
     Every default below is what the plugin did before there was any configuration, so an
     install that skips the prompts behaves exactly as it used to. That is the property
@@ -116,10 +149,13 @@ def option_with_source(key, cli_value, default):
     "flag"), then a non-empty CLAUDE_PLUGIN_OPTION_<KEY> (source "env"), then
     the built-in default (source "default"). An empty-string flag counts as not
     given, because that is what an empty userConfig value substitutes to in the
-    supervisor's `run` line. Flag and env values are validated with
-    coerce_option, so a bad value raises ConfigError naming the key.
+    supervisor's `run` line. A same-key "${user_config.KEY}" placeholder also
+    counts as not given, because the runtime leaves unset keys as literal text;
+    a placeholder naming a different key raises ConfigError. Flag and env values
+    are validated with coerce_option, so a bad value raises ConfigError naming
+    the key.
     """
-    if cli_value is not None and not (isinstance(cli_value, str) and cli_value == ""):
+    if flag_given(key, cli_value):
         return (coerce_option(key, cli_value, default), "flag")
     env_raw = os.environ.get("CLAUDE_PLUGIN_OPTION_" + key.upper())
     if env_raw is not None and env_raw != "":

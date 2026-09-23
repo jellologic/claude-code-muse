@@ -267,8 +267,13 @@ def check_user_config(out, core, repo: Path, flags):
             resolved[key] = core.option_with_source(key, cli, default)
         except core.ConfigError as e:
             # The helper validates the flag first and the env second, so the
-            # rejected raw is the non-empty flag when there is one, else env.
-            if cli is not None and cli != "":
+            # rejected raw is the given flag when there is one, else env. A
+            # different-key placeholder counts as a rejected flag.
+            try:
+                given = core.flag_given(key, cli)
+            except core.ConfigError:
+                given = True
+            if given:
                 raw, source = cli, "flag"
             else:
                 raw = os.environ.get("CLAUDE_PLUGIN_OPTION_" + key.upper())
@@ -281,7 +286,11 @@ def check_user_config(out, core, repo: Path, flags):
         wt_root = core.resolve_worktree_root(repo, resolved["worktree_root"][0])
     except core.ConfigError as e:
         cli = flags.get("worktree_root")
-        if cli is not None and cli != "":
+        try:
+            given = core.flag_given("worktree_root", cli)
+        except core.ConfigError:
+            given = True
+        if given:
             raw, source = cli, "flag"
         else:
             raw = os.environ.get("CLAUDE_PLUGIN_OPTION_WORKTREE_ROOT")

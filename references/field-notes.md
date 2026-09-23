@@ -205,6 +205,31 @@ then the cwd (first non-empty existing directory without an unsubstituted '${');
 outside any repo the monitor prints one stdout line naming the directory and
 exits 0 instead of watching nothing silently.
 
+## userConfig substitution: unset keys stay literal
+
+Claude Code substitutes userConfig keys into agent/skill/command bodies only
+for keys the user has actually configured. A key never set is left as the
+literal placeholder text even when .claude-plugin/plugin.json declares a
+default for it. Measured on claude 2.1.280 with `claude -p --plugin-dir .` and
+pluginConfigs setting only max_rounds and default_effort: the supervisor's run
+line reached Bash carrying literal placeholders for default_model,
+worktree_root and refuse_on_secrets, so `muse-task run --model` refused on a
+refuse_on_secrets value that was never a real setting. Any install with at
+least one unset key could not delegate at all.
+
+The rule the scripts now apply: a flag value that, after stripping, is exactly
+one placeholder for the key being resolved counts as not given, and resolution
+falls through to CLAUDE_PLUGIN_OPTION_<KEY> (source "env") and then the
+plugin.json default (source "default"). A placeholder naming a different key is
+a wiring bug in prose and refuses loudly, before any worktree exists or muse
+is spawned. A placeholder embedded in a longer value is not a placeholder at
+all and keeps the old behaviour. The workflow applies the same rule to its
+fleet args, falling back to its built-in defaults.
+
+<!-- The placeholder text above is described in words rather than written out,
+because tests/test_userconfig.sh check 14 fails any literal user_config
+placeholder under references/. -->
+
 ## Considered, not adopted
 
 - LSP servers: muse ships no language, so there is nothing for a server to index.
