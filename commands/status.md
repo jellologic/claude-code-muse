@@ -2,7 +2,7 @@
 description: Report what every delegated muse task did — rounds, verdict, patch size, and whether a check actually ran
 argument-hint: "[--out <artifact-root>]"
 disable-model-invocation: true
-allowed-tools: Bash(python3:*), Read
+allowed-tools: Bash(muse-status:*), Read
 model: haiku
 ---
 
@@ -11,7 +11,7 @@ model: haiku
 Report on the muse tasks in this repo.
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/muse_status.py" [--out <root>] [--json]
+muse-status [--out <root>] [--json]
 ```
 
 Defaults to scanning `.muse-fleet`. Pass `--out` when the user named a different artifact

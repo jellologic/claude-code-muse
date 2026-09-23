@@ -2,7 +2,7 @@
 description: Delegate one coding task to Muse Code under an Opus supervisor that runs the acceptance check and revises until the patch is right
 argument-hint: "<task> — name the target files and say what must not change"
 disable-model-invocation: true
-allowed-tools: Bash, Read, Grep, Glob, Agent, AskUserQuestion
+allowed-tools: Bash(git rev-parse:*), Bash(git status:*), Bash(muse-task:*), Read, Grep, Glob, Agent, AskUserQuestion
 ---
 
 # Delegate one task to muse
@@ -13,7 +13,6 @@ Muse types; you judge. Do not do the edit yourself — that is the whole point o
 ## 1. Preflight
 
 ```bash
-echo "${CLAUDE_PLUGIN_ROOT}"          # the supervisor needs this literal path
 git rev-parse --show-toplevel         # must be a git repo
 git status --porcelain                # must be clean
 ```
@@ -63,7 +62,7 @@ A worktree is a clean checkout, so everything git ignores is missing: `.env`, `n
 so it reports a success it never verified, and helpfully rebuilds what looks absent.
 
 ```bash
-git status --ignored --porcelain | grep '^!!' | head -20
+git status --ignored --porcelain   # lines starting with `!!` are what the worktree will lack
 ```
 
 Copy small config with `--seed .env`; symlink heavy directories with `--link node_modules`.
@@ -71,8 +70,7 @@ Never symlink something the worker might install into.
 
 ## 4. Spawn the supervisor
 
-Launch the `muse-supervisor` agent with one task. Give it the literal plugin root — it
-cannot expand `${CLAUDE_PLUGIN_ROOT}` from your message, so paste the value you echoed.
+Launch the `muse-supervisor` agent with one task. The supervisor calls `muse-task` from PATH, so no plugin path needs passing.
 
 The brief you hand the agent must contain: the task id, the artifact root, the repo path,
 the prompt, the acceptance check, the effort, any `--seed`/`--link` flags, and the round

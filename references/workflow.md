@@ -62,10 +62,10 @@ Workflow({ name: "muse-supervised-fleet",
                    stamp: "20260919-1430", maxRounds: 3 } })
 ```
 
-`pluginRoot` is still asked for. Whether a plugin-owned workflow gets
-`${CLAUDE_PLUGIN_ROOT}` substituted by the loader is undocumented and was not verified
-here, so the script tries the substitution and falls back to `args.pluginRoot` when the
-token comes through unexpanded — passing it costs one `echo` and removes the question.
+`pluginRoot` is optional. Pass it so the script can fall back to the absolute
+`bin/muse-task` when the plugin is not enabled in the session running the workflow;
+without it the agents call bare `muse-task` from PATH, which is there only while the
+plugin is enabled.
 
 ## Why each choice is the way it is
 
@@ -105,7 +105,7 @@ a worktree at all:
 
 ```javascript
 const inventory = await agent(
-  `Run: ${PLUGIN}/scripts/muse_ask.sh --effort low \\
+  `Run: muse-ask --effort low \\
      "List every file importing 'requests', with line numbers"
    Return its stdout verbatim.`,
   { label: 'inventory', effort: 'low' })
@@ -131,10 +131,11 @@ The script above is the whole fan-out. More often you want muse as **one stage**
 workflow you are writing — research, then delegate, then review. The shape is small:
 
 ```javascript
-// Two values a workflow script cannot obtain for itself. Pass both in via args:
-//   ${CLAUDE_PLUGIN_ROOT} is not expanded in script scope, and Date.now() throws.
-// Resolve them in the turn that calls Workflow: `echo ${CLAUDE_PLUGIN_ROOT}` and `date`.
-const TASK  = `python3 "${args.pluginRoot}/scripts/muse_task.py"`
+// Plugin bin/ directories are on an agent's Bash PATH only while the muse plugin
+// is enabled in the session running the workflow. When it is not enabled, bare
+// `muse-task` exits 127 ("command not found"), so pass `args.pluginRoot` and the
+// absolute shim is used instead.
+const TASK  = args.pluginRoot ? `"${args.pluginRoot}/bin/muse-task"` : 'muse-task'
 const REPO  = args.repo || '.'
 const STAMP = args.stamp
 if (!STAMP) throw new Error('args.stamp is required: Date.now() throws in workflow scripts, so pass one in')
@@ -174,9 +175,12 @@ Four rules that are not obvious from the API:
 - **A workflow script cannot call muse.** Scripts have no filesystem and no Node API, so
   every muse invocation happens inside an `agent()` that runs Bash. The script decides
   *what* and *how many*; the agent does.
-- **Thread `pluginRoot` and `stamp` through `args`.** `${CLAUDE_PLUGIN_ROOT}` is not
-  expanded in script scope and `Date.now()` throws — both would otherwise fail at the
-  first shell call, after the planning agents have already been paid for.
+- **Thread `stamp` through `args`, and `pluginRoot` when the plugin may not be enabled.**
+  `Date.now()` throws in script scope, so `stamp` is always required — pass it in from
+  the turn that calls Workflow, or the run fails at the first shell call after the
+  planning agents have already been paid for. `pluginRoot` is only needed when the
+  session running the workflow may not have the muse plugin enabled: without it the
+  agents call bare `muse-task` from PATH, which is there only while the plugin is enabled.
 - **Task ids must match `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`.** An id names a worktree
   directory and a git branch, and `run` refuses anything else. If a planning agent
   invents ids, put that pattern in its schema, or every task dies at step one.
@@ -191,7 +195,7 @@ Four rules that are not obvious from the API:
   so a second run of the same job — or two jobs both planning a task called
   `tests-parser` — had every supervisor refuse at step one with "task already exists".
 - **Reap what you spawn.** Each task leaves a worktree and a branch. A workflow that fans
-  out many of them should finish with `muse_cleanup.py --yes` (or `finish --cleanup` per
+  out many of them should finish with `muse-cleanup --yes` (or `finish --cleanup` per
   task) once the patches are harvested, or the worktree root grows every run.
 - **Do not add `isolation: 'worktree'`.** `muse_task.py` already gives each task its own
   worktree; a second one nests them and costs setup per agent for nothing.
@@ -202,7 +206,7 @@ Four rules that are not obvious from the API:
 which keeps one source of truth:
 
 ```javascript
-agent(`Task id: ${t.id}\nRepo: ${REPO}\nPlugin root: ${args.pluginRoot}\n` +
+agent(`Task id: ${t.id}\nRepo: ${REPO}\n` +
       `Brief: ${t.prompt}\nAcceptance check: ${t.check}`,
       { agentType: 'muse:muse-supervisor', label: `muse:${t.id}`, phase: 'Delegate' })
 ```

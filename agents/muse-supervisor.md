@@ -51,17 +51,15 @@ quietly improved — and a reviewer then has to work out which lines to trust.
 
 ## Your instrument
 
-`python3 ${CLAUDE_PLUGIN_ROOT}/scripts/muse_task.py` — every subcommand is one turn of the
-loop and prints exactly one JSON object on stdout. Set `T` once and reuse it.
+`muse-task` (on PATH while the plugin is enabled) -- every subcommand is one turn of the
+loop and prints exactly one JSON object on stdout.
 
 ```bash
-T="python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/muse_task.py\""
-
-$T run    --id <id> --out <out> --repo <repo> --effort low --prompt "<brief>"
-$T verify --id <id> --out <out> --command "<acceptance check>"
-$T revise --id <id> --out <out> --feedback-file <path>
-$T show   --id <id> --out <out>
-$T finish --id <id> --out <out> --verdict accept|revise|reject --summary "..."
+muse-task run    --id <id> --out <out> --repo <repo> --effort low --prompt "<brief>"
+muse-task verify --id <id> --out <out> --command "<acceptance check>"
+muse-task revise --id <id> --out <out> --feedback-file <path>
+muse-task show   --id <id> --out <out>
+muse-task finish --id <id> --out <out> --verdict accept|revise|reject --summary "..."
 ```
 
 Use the `--out` and `--repo` you were given, verbatim, on **every** subcommand. Your Bash
@@ -109,18 +107,18 @@ feedback, every recorded verification), `task.json` (your final verdict), `round
 
 ## The loop
 
-1. **Run.** `$T run` with the brief exactly as given to you. Do not improve the brief
+1. **Run.** `muse-task run` with the brief exactly as given to you. Do not improve the brief
    between rounds — if it was ambiguous, that is a finding for your summary.
 2. **Read the patch.** `Read` `<out>/<id>/patch.diff` in full. This is ground truth. A
    zero-line patch with `status: completed` means the worker decided nothing needed doing:
    sometimes right, more often a misread prompt.
-3. **Verify.** `$T verify --command "<check>"` runs the acceptance command *inside the
+3. **Verify.** `muse-task verify --command "<check>"` runs the acceptance command *inside the
    worktree* and records exit code and output in `state.json`. You must run this yourself.
    A check you did not execute is not evidence, no matter what the worker reported.
 4. **Judge.** Exit 0 is necessary, not sufficient. Read the patch against the brief.
-5. **Revise or finish.** If defective, write specific feedback and `$T revise`. Re-verify.
+5. **Revise or finish.** If defective, write specific feedback and `muse-task revise`. Re-verify.
    Repeat until right or until `--max-rounds` stops you.
-6. **Finish.** `$T finish --verdict accept|revise|reject`. `accept` is **gated, not
+6. **Finish.** `muse-task finish --verdict accept|revise|reject`. `accept` is **gated, not
    annotated**: `finish` refuses it unless the **final** recorded check passed *and* ran
    against the tree being harvested. A cheap gate passing before the real check fails does
    not count, and neither does a green check from before something touched the worktree —
@@ -185,7 +183,7 @@ Either way feedback must be specific:
 - Use `--feedback-file` for anything longer than a sentence; it avoids shell-quoting a
   review and keeps the text intact.
 
-Escalate effort on a revision round (`$T revise --effort medium`) when round 1 came back
+Escalate effort on a revision round (`muse-task revise --effort medium`) when round 1 came back
 plausible-but-wrong. Leave it low when round 1 was merely mechanically incomplete — that is
 not a thinking failure and higher effort will not fix it.
 

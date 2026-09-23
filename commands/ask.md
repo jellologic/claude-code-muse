@@ -2,7 +2,7 @@
 description: Ask Muse Code one question, or have it make one contained edit — no worktree, answer on stdout
 argument-hint: "[--write] [--effort low|medium|xhigh] <question or edit>"
 disable-model-invocation: true
-allowed-tools: Bash, Read
+allowed-tools: Bash(muse-ask:*), Bash(git status:*), Read, Grep
 ---
 
 # One question for muse
@@ -13,7 +13,7 @@ explanation, or one small contained edit — anything where the orchestration of
 `/muse:delegate` would cost more than the task.
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/scripts/muse_ask.sh" [--effort <e>] [--write] [--schema <file>] \
+muse-ask [--effort <e>] [--write] [--schema <file>] \
   [--continue | --session <id>] "<prompt>"
 ```
 
@@ -41,9 +41,9 @@ reason to stderr. The model is resolved to the newest contributor tier at run ti
 new question:
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/scripts/muse_ask.sh" "Summarise what retry.py does"
+muse-ask "Summarise what retry.py does"
 # stderr: muse_ask: session 7f3a...
-"${CLAUDE_PLUGIN_ROOT}/scripts/muse_ask.sh" --continue "Now list everything that calls it"
+muse-ask --continue "Now list everything that calls it"
 ```
 
 The id is remembered per repo under `${CLAUDE_PLUGIN_DATA}` — that directory is shared

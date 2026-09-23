@@ -2,7 +2,7 @@
 description: Reap the worktrees, branches and artifacts left behind by delegated muse runs
 argument-hint: "[--yes] [--all] [--artifacts] [--discard-unharvested]"
 disable-model-invocation: true
-allowed-tools: Bash(python3:*), Read
+allowed-tools: Bash(muse-cleanup:*), Read
 model: haiku
 ---
 
@@ -14,17 +14,17 @@ because the patch inside an unfinished worktree is the only copy of that work.
 Always show the dry run first:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/muse_cleanup.py" [--repo .] [--out .muse-fleet]
+muse-cleanup [--repo .] [--out .muse-fleet]
 ```
 
 It lists what would go, and separately lists the tasks it is skipping because they never
 reached a verdict. Relay both. Then, only with the user's say-so:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/muse_cleanup.py" --yes                 # finished tasks
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/muse_cleanup.py" --yes --all           # unfinished too
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/muse_cleanup.py" --yes --artifacts     # and the patches
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/muse_cleanup.py" --yes --discard-unharvested  # also reap worktrees whose patch was never harvested (that work exists only in the worktree)
+muse-cleanup --yes                 # finished tasks
+muse-cleanup --yes --all           # unfinished too
+muse-cleanup --yes --artifacts     # and the patches
+muse-cleanup --yes --discard-unharvested  # also reap worktrees whose patch was never harvested (that work exists only in the worktree)
 ```
 
 ## What to check before removing anything

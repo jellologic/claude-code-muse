@@ -81,13 +81,11 @@ fan-out unit is **one Opus agent per task**, each driving `muse_task.py` through
 rounds as its task needs. `references/workflow.md` has the full script.
 
 ```javascript
-// PLUGIN is the value of ${CLAUDE_PLUGIN_ROOT}, passed in as args.pluginRoot:
-// a workflow script sees no environment and cannot read it itself.
 const results = await parallel(tasks.map(t => () => agent(
-  `Run:  python3 ${PLUGIN}/scripts/muse_task.py run --id ${t.id} --out ${OUT} \\
+  `Run:  muse-task run --id ${t.id} --out ${OUT} \\
            --prompt ${JSON.stringify(t.prompt)}
    Read the patch it prints. Run your own check:
-         python3 ${PLUGIN}/scripts/muse_task.py verify --id ${t.id} --out ${OUT} \\
+         muse-task verify --id ${t.id} --out ${OUT} \\
            --command ${JSON.stringify(t.check)}
    Wrong or failing → revise --feedback "<specific defects>" and verify again.
    Then finish --verdict <accept|revise|reject>. Do not write the code yourself.`,
@@ -111,10 +109,8 @@ with its own timeouts, harvesting, exclusions and teardown.
 A single muse question — cheap analysis inside a larger Claude pipeline:
 
 ```javascript
-// Inside the main script, where `const PLUGIN = args.pluginRoot` is in scope. A workflow
-// script sees no environment, so ${CLAUDE_PLUGIN_ROOT} here would be an undefined identifier.
 const inventory = await agent(
-  `Run: ${PLUGIN}/scripts/muse_ask.sh --effort low \\
+  `Run: muse-ask --effort low \\
      "List every file importing 'requests' with its line number"
    Return its stdout verbatim.`,
   { label: 'inventory', effort: 'low' })
