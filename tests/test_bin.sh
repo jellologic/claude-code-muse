@@ -428,6 +428,9 @@ for f in files:
             if pat:
                 mentioned.update(x.group(1) for x in pat.finditer(u))
     for name in sorted(mentioned):
+        # The auto-triggering skill must NOT pre-approve the shims it documents, because a prompt is the consent step.
+        if "/skills/" in f.replace(os.sep, "/"):
+            continue
         if ("Bash(%s:*)" % name) not in entries:
             print("BAD %s mentions %s without granting Bash(%s:*)" % (f, name, name))
     for e in entries:
