@@ -249,6 +249,22 @@ if grep -q '^BAD ' "$GR/probe.out"; then
 else
   bad "grants: the grant check still fires on a loose probe" "probe with Bash/Agent/Workflow reported nothing"
 fi
+# The lumped probe above stays green when a single entry stops firing, so each
+# risky entry gets its own file and its own check. (Entries are spelled without
+# quoting the anchored tuple, which must keep its single occurrence.)
+GR_ENTRY_N=0
+for GR_ENTRY in Bash Agent Workflow 'Bash(python3:*)'; do
+  GR_ENTRY_N=$((GR_ENTRY_N+1))
+  printf '%s\n' '---' "allowed-tools: $GR_ENTRY, Read" '---' '' '# probe' > "$GR/entry$GR_ENTRY_N.md"
+  python3 "$GR/skillcheck.py" "$GR/entry$GR_ENTRY_N.md" > "$GR/entry$GR_ENTRY_N.out" 2>&1
+  # Whole-line match: skillcheck.py prints exactly `BAD grants <entry>` per line,
+  # so a substring match would let `Bash` pass on a `BAD grants Bash(python3:*)` line.
+  if grep -F -x -q "BAD grants $GR_ENTRY" "$GR/entry$GR_ENTRY_N.out"; then
+    ok "testfix: skill grant check fires on $GR_ENTRY"
+  else
+    bad "testfix: skill grant check fires on $GR_ENTRY" "entry$GR_ENTRY_N.out: [$(cat "$GR/entry$GR_ENTRY_N.out")]"
+  fi
+done
 
 if [ "$GR_STANDALONE" = "1" ]; then
   rm -rf "$LAB"

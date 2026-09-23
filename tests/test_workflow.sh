@@ -17,6 +17,8 @@ if ! declare -F ok >/dev/null 2>&1; then
   # Every path below is built from LAB and the next lines rm -rf under it.
   if [ -z "$LAB" ] || [ ! -d "$LAB" ]; then echo "no scratch dir" >&2; exit 1; fi
   LAB="$(native_path "$LAB")"
+  # Standalone only: an early exit must not leave the lab behind under TMPDIR.
+  trap 'rm -rf "$LAB"' EXIT
   PASS=0; FAIL=0; SKIP=0
   ok()  { PASS=$((PASS+1)); printf '  PASS  %s\n' "$1"; }
   bad() { FAIL=$((FAIL+1)); printf '  FAIL  %s\n' "$1"; [ -n "${2:-}" ] && echo "        $2"; }
@@ -341,12 +343,23 @@ sys.exit(0 if d.get('command')=='echo wfcheck' and d.get('exit_code')==0 else 1)
   && ok "workflow: --command-file records the check text" \
   || bad "workflow: --command-file records the check text" "$WF_VER9"
 
-# 10. --prompt and --prompt-file together are a usage error.
+# 10. --prompt and --prompt-file together are a usage error: argparse itself must
+#    refuse them (rc 2), not the command running and failing later. A bare rc check
+#    cannot tell exclusivity from any other failure -- dropping the exclusive group
+#    still exits 1 with status no_terminal -- so the stderr wording and the absence
+#    of a started task pin the real error.
 python3 "$WF_T" run --id both --out "$WF_R/.muse-fleet/s" --repo "$WF_R" \
-  --prompt x --prompt-file "$WF_R/.muse-fleet/briefs/b.prompt.txt" >/dev/null 2>&1
-[ $? -ne 0 ] \
-  && ok "workflow: --prompt with --prompt-file exits non-zero" \
-  || bad "workflow: --prompt with --prompt-file exits non-zero" "both flags accepted"
+  --prompt x --prompt-file "$WF_R/.muse-fleet/briefs/b.prompt.txt" >"$WF_R/both.out" 2>"$WF_R/both.err"
+WF_BOTH_RC=$?
+WF_BOTH_OUT="$(cat "$WF_R/both.out")"
+WF_BOTH_ERR="$(cat "$WF_R/both.err")"
+if [ "$WF_BOTH_RC" -eq 2 ] && printf '%s' "$WF_BOTH_ERR" | grep -q 'not allowed with argument' \
+  && [ ! -e "$WF_R/.muse-fleet/s/both" ]; then
+  ok "workflow: --prompt with --prompt-file exits non-zero"
+else
+  bad "workflow: --prompt with --prompt-file exits non-zero" \
+    "rc=$WF_BOTH_RC out=[$WF_BOTH_OUT] err=[$WF_BOTH_ERR]"
+fi
 
 PATH="$WF_OLDPATH"
 export PATH

@@ -225,54 +225,63 @@ done
 if [ -n "$BIN_MISSING" ]; then
   bad "bin: docs name every shim" "never mentioned:$BIN_MISSING"
 fi
-# One --help per distinct shim name, run by bash through PATH lookup. The
-# argparse subcommand set is the first "{a,b,...} ..." group; a bare "{low,medium}"
-# with no trailing " ..." (an option's choices) does not count.
-grep '^FORM' "$BIN_LAB/extract.out" > "$BIN_LAB/forms.all" || true
-cut -f2 "$BIN_LAB/forms.all" | sort -u > "$BIN_LAB/form.names" || true
-: > "$BIN_LAB/forms.bad"
-while IFS= read -r BIN_HNAME; do
-  case "$BIN_HNAME" in '') continue;; esac
-  BIN_run_help "$BIN_LAB/help-$BIN_HNAME.txt" "$SKILL/bin" "$BIN_HNAME" --help
-  printf '%s' "$?" > "$BIN_LAB/helprc-$BIN_HNAME"
-  BIN_SET="$(sed -n 's/.*{\([a-z0-9_,-]*\)} \.\.\..*/\1/p' "$BIN_LAB/help-$BIN_HNAME.txt" | head -1)"
-  printf '%s' "$BIN_SET" > "$BIN_LAB/helpset-$BIN_HNAME"
-done < "$BIN_LAB/form.names"
-# One run per distinct form: a subcommand in the set runs "name sub --help", a form
-# with no set behind it runs "name --help", and a subcommand outside the set is
-# reported without running anything. Membership is a case pattern (bash 3.2 has no
-# associative arrays). Redirects, not pipes into while, so FAIL counts survive.
-BIN_TAB="$(printf '\t')"
-sort -t"$BIN_TAB" -k2,2 -k3,3 -u "$BIN_LAB/forms.all" > "$BIN_LAB/forms.uniq" || true
-while IFS= read -r BIN_FLINE; do
-  BIN_FNAME="$(printf '%s' "$BIN_FLINE" | cut -f2)"
-  BIN_FSUB="$(printf '%s' "$BIN_FLINE" | cut -f3)"
-  BIN_FLOC="$(printf '%s' "$BIN_FLINE" | cut -f4)"
-  BIN_SET="$(cat "$BIN_LAB/helpset-$BIN_FNAME" 2>/dev/null)"
-  BIN_HRC="$(cat "$BIN_LAB/helprc-$BIN_FNAME" 2>/dev/null)"
-  if [ -n "$BIN_FSUB" ] && [ -n "$BIN_SET" ]; then
-    case ",$BIN_SET," in
-      *",$BIN_FSUB,"*)
-        BIN_run_help "$BIN_LAB/subhelp-$BIN_FNAME-$BIN_FSUB.txt" "$SKILL/bin" "$BIN_FNAME" "$BIN_FSUB" --help
-        BIN_SRC=$?
-        if [ "$BIN_SRC" -ne 0 ]; then
-          printf '%s\n' "$BIN_FLOC $BIN_FNAME $BIN_FSUB --help rc=$BIN_SRC" >> "$BIN_LAB/forms.bad"
-        fi
-        ;;
-      *)
-        printf '%s\n' "$BIN_FLOC $BIN_FNAME $BIN_FSUB: not a subcommand" >> "$BIN_LAB/forms.bad"
-        ;;
-    esac
-  else
-    if [ "$BIN_HRC" != "0" ]; then
-      printf '%s\n' "$BIN_FLOC $BIN_FNAME --help rc=$BIN_HRC" >> "$BIN_LAB/forms.bad"
+# One function checks every extracted form, so the real tree and a probe run the
+# same code: the probe below used to parse one --help by hand and never read the
+# doc it wrote, so it passed no matter what the doc said. Help/cache files are
+# tag-prefixed and the report goes to $BIN_LAB/<tag>.forms.bad, so the real tree
+# and a probe never share files.
+BIN_check_forms() {  # BIN_check_forms <extract-output-file> <bindir-native> <tag>
+  BIN_CF_OUT="$1"; BIN_CF_DIR="$2"; BIN_CF_TAG="$3"
+  # One --help per distinct shim name, run by bash through PATH lookup. The
+  # argparse subcommand set is the first "{a,b,...} ..." group; a bare "{low,medium}"
+  # with no trailing " ..." (an option's choices) does not count.
+  grep '^FORM' "$BIN_CF_OUT" > "$BIN_LAB/$BIN_CF_TAG.forms.all" || true
+  cut -f2 "$BIN_LAB/$BIN_CF_TAG.forms.all" | sort -u > "$BIN_LAB/$BIN_CF_TAG.form.names" || true
+  : > "$BIN_LAB/$BIN_CF_TAG.forms.bad"
+  while IFS= read -r BIN_CF_HNAME; do
+    case "$BIN_CF_HNAME" in '') continue;; esac
+    BIN_run_help "$BIN_LAB/$BIN_CF_TAG.help-$BIN_CF_HNAME.txt" "$BIN_CF_DIR" "$BIN_CF_HNAME" --help
+    printf '%s' "$?" > "$BIN_LAB/$BIN_CF_TAG.helprc-$BIN_CF_HNAME"
+    BIN_CF_SET="$(sed -n 's/.*{\([a-z0-9_,-]*\)} \.\.\..*/\1/p' "$BIN_LAB/$BIN_CF_TAG.help-$BIN_CF_HNAME.txt" | head -1)"
+    printf '%s' "$BIN_CF_SET" > "$BIN_LAB/$BIN_CF_TAG.helpset-$BIN_CF_HNAME"
+  done < "$BIN_LAB/$BIN_CF_TAG.form.names"
+  # One run per distinct form: a subcommand in the set runs "name sub --help", a form
+  # with no set behind it runs "name --help", and a subcommand outside the set is
+  # reported without running anything. Membership is a case pattern (bash 3.2 has no
+  # associative arrays). Redirects, not pipes into while, so FAIL counts survive.
+  BIN_CF_TAB="$(printf '\t')"
+  sort -t"$BIN_CF_TAB" -k2,2 -k3,3 -u "$BIN_LAB/$BIN_CF_TAG.forms.all" > "$BIN_LAB/$BIN_CF_TAG.forms.uniq" || true
+  while IFS= read -r BIN_CF_FLINE; do
+    BIN_CF_FNAME="$(printf '%s' "$BIN_CF_FLINE" | cut -f2)"
+    BIN_CF_FSUB="$(printf '%s' "$BIN_CF_FLINE" | cut -f3)"
+    BIN_CF_FLOC="$(printf '%s' "$BIN_CF_FLINE" | cut -f4)"
+    BIN_CF_SET="$(cat "$BIN_LAB/$BIN_CF_TAG.helpset-$BIN_CF_FNAME" 2>/dev/null)"
+    BIN_CF_HRC="$(cat "$BIN_LAB/$BIN_CF_TAG.helprc-$BIN_CF_FNAME" 2>/dev/null)"
+    if [ -n "$BIN_CF_FSUB" ] && [ -n "$BIN_CF_SET" ]; then
+      case ",$BIN_CF_SET," in
+        *",$BIN_CF_FSUB,"*)
+          BIN_run_help "$BIN_LAB/$BIN_CF_TAG.subhelp-$BIN_CF_FNAME-$BIN_CF_FSUB.txt" "$BIN_CF_DIR" "$BIN_CF_FNAME" "$BIN_CF_FSUB" --help
+          BIN_CF_SRC=$?
+          if [ "$BIN_CF_SRC" -ne 0 ]; then
+            printf '%s\n' "$BIN_CF_FLOC $BIN_CF_FNAME $BIN_CF_FSUB --help rc=$BIN_CF_SRC" >> "$BIN_LAB/$BIN_CF_TAG.forms.bad"
+          fi
+          ;;
+        *)
+          printf '%s\n' "$BIN_CF_FLOC $BIN_CF_FNAME $BIN_CF_FSUB: not a subcommand" >> "$BIN_LAB/$BIN_CF_TAG.forms.bad"
+          ;;
+      esac
+    else
+      if [ "$BIN_CF_HRC" != "0" ]; then
+        printf '%s\n' "$BIN_CF_FLOC $BIN_CF_FNAME --help rc=$BIN_CF_HRC" >> "$BIN_LAB/$BIN_CF_TAG.forms.bad"
+      fi
     fi
-  fi
-done < "$BIN_LAB/forms.uniq"
-if [ -s "$BIN_LAB/forms.bad" ]; then
+  done < "$BIN_LAB/$BIN_CF_TAG.forms.uniq"
+}
+BIN_check_forms "$BIN_LAB/extract.out" "$SKILL/bin" real
+if [ -s "$BIN_LAB/real.forms.bad" ]; then
   while IFS= read -r BIN_ELINE; do
     bad "bin: doc example runs" "$BIN_ELINE"
-  done < "$BIN_LAB/forms.bad"
+  done < "$BIN_LAB/real.forms.bad"
 elif [ "$BIN_NLINES" -gt 0 ]; then
   ok "bin: docs name $BIN_NLINES shim examples and every form answers --help"
 fi
@@ -345,25 +354,24 @@ muse-zed alpha
 muse-zed gamma
 ```
 MDEOF
-BIN_run_help "$BIN_LAB/help-muse-zed.txt" "$BIN_SUBPROBE/bin" muse-zed --help
-BIN_ZED_RC=$?
-BIN_ZED_SET="$(sed -n 's/.*{\([a-z0-9_,-]*\)} \.\.\..*/\1/p' "$BIN_LAB/help-muse-zed.txt" | head -1)"
-BIN_ZED_BAD=0
-if [ "$BIN_ZED_RC" -ne 0 ]; then
-  BIN_ZED_BAD=1
-else
-  case ",$BIN_ZED_SET," in
-    *",gamma,"*) BIN_ZED_BAD=1 ;;
-  esac
-  case ",$BIN_ZED_SET," in
-    *",alpha,"*) ;;
-    *) BIN_ZED_BAD=1 ;;
-  esac
-fi
-if [ "$BIN_ZED_BAD" -eq 0 ]; then
+# The probe doc goes through the same extract and the same function: the gamma
+# form is not a subcommand of the probe shim, so the report must name it while
+# saying nothing about the good alpha form. (The bad form is named by its short
+# suffix below, keeping the planted doc line the single full mention.)
+python3 "$BIN_LAB/extract.py" "$BIN_SUBPROBE" > "$BIN_LAB/sub-probe.extract.out"
+BIN_check_forms "$BIN_LAB/sub-probe.extract.out" "$BIN_SUBPROBE/bin" subprobe
+BIN_ZED_FORMS="$(grep '^FORM' "$BIN_LAB/sub-probe.extract.out" || true)"
+BIN_ZED_BAD="$(cat "$BIN_LAB/subprobe.forms.bad")"
+# FORM lines are TAB-separated (FORM, name, sub, loc), so the subcommand field
+# is matched by field, not by a space-joined grep that can never hit.
+if printf '%s\n' "$BIN_ZED_FORMS" | awk -F'\t' '$1=="FORM" && $2=="muse-zed" && $3=="alpha"' | grep -q . \
+  && printf '%s\n' "$BIN_ZED_FORMS" | awk -F'\t' '$1=="FORM" && $2=="muse-zed" && $3=="gamma"' | grep -q . \
+  && printf '%s\n' "$BIN_ZED_BAD" | grep -q 'gamma: not a subcommand' \
+  && ! printf '%s\n' "$BIN_ZED_BAD" | grep -q 'muse-zed alpha'; then
   ok "bin: the subcommand check covers every shim with subcommands, not only muse-task"
 else
-  bad "bin: the subcommand check covers every shim with subcommands, not only muse-task" "set=[$BIN_ZED_SET] rc=$BIN_ZED_RC"
+  bad "bin: the subcommand check covers every shim with subcommands, not only muse-task" \
+    "forms=[$(printf '%s' "$BIN_ZED_FORMS" | tr '\n' ';')] bad=[$BIN_ZED_BAD]"
 fi
 
 # C. Grants: only muse-* shims, read-only git, echo and date may be granted; every
@@ -465,6 +473,10 @@ for BIN_G in 'Bash(*)' 'Bash(sh:*)' 'Bash(python:*)' 'Bash(curl:*)' 'Bash(git pu
   printf '%s\n' '---' "allowed-tools: $BIN_G, Read" '---' '' '# probe' > "$BIN_GPROBE/commands/p$BIN_GI.md"
 done
 printf '%s\n' '---' 'allowed-tools: Bash(muse-doctor:*), Bash(git status:*), Bash(date:*), Read' '---' '' '# control' > "$BIN_GPROBE/commands/good.md"
+# A bare Bash and a Bash(python3:*) grant look narrower than Bash(*) but open the
+# same hole: python3 runs arbitrary code. Each must fire under its own file name.
+printf '%s\n' '---' 'allowed-tools: Bash(python3:*), Read' '---' '' '# probe' > "$BIN_GPROBE/commands/q1.md"
+printf '%s\n' '---' 'allowed-tools: Bash, Read' '---' '' '# probe' > "$BIN_GPROBE/commands/q2.md"
 python3 "$BIN_LAB/grants.py" "$BIN_GPROBE" 1 > "$BIN_LAB/grant-probe.out"
 BIN_GI=0
 for BIN_G in 'Bash(*)' 'Bash(sh:*)' 'Bash(python:*)' 'Bash(curl:*)' 'Bash(git push:*)'; do
@@ -479,6 +491,16 @@ if grep -q "good.md" "$BIN_LAB/grant-probe.out"; then
   bad "bin: grant check passes the control file" "good.md wrongly reported"
 else
   ok "bin: grant check passes the control file"
+fi
+if grep -q "commands/q1.md" "$BIN_LAB/grant-probe.out"; then
+  ok "testfix: grant check fires on Bash(python3:*)"
+else
+  bad "testfix: grant check fires on Bash(python3:*)" "q1.md not reported"
+fi
+if grep -q "commands/q2.md" "$BIN_LAB/grant-probe.out"; then
+  ok "testfix: grant check fires on bare Bash"
+else
+  bad "testfix: grant check fires on bare Bash" "q2.md not reported"
 fi
 # Probe: grants.py enforces its own minimum instead of the bash side comparing
 # against a hardcoded count separately.

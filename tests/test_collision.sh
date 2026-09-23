@@ -23,6 +23,8 @@ if [ "$CO_STANDALONE" = 1 ]; then
   # Every path below is built from LAB and the next lines rm -rf under it.
   if [ -z "$LAB" ] || [ ! -d "$LAB" ]; then echo "no scratch dir" >&2; exit 1; fi
   LAB="$(native_path "$LAB")"
+  # Standalone only: an early exit must not leave the lab behind under TMPDIR.
+  trap 'rm -rf "$LAB"' EXIT
 fi
 CO_FLEET="$SKILL/scripts/muse_fleet.py"
 CO_TASK="$SKILL/scripts/muse_task.py"

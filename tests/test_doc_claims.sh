@@ -19,6 +19,8 @@ if ! declare -F ok >/dev/null 2>&1; then
   SKILL="$(native_path "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)")"
   LAB="$(native_path "$(mktemp -d "${TMPDIR:-/tmp}/muse-docs.XXXXXX")")"
   if [ -z "${LAB:-}" ] || [ ! -d "$LAB" ]; then echo "no scratch dir" >&2; exit 1; fi
+  # Standalone only: an early exit must not leave the lab behind under TMPDIR.
+  trap 'rm -rf "$LAB"' EXIT
   PASS=0; FAIL=0; SKIP=0
   ok()  { PASS=$((PASS+1)); printf '  PASS  %s\n' "$1"; }
   bad() { FAIL=$((FAIL+1)); printf '  FAIL  %s\n' "$1"; [ -n "${2:-}" ] && echo "        $2"; }
@@ -186,6 +188,144 @@ else
   bad "docs: probe — a new auto-triggering surface fails the surface count" "rc=$DC_P8_RC out=[$DC_P8_OUT]"
 fi
 
+# Per-doc probes: 6-8 above change the code side, so every doc mismatches at
+# once and a disabled comparison for one doc stays green. Each probe below
+# rewrites one claim in one doc -- the number word becomes 99, so no count is
+# hard-coded -- and requires the failure to name that file and no other doc.
+DC_P11="$(dc_probe_root 11)"
+python3 - "$DC_P11/README.md" <<'PY'
+import re, sys
+p = sys.argv[1]
+old = open(p, encoding="utf-8").read()
+new = re.sub(r"^\| `/muse:[A-Za-z0-9_-]+.*\n", "", old, count=1, flags=re.M)
+assert new != old, "no `/muse:` table row found"
+open(p, "w", encoding="utf-8").write(new)
+PY
+DC_P11_PYRC=$?
+DC_P11_OUT="$(dc_counts "$DC_P11")"; DC_P11_RC=$?
+if [ "$DC_P11_PYRC" -eq 0 ] && [ "$DC_P11_RC" -ne 0 ] \
+  && printf '%s\n' "$DC_P11_OUT" | grep -q '^COMMANDS: .*README\.md' \
+  && ! printf '%s\n' "$DC_P11_OUT" | grep '^COMMANDS: ' | grep -q 'SKILL\.md\|AGENTS\.md'; then
+  ok "testfix: docs probe — README commands count is held on its own"
+else
+  bad "testfix: docs probe — README commands count is held on its own" "pyrc=$DC_P11_PYRC rc=$DC_P11_RC out=[$DC_P11_OUT]"
+fi
+
+DC_P12="$(dc_probe_root 12)"
+python3 - "$DC_P12/skills/muse-fleet/SKILL.md" <<'PY'
+import re, sys
+p = sys.argv[1]
+old = open(p, encoding="utf-8").read()
+new = re.sub(r"(\w+) commands you type", "99 commands you type", old, count=1)
+assert new != old, "no '<word> commands you type' phrase found"
+open(p, "w", encoding="utf-8").write(new)
+PY
+DC_P12_PYRC=$?
+DC_P12_OUT="$(dc_counts "$DC_P12")"; DC_P12_RC=$?
+if [ "$DC_P12_PYRC" -eq 0 ] && [ "$DC_P12_RC" -ne 0 ] \
+  && printf '%s\n' "$DC_P12_OUT" | grep -q '^COMMANDS: .*SKILL\.md' \
+  && ! printf '%s\n' "$DC_P12_OUT" | grep '^COMMANDS: ' | grep -q 'README\.md\|AGENTS\.md'; then
+  ok "testfix: docs probe — SKILL.md commands count is held on its own"
+else
+  bad "testfix: docs probe — SKILL.md commands count is held on its own" "pyrc=$DC_P12_PYRC rc=$DC_P12_RC out=[$DC_P12_OUT]"
+fi
+
+DC_P13="$(dc_probe_root 13)"
+python3 - "$DC_P13/AGENTS.md" <<'PY'
+import re, sys
+p = sys.argv[1]
+old = open(p, encoding="utf-8").read()
+new = re.sub(r"The (\w+) `/muse:\*` commands", "The 99 `/muse:*` commands", old, count=1)
+assert new != old, "no 'The <word> `/muse:*` commands' phrase found"
+open(p, "w", encoding="utf-8").write(new)
+PY
+DC_P13_PYRC=$?
+DC_P13_OUT="$(dc_counts "$DC_P13")"; DC_P13_RC=$?
+if [ "$DC_P13_PYRC" -eq 0 ] && [ "$DC_P13_RC" -ne 0 ] \
+  && printf '%s\n' "$DC_P13_OUT" | grep -q '^COMMANDS: .*AGENTS\.md' \
+  && ! printf '%s\n' "$DC_P13_OUT" | grep '^COMMANDS: ' | grep -q 'README\.md\|SKILL\.md'; then
+  ok "testfix: docs probe — AGENTS.md commands count is held on its own"
+else
+  bad "testfix: docs probe — AGENTS.md commands count is held on its own" "pyrc=$DC_P13_PYRC rc=$DC_P13_RC out=[$DC_P13_OUT]"
+fi
+
+DC_P14="$(dc_probe_root 14)"
+python3 - "$DC_P14/README.md" <<'PY'
+import re, sys
+p = sys.argv[1]
+old = open(p, encoding="utf-8").read()
+new = re.sub(r"(\w+) shims", "99 shims", old, count=1)
+assert new != old, "no '<word> shims' phrase found"
+open(p, "w", encoding="utf-8").write(new)
+PY
+DC_P14_PYRC=$?
+DC_P14_OUT="$(dc_counts "$DC_P14")"; DC_P14_RC=$?
+if [ "$DC_P14_PYRC" -eq 0 ] && [ "$DC_P14_RC" -ne 0 ] \
+  && printf '%s\n' "$DC_P14_OUT" | grep -q '^SHIMS: .*README\.md' \
+  && ! printf '%s\n' "$DC_P14_OUT" | grep '^SHIMS: ' | grep -q 'AGENTS\.md'; then
+  ok "testfix: docs probe — README shims count is held on its own"
+else
+  bad "testfix: docs probe — README shims count is held on its own" "pyrc=$DC_P14_PYRC rc=$DC_P14_RC out=[$DC_P14_OUT]"
+fi
+
+DC_P15="$(dc_probe_root 15)"
+python3 - "$DC_P15/AGENTS.md" <<'PY'
+import re, sys
+p = sys.argv[1]
+old = open(p, encoding="utf-8").read()
+new = re.sub(r"(\w+) shims", "99 shims", old, count=1)
+assert new != old, "no '<word> shims' phrase found"
+open(p, "w", encoding="utf-8").write(new)
+PY
+DC_P15_PYRC=$?
+DC_P15_OUT="$(dc_counts "$DC_P15")"; DC_P15_RC=$?
+if [ "$DC_P15_PYRC" -eq 0 ] && [ "$DC_P15_RC" -ne 0 ] \
+  && printf '%s\n' "$DC_P15_OUT" | grep -q '^SHIMS: .*AGENTS\.md' \
+  && ! printf '%s\n' "$DC_P15_OUT" | grep '^SHIMS: ' | grep -q 'README\.md'; then
+  ok "testfix: docs probe — AGENTS.md shims count is held on its own"
+else
+  bad "testfix: docs probe — AGENTS.md shims count is held on its own" "pyrc=$DC_P15_PYRC rc=$DC_P15_RC out=[$DC_P15_OUT]"
+fi
+
+DC_P16="$(dc_probe_root 16)"
+python3 - "$DC_P16/README.md" <<'PY'
+import re, sys
+p = sys.argv[1]
+old = open(p, encoding="utf-8").read()
+new = re.sub(r"(\w+) surfaces can fire without a slash command",
+             "99 surfaces can fire without a slash command", old, count=1)
+assert new != old, "no '<word> surfaces can fire' phrase found"
+open(p, "w", encoding="utf-8").write(new)
+PY
+DC_P16_PYRC=$?
+DC_P16_OUT="$(dc_counts "$DC_P16")"; DC_P16_RC=$?
+if [ "$DC_P16_PYRC" -eq 0 ] && [ "$DC_P16_RC" -ne 0 ] \
+  && printf '%s\n' "$DC_P16_OUT" | grep -q '^SURFACES: .*README\.md' \
+  && ! printf '%s\n' "$DC_P16_OUT" | grep '^SURFACES: ' | grep -q 'AGENTS\.md'; then
+  ok "testfix: docs probe — README surfaces count is held on its own"
+else
+  bad "testfix: docs probe — README surfaces count is held on its own" "pyrc=$DC_P16_PYRC rc=$DC_P16_RC out=[$DC_P16_OUT]"
+fi
+
+DC_P17="$(dc_probe_root 17)"
+python3 - "$DC_P17/AGENTS.md" <<'PY'
+import re, sys
+p = sys.argv[1]
+old = open(p, encoding="utf-8").read()
+new = re.sub(r"(\w+) auto-triggering surfaces", "99 auto-triggering surfaces", old, count=1)
+assert new != old, "no '<word> auto-triggering surfaces' phrase found"
+open(p, "w", encoding="utf-8").write(new)
+PY
+DC_P17_PYRC=$?
+DC_P17_OUT="$(dc_counts "$DC_P17")"; DC_P17_RC=$?
+if [ "$DC_P17_PYRC" -eq 0 ] && [ "$DC_P17_RC" -ne 0 ] \
+  && printf '%s\n' "$DC_P17_OUT" | grep -q '^SURFACES: .*AGENTS\.md' \
+  && ! printf '%s\n' "$DC_P17_OUT" | grep '^SURFACES: ' | grep -q 'README\.md'; then
+  ok "testfix: docs probe — AGENTS.md surfaces count is held on its own"
+else
+  bad "testfix: docs probe — AGENTS.md surfaces count is held on its own" "pyrc=$DC_P17_PYRC rc=$DC_P17_RC out=[$DC_P17_OUT]"
+fi
+
 # Probe 9: a flag no shim accepts must fail the flag check.
 DC_P9="$(dc_probe_root 9)"
 printf '%s\n' "Run \`muse-status --zz-bogus-flag\`." >> "$DC_P9/README.md"
@@ -204,6 +344,27 @@ if [ "$DC_P10_RC" -ne 0 ] && printf '%s' "$DC_P10_OUT" | grep -q "SessionEnd"; t
   ok "docs: probe — naming an unregistered hook event fails the event check"
 else
   bad "docs: probe — naming an unregistered hook event fails the event check" "rc=$DC_P10_RC out=[$DC_P10_OUT]"
+fi
+
+# An event no list holds must still be refused in either prose form: bold
+# CamelCase or CamelCase followed by "hook". A hard-coded KNOWN_EVENTS lookup
+# sees neither, so both probes fail on the reverted checker.
+DC_P18="$(dc_probe_root 18)"
+printf '\n%s\n' '**ZzUnlistedEvent** (`hooks/zz.py`) does a thing.' >> "$DC_P18/README.md"
+DC_P18_OUT="$(dc_events "$DC_P18")"; DC_P18_RC=$?
+if [ "$DC_P18_RC" -ne 0 ] && printf '%s' "$DC_P18_OUT" | grep -q "ZzUnlistedEvent"; then
+  ok "testfix: docs probe — a bold unlisted event fails the event check"
+else
+  bad "testfix: docs probe — a bold unlisted event fails the event check" "rc=$DC_P18_RC out=[$DC_P18_OUT]"
+fi
+
+DC_P19="$(dc_probe_root 19)"
+printf '\n%s\n' 'The ZzUnlistedEvent hook does a thing.' >> "$DC_P19/README.md"
+DC_P19_OUT="$(dc_events "$DC_P19")"; DC_P19_RC=$?
+if [ "$DC_P19_RC" -ne 0 ] && printf '%s' "$DC_P19_OUT" | grep -q "ZzUnlistedEvent"; then
+  ok "testfix: docs probe — an unlisted event followed by hook fails the event check"
+else
+  bad "testfix: docs probe — an unlisted event followed by hook fails the event check" "rc=$DC_P19_RC out=[$DC_P19_OUT]"
 fi
 
 if [ "$DC_STANDALONE" = 1 ]; then

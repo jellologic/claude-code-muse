@@ -14,6 +14,8 @@ if ! declare -F ok >/dev/null 2>&1; then
   skip() { local n="$1"; shift; if [ "${CI:-}" = "true" ]; then FAIL=$((FAIL+n)); printf '  \033[31mFAIL\033[0m  SKIP counts as a failure under CI: %s\n' "$*"; else SKIP=$((SKIP+n)); printf '  \033[33mSKIP\033[0m  %s\n' "$*"; fi; }
   SKILL="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
   LAB="$(mktemp -d "${TMPDIR:-/tmp}/musetest.XXXXXX")"
+  # Standalone only: falling off the end must not leave the lab behind under TMPDIR.
+  trap 'rm -rf "$LAB"' EXIT
   native_path() {
     if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi
   }

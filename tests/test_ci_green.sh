@@ -37,10 +37,26 @@ CG_CR="$(PATH="$(shell_path "$CG/crlfpy"):$PATH" python3 -c 'print(1)' | od -c |
 CG_OUT_MISSING="$(cg_pf)"
 printf '{"rows":[{"model_id":"x-contributor"}]}' > "$CG/data/model-catalog/c.json"
 CG_OUT_PRESENT="$(cg_pf)"; CG_RC=$?
-if printf '%s' "$CG_CR" | grep -q '1\\r\\n' && printf '%s' "$CG_OUT_MISSING" | grep -q 'model catalog'; then
-  ok "cigreen: preflight's catalog check runs through a CRLF python (a missing catalog is reported)"
+# Without the `tr -d '\r'` in preflight.sh the resolved glob keeps its trailing CR,
+# and the missing-catalog line names a glob with a stray carriage return in it.
+# Grep cannot portably match a CR, so python checks the one line on bytes; only
+# that line is asserted, because on the Windows leg other lines may differ.
+CG_CR_LINE_RC=1
+if printf '%s' "$CG_OUT_MISSING" | grep -q 'model catalog'; then
+  CG_CR_LINE="$(printf '%s' "$CG_OUT_MISSING" | python3 -c '
+import sys
+raw = sys.stdin.buffer.read()
+lines = [l for l in raw.split(b"\n") if b"model catalog" in l]
+if not lines:
+    sys.exit(2)
+sys.exit(0 if all(b"\r" not in l for l in lines) else 1)
+')"
+  CG_CR_LINE_RC=$?
+fi
+if printf '%s' "$CG_CR" | grep -q '1\\r\\n' && [ "$CG_CR_LINE_RC" -eq 0 ]; then
+  ok "cigreen: through a CRLF python, a missing catalog is reported with no stray CR in the glob it names"
 else
-  bad "cigreen: preflight's catalog check runs through a CRLF python (a missing catalog is reported)" "cr='$CG_CR' out='$CG_OUT_MISSING'"
+  bad "cigreen: through a CRLF python, a missing catalog is reported with no stray CR in the glob it names" "cr='$CG_CR' rc=$CG_CR_LINE_RC out='$CG_OUT_MISSING'"
 fi
 if printf '%s' "$CG_OUT_MISSING" | grep -q 'model catalog' && [ "$CG_RC" -eq 0 ] && [ -z "$CG_OUT_PRESENT" ]; then
   ok "cigreen: a CRLF python does not turn a present catalog into a missing one"
