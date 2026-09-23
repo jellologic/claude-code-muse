@@ -233,6 +233,47 @@ end that quoting early, so such a value is refused.
 because tests/test_userconfig.sh check 14 fails any literal user_config
 placeholder under references/. -->
 
+## Measured: model frontmatter on commands and skills
+
+`model: haiku` took effect in default, acceptEdits and bypassPermissions
+permission modes, while auto and plan kept the session model. The command
+`/muse:status` (whose frontmatter sets `model: haiku`) was measured in
+default and auto, and a throwaway skill carrying `model: haiku` as a control
+was measured in all five modes. Measured on claude 2.1.280 on 2026-09-23: a
+scratch copy of this repo was driven headless with `--model sonnet`, so the
+session model is distinguishable from haiku. Only the skill control was run
+in acceptEdits, bypassPermissions and plan; the warning names skills and
+commands together, so it is one shared mechanism. In the modes where the
+field took effect the turns were served by claude-haiku-4-5-20251001; in
+auto and plan the turns stayed on the session model claude-sonnet-5, and the
+debug log warned `Skill/command model "claude-haiku-4-5-20251001" is not
+supported in auto mode; keeping the session model`. Both readings agreed on
+every run: the `modelUsage` keys of the headless JSON result and the
+`dispatching to firstParty model=...` lines in the debug log. An interactive
+attempt through a pty never got its command turn started — the fresh
+directory's trust prompt consumed the early keystrokes — so that row is
+recorded as not measured rather than inferred.
+
+The rule for this plugin: keep `model: haiku` on the four reporting
+commands. It takes effect outside auto and plan modes, and in auto and plan
+modes the turns run on the session model, which is harmless for commands
+that relay one script's output. Session ids below are the headless runs, so
+a re-run can compare against the same transcripts: command/default
+19efe757, command/auto cdb9adf5, skill/default 50c110dc,
+skill/acceptEdits 844d5b08, skill/bypassPermissions 81420d01, skill/auto
+78ebf41c, skill/plan 46ce7bf9.
+
+| Mode | Surface | Frontmatter model | Served by | Command |
+|---|---|---|---|---|
+| headless, auto | command /muse:status | haiku | claude-sonnet-5 | `claude -p --plugin-dir <tmp> --model sonnet --permission-mode auto --allowedTools "Bash(muse-status:*)" --debug-file <log> --output-format json "/muse:status"` |
+| headless, default | command /muse:status | haiku | claude-haiku-4-5-20251001 | `claude -p --plugin-dir <tmp> --model sonnet --permission-mode default --allowedTools "Bash(muse-status:*)" --debug-file <log> --output-format json "/muse:status"` |
+| headless, auto | skill zz-model-probe (control) | haiku | claude-sonnet-5 | `claude -p --plugin-dir <tmp> --model sonnet --permission-mode auto --debug-file <log> --output-format json "/muse:zz-model-probe"` |
+| headless, default | skill zz-model-probe (control) | haiku | claude-haiku-4-5-20251001 | `claude -p --plugin-dir <tmp> --model sonnet --permission-mode default --debug-file <log> --output-format json "/muse:zz-model-probe"` |
+| headless, acceptEdits | skill zz-model-probe (control) | haiku | claude-haiku-4-5-20251001 | `claude -p --plugin-dir <tmp> --model sonnet --permission-mode acceptEdits --debug-file <log> --output-format json "/muse:zz-model-probe"` |
+| headless, bypassPermissions | skill zz-model-probe (control) | haiku | claude-haiku-4-5-20251001 | `claude -p --plugin-dir <tmp> --model sonnet --permission-mode bypassPermissions --debug-file <log> --output-format json "/muse:zz-model-probe"` |
+| headless, plan | skill zz-model-probe (control) | haiku | claude-sonnet-5 | `claude -p --plugin-dir <tmp> --model sonnet --permission-mode plan --debug-file <log> --output-format json "/muse:zz-model-probe"` |
+| interactive (pty), auto | command /muse:status | haiku | not measured (fresh-dir trust prompt consumed the pty keystrokes; no command turn started in three attempts) | `claude --plugin-dir <tmp> --model sonnet --debug-file <log>` (then /muse:status typed at the prompt) |
+
 ## Considered, not adopted
 
 - LSP servers: muse ships no language, so there is nothing for a server to index.
