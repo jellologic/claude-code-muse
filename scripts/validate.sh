@@ -73,7 +73,7 @@ PASS=0; FAIL=0; SKIP=0
 # compares PASS+FAIL against this, so a removed block lowers the tally. Skips do
 # not count -- a SKIP is a check that did not run, and counting it lets a machine
 # without node stay green with fewer executed checks.
-EXPECTED_OFFLINE=334
+EXPECTED_OFFLINE=344
 
 ok()   { PASS=$((PASS+1)); printf '  \033[32mPASS\033[0m  %s\n' "$1"; }
 bad()  { FAIL=$((FAIL+1)); printf '  \033[31mFAIL\033[0m  %s\n' "$1"; [ -n "${2:-}" ] && echo "        $2"; }
@@ -538,9 +538,18 @@ for i, b in enumerate(blocks, 1):
         problems.append("block %d: --out %r does not carry the stamp, so two runs collide"
                         % (i, got["OUT"]))
     no_stamp = run_header(b, {"pluginRoot": "/p", "repo": "/r"})
-    if no_stamp.returncode == 0:
-        problems.append("block %d: a missing stamp silently defaulted to %r instead of throwing"
-                        % (i, json.loads(no_stamp.stdout).get("STAMP")))
+    # The registered workflow no longer throws on a missing stamp -- it returns
+    # {refused: true} with no agent calls, which prints no STAMP. A default such as
+    # `args.stamp ?? 'run'` still surfaces here as a truthy STAMP with rc 0.
+    no_stamp_stamp = None
+    if no_stamp.returncode == 0 and (no_stamp.stdout or "").strip():
+        try:
+            no_stamp_stamp = json.loads(no_stamp.stdout).get("STAMP")
+        except ValueError:
+            no_stamp_stamp = None
+    if no_stamp.returncode == 0 and no_stamp_stamp:
+        problems.append("block %d: a missing stamp silently defaulted to %r instead of refusing"
+                        % (i, no_stamp_stamp))
 if problems:
     for p in problems: print("        " + p)
     sys.exit(1)
@@ -2062,6 +2071,7 @@ sys.exit(0 if c and not any('PARTIAL' in x['value'] for x in c) else 1)" \
 . "$SKILL/tests/test_bin.sh"
 . "$SKILL/tests/test_collision.sh"
 . "$SKILL/tests/test_ci_green.sh"
+. "$SKILL/tests/test_workflow.sh"
 # ------------------------------------------------------------ 4. live runs
 # The guard counts itself out: no ok here, so deleting a block lowers the tally.
 offline_count_guard

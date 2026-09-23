@@ -317,14 +317,10 @@ def preflight(repo: Path, require_clean: bool) -> str:
         raise PreflightError(
             "{} is not a git repository (worktree isolation requires git)".format(repo))
 
-    dirty = git(repo, "status", "--porcelain", check=False)
-    if dirty and require_clean:
-        raise PreflightError(
-            "working copy is dirty; commit/stash first, or pass --allow-dirty.\n"
-            "Worktrees branch from a committed ref, so uncommitted work is invisible "
-            "to the run and will look like the agents deleted it."
-        )
-
+    # Written BEFORE the dirty check below: briefs staged under <repo>/.muse-fleet/
+    # exist before the first `run`, and the dirty check reads through this very
+    # exclude -- so excluding after checking refused a clean repo for carrying the
+    # brief it was told to carry.
     # Worktrees created under the repo would otherwise show up as untracked noise.
     # In a linked worktree .git is a file, so the exclude lives in the common dir,
     # which git applies to every worktree sharing it.
@@ -340,6 +336,14 @@ def preflight(repo: Path, require_clean: bool) -> str:
     except OSError as e:
         print("muse: could not update {} ({}); later runs may be refused as dirty".format(
             excl, e), file=sys.stderr)
+
+    dirty = git(repo, "status", "--porcelain", check=False)
+    if dirty and require_clean:
+        raise PreflightError(
+            "working copy is dirty; commit/stash first, or pass --allow-dirty.\n"
+            "Worktrees branch from a committed ref, so uncommitted work is invisible "
+            "to the run and will look like the agents deleted it."
+        )
 
     try:
         return git(repo, "rev-parse", "HEAD")
