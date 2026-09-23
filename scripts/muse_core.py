@@ -234,6 +234,44 @@ def drop_worktree(repo: Path, wt: Path, branch: str, force_branch: bool = True) 
                     "-D" if force_branch else "-d", branch], capture_output=True)
 
 
+def collision(repo: Path, wt: Path, branch: str, patch: Path = None,
+              ours_branch: bool = False):
+    """None when it is safe to (re)create `wt` on `branch`, else
+    {"kind": "branch"|"worktree"|"patch", "path": str, "reason": str}."""
+    # A re-run must not inherit a previous attempt's tree. But dropping
+    # unconditionally ends in `git branch -D`, which discards unmerged commits without
+    # asking -- and this branch name can collide with one that is not ours (a re-used
+    # --out after its worktree dir vanished, same --id and --stamp under a different
+    # --out, or any pre-existing branch of that name). Refusing keeps the commit.
+    if not ours_branch and git(repo, "rev-parse", "--verify", "--quiet", branch,
+                               check=False).strip():
+        return {"kind": "branch", "path": branch,
+                "reason": "branch {} already exists. Removing it would discard any "
+                          "unmerged commits on it.".format(branch)}
+    # The branch check above catches a name collision, and it is not the same question.
+    # A live worktree can sit at this path under a DIFFERENT branch -- another run with
+    # --branch-prefix, a branch someone renamed, a stamp passed in explicitly -- and
+    # drop_worktree would force-remove it along with whatever was in flight there.
+    if wt.exists() and any(wt.iterdir()):
+        return {"kind": "worktree", "path": str(wt),
+                "reason": "worktree {} already exists and is not empty. Removing it "
+                          "would destroy that run's in-flight work.".format(wt)}
+    # A harvested patch.diff is the only copy of the work once the worktree and branch
+    # are gone (--cleanup). Overwriting it loses work nobody may have applied yet, so a
+    # non-empty patch blocks a re-run on its own. An empty patch is not work.
+    if patch is not None and patch.exists():
+        try:
+            nonempty = patch.stat().st_size > 0
+        except OSError:
+            nonempty = False
+        if nonempty:
+            return {"kind": "patch", "path": str(patch),
+                    "reason": "{} already exists and is not empty; overwriting it "
+                              "would lose a harvested patch nobody may have applied "
+                              "yet.".format(patch)}
+    return None
+
+
 def seed_worktree(repo: Path, wt: Path, copies, links):
     """Bring untracked-but-needed files into a fresh worktree.
 
