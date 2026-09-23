@@ -67,10 +67,21 @@ fi
 # can run on every change; the live sections cost real money and several minutes.
 OFFLINE=0
 [[ "${1:-}" == "--offline" ]] && OFFLINE=1
-PASS=0; FAIL=0
+PASS=0; FAIL=0; SKIP=0
+# Deleting a check block must turn the run red: the count guard before section 4
+# compares PASS+FAIL+SKIP against this, so a removed block lowers the tally.
+EXPECTED_OFFLINE=154
 
 ok()   { PASS=$((PASS+1)); printf '  \033[32mPASS\033[0m  %s\n' "$1"; }
 bad()  { FAIL=$((FAIL+1)); printf '  \033[31mFAIL\033[0m  %s\n' "$1"; [ -n "${2:-}" ] && echo "        $2"; }
+skip() {  # skip <number-of-checks-it-replaces> <message>
+  local n="$1"; shift
+  if [ "${CI:-}" = "true" ]; then
+    FAIL=$((FAIL+n)); printf '  \033[31mFAIL\033[0m  SKIP counts as a failure under CI: %s\n' "$*"
+  else
+    SKIP=$((SKIP+n)); printf '  \033[33mSKIP\033[0m  %s\n' "$*"
+  fi
+}
 head_() { printf '\n\033[1m%s\033[0m\n' "$1"; }
 
 mkrepo() {  # mkrepo <path>
@@ -219,6 +230,8 @@ for f in files:
             if k in d and not isinstance(d[k], str):
                 problems.append("%s: %s parsed as %s, not a string"
                                 % (rel, k, type(d[k]).__name__))
+if yaml is None and os.environ.get("CI") == "true":
+    problems.append("PyYAML absent under CI=true -- the real frontmatter parse did not run; pip install pyyaml")
 print("        (parsed with PyYAML)" if yaml is not None
       else "        (PyYAML absent -- quoting rule only)")
 if problems:
@@ -532,7 +545,7 @@ if calls - meta:
 sys.exit(0 if calls <= meta else 1)
 PY
 else
-  printf '  \033[33mSKIP\033[0m  node not found — workflow script not syntax-checked\n'
+  skip 4 "node not found — workflow script not syntax-checked"
 fi
 
 # ------------------------------------------------------- 2. pure functions
@@ -586,14 +599,7 @@ sys.exit(1 if fails else 0)
 PY
 [ $? -eq 0 ] && PASS=$((PASS+15)) || FAIL=$((FAIL+1))
 
-# muse_ask.sh reaches resolve_model by importing a module path; if that import breaks,
-# it silently falls back to a hardcoded model id instead of failing.
-python3 -c "
-import importlib.util,os,sys
-spec=importlib.util.spec_from_file_location('m', os.path.expanduser('$CORE'))
-m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
-sys.exit(0 if m.resolve_model(m.LATEST)[0].endswith('-contributor') else 1)" \
-  && ok "muse_ask's resolve_model import path works" || bad "muse_ask resolve import"
+. "$SKILL/tests/test_muse_ask_resolve.sh"
 
 # ------------------------------------------------------------ 3. guardrails
 # ------------------------------------------------- 2b. session plumbing (no muse spawned)
@@ -842,27 +848,43 @@ PY
 # A 1-second stamp is not a unique namespace: two fleets started in the same second
 # computed identical branches AND worktree paths, and run_task opens with drop_worktree,
 # so the second silently force-removed the first's live worktrees.
-python3 - <<'PY' && ok "fleet run stamps are unique within the same second" || bad "stamp collision still possible"
+mkrepo "$LAB/v_stamp"
+cat > "$LAB/v_stamp_tasks.json" <<'JSON'
+[{"id":"t1","prompt":"noop"}]
+JSON
+python3 - "$LAB/v_stamp" "$LAB/v_stamp_tasks.json" <<'PY' && ok "fleet run stamps are unique within the same second" || bad "stamp collision still possible"
 import importlib.util, os, re, sys
-src = open(os.path.join(os.environ["PLUGIN_ROOT"], "scripts/muse_fleet.py")).read()
-# The stamp must carry entropy, not just a second-resolution clock.
-if "secrets.token_hex" not in src:
-    print("        stamp has no entropy source"); sys.exit(1)
-import datetime as dt, secrets
-# Mirror what muse_fleet actually does, including the width -- a test that samples less
-# entropy than the code would pass while the code stayed weak.
-import re as _re
-width = int(_re.search(r"secrets\.token_hex\((\d+)\)", src).group(1))
-if width < 4:
-    print("        token_hex(%d) is too thin: ~1.9%% collision across 50 runs" % width)
-    sys.exit(1)
-mk = lambda: "{}-{}".format(dt.datetime.now().strftime("%Y%m%d-%H%M%S"), secrets.token_hex(width))
-s = [mk() for _ in range(200)]
+spec = importlib.util.spec_from_file_location(
+    "fleet", os.path.join(os.environ["PLUGIN_ROOT"], "scripts/muse_fleet.py"))
+fleet = importlib.util.module_from_spec(spec); spec.loader.exec_module(fleet)
+# Sample the real constructor, not a local mirror -- a lambda here would pass while
+# the code stayed weak.
+s = [fleet.new_stamp() for _ in range(200)]
 if len(set(s)) != len(s):
     print("        collided in 200 draws"); sys.exit(1)
-# and must still sort chronologically on its time prefix
 if [x[:15] for x in s] != sorted(x[:15] for x in s):
     print("        no longer chronological"); sys.exit(1)
+for x in s:
+    suffix = x.rsplit("-", 1)[-1]
+    if len(suffix) < 8 or not re.fullmatch(r"[0-9a-f]+", suffix):
+        print("        stamp suffix is not token_hex(4): %r" % x); sys.exit(1)
+# main() must really call it: replacing it with a raiser has to abort the run before
+# any task spawns. A stub muse is already on PATH here, so preflight passes.
+class Sentinel(Exception):
+    pass
+def boom():
+    raise Sentinel()
+fleet.new_stamp = boom
+sys.argv = ["muse_fleet.py", "--tasks", sys.argv[2], "--repo", sys.argv[1],
+            "--model", "x"]
+try:
+    fleet.main()
+except Sentinel:
+    pass
+except SystemExit as e:
+    print("        main exited without calling new_stamp: %r" % e); sys.exit(1)
+else:
+    print("        main did not call new_stamp"); sys.exit(1)
 PY
 
 # Every muse-side failure used to come back as the same sentence -- "muse produced no
@@ -1026,9 +1048,20 @@ for name in ("muse_task.py", "muse_fleet.py"):
              and any(isinstance(t, ast.Name) and t.id == "stamp" for t in n.targets)]
     if not exprs:
         problems.append("%s: nothing is assigned to `stamp`" % name)
-    elif not any("token_hex" in e for e in exprs):
-        problems.append("%s: the stamp expression has no entropy, so two runs in the "
-                        "same second compute the same worktree path" % name)
+        continue
+    if any("token_hex" in e for e in exprs):
+        continue
+    # A stamp built by a named constructor carries its entropy there; follow the call
+    # rather than demanding the expression spell it out, or extracting the helper
+    # turns this guard red for a correct reason.
+    tree = ast.parse(src)
+    helpers = [n for n in ast.walk(tree)
+               if isinstance(n, ast.FunctionDef) and n.name == "new_stamp"]
+    if (any("new_stamp" in e for e in exprs) and helpers
+            and any("token_hex" in ast.dump(h) for h in helpers)):
+        continue
+    problems.append("%s: the stamp expression has no entropy, so two runs in the "
+                    "same second compute the same worktree path" % name)
 if problems:
     for p in problems: print("        " + p)
     sys.exit(1)
@@ -1756,8 +1789,11 @@ S4=$(sed -n '4p' "$MUSE_STUB_LOG")
 unset MUSE_STUB_LOG
 
 # --help must not spill source: the old fixed line range printed `set -uo pipefail`.
-bash "$SKILL/scripts/muse_ask.sh" --help 2>/dev/null | grep -q 'set -uo pipefail' \
-  && bad "muse_ask.sh --help leaks source lines" || ok "muse_ask.sh --help prints only the header"
+# An empty --help would pass the absence check below, so require the real header first.
+HELP=$(bash "$SKILL/scripts/muse_ask.sh" --help 2>/dev/null)
+[ -n "$HELP" ] && printf '%s\n' "$HELP" | grep -q 'muse_ask.sh' && ! printf '%s\n' "$HELP" | grep -q 'set -uo pipefail' \
+  && ok "muse_ask.sh --help prints only the header" \
+  || bad "muse_ask.sh --help leaks source lines" "input was empty or matched: $HELP"
 
 # The two hooks that speak. Both follow the discipline preflight.sh set -- silent unless
 # there is something to say, and always exit 0, because a hook that can fail a session is
@@ -1783,9 +1819,9 @@ HLRC=$?
 echo "$HL" | grep -q 'muse/20260101-aaaa/t1' \
   && ok "SessionEnd names the delegation worktree still open" \
   || bad "an open worktree went unreported" "$HL"
-echo "$HL" | grep -q 'my-own-feature' \
-  && bad "SessionEnd reports the user's own worktrees" "$HL" \
-  || ok "SessionEnd leaves the user's own worktrees alone"
+[ -n "$HL" ] && ! printf '%s\n' "$HL" | grep -q 'my-own-feature' \
+  && ok "SessionEnd leaves the user's own worktrees alone" \
+  || bad "SessionEnd reports the user's own worktrees" "input was empty or matched: $HL"
 
 # SubagentStop, the backstop for the path `finish` cannot close: the record is never
 # written at all because the supervisor ran out of turns, was interrupted, or stopped and
@@ -1807,15 +1843,16 @@ HSRC=$?
 echo "$HS" | grep -q 'stopped' \
   && ok "a supervisor that stopped without a verdict is surfaced" \
   || bad "a verdict-less task went unmentioned" "$HS"
-echo "$HS" | grep -q "^  - clean:" \
-  && bad "SubagentStop complains about a properly verified task" "$HS" \
-  || ok "a verified task produces no note"
+[ -n "$HS" ] && ! printf '%s\n' "$HS" | grep -q "^  - clean:" \
+  && ok "a verified task produces no note" \
+  || bad "SubagentStop complains about a properly verified task" "input was empty or matched: $HS"
 
 # And the fully clean project: nothing to say, nothing said.
 rm -rf "$HK/.muse-fleet/tasks/stopped"
 HS2=$(echo '{}' | CLAUDE_PROJECT_DIR="$HK" python3 "$SKILL/hooks/supervisor_stop.py" 2>&1)
 [ -z "$HS2" ] && ok "SubagentStop is silent when the artifacts are clean" \
   || bad "SubagentStop speaks on a clean run" "$HS2"
+. "$SKILL/tests/test_preflight.sh"
 
 head_ "3c. Data-loss and process guards"
 
@@ -1926,8 +1963,12 @@ done
   && ok "doctor reaches a verdict on a healthy, stubbed and bare machine" \
   || bad "doctor crashed or gave no verdict" "$DOC_CRASHED"
 
-env PATH="$(minimal_path)" MUSE_CONFIG_DIR="$DLAB/nocfg" python3 "$DOC" --repo "$DLAB/empty" >/dev/null 2>&1
-[ $? -ne 0 ] && ok "doctor exits non-zero when something is blocking" || bad "doctor reported a broken machine as ready"
+DOCNZ=$(env PATH="$(minimal_path)" MUSE_CONFIG_DIR="$DLAB/nocfg" python3 "$DOC" --repo "$DLAB/empty" 2>&1); DOCNZRC=$?
+if [ "$DOCNZRC" -ne 0 ] && ! printf '%s\n' "$DOCNZ" | grep -q 'Traceback' && printf '%s\n' "$DOCNZ" | grep -q 'NOT READY'; then
+  ok "doctor exits non-zero when something is blocking"
+else
+  bad "doctor reported a broken machine as ready" "rc=$DOCNZRC tail=$(printf '%s\n' "$DOCNZ" | tail -3)"
+fi
 
 # Well-formed regardless of verdict: a consumer parses this to decide what to do about a
 # machine that is, by definition, possibly broken.
@@ -2025,9 +2066,12 @@ sys.exit(0 if c and not any('PARTIAL' in x['value'] for x in c) else 1)" \
   || bad "the partial label fires unconditionally" "$DOC_FULL"
 
 # ------------------------------------------------------------ 4. live runs
+# The guard counts itself out: no ok here, so deleting a block lowers the tally.
+OFFLINE_SEEN=$((PASS+FAIL+SKIP))
+if [ "$OFFLINE_SEEN" -lt "$EXPECTED_OFFLINE" ]; then bad "offline suite ran $OFFLINE_SEEN checks, EXPECTED_OFFLINE=$EXPECTED_OFFLINE" "a check block was deleted or stopped running; restore it or lower EXPECTED_OFFLINE in the same change"; fi
 if [ "$OFFLINE" = "1" ]; then
   printf '\n\033[33mSKIP\033[0m  sections 4+ (live muse runs) — --offline\n'
-  printf '\n\033[1mRESULT: %d passed, %d failed (offline subset)\033[0m\n' "$PASS" "$FAIL"
+  printf '\n\033[1mRESULT: %d passed, %d failed, %d skipped (offline subset, expected >= %d)\033[0m\n' "$PASS" "$FAIL" "$SKIP" "$EXPECTED_OFFLINE"
   exit $([ "$FAIL" -eq 0 ] && echo 0 || echo 1)
 fi
 
@@ -2127,9 +2171,10 @@ RC2=$?
 # Only the --cleanup run's own artifacts should be gone. The first run deliberately
 # ran without --cleanup, so its worktrees are expected to still be present.
 STAMP2=$(basename "$(ls -d "$LAB/v_live/.muse-fleet"/*/ | tail -1)")
-git -C "$LAB/v_live" worktree list | grep -q "$STAMP2" \
-  && bad "--cleanup left its own worktrees ($STAMP2)" \
-  || ok "--cleanup removed its own worktrees"
+LIVE_WT=$(git -C "$LAB/v_live" worktree list 2>/dev/null)
+[ -n "$STAMP2" ] && [ -n "$LIVE_WT" ] && ! printf '%s\n' "$LIVE_WT" | grep -q "$STAMP2" \
+  && ok "--cleanup removed its own worktrees" \
+  || bad "--cleanup left its own worktrees ($STAMP2)" "input was empty or matched: STAMP2=$STAMP2 WT=$LIVE_WT"
 [ "$(git -C "$LAB/v_live" branch --list "fleet/$STAMP2/*" | wc -l | tr -d ' ')" = "0" ] \
   && ok "--cleanup removed its own branches" || bad "--cleanup left its own branches"
 git -C "$LAB/v_live" worktree list | grep -q "$STAMP1" \
@@ -2164,10 +2209,12 @@ SD=$(ls -d "$SEEDR/.muse-fleet"/*/ | tail -1)
 grep -q 'seedok7391' "$SD/envprobe/patch.diff" 2>/dev/null \
   && ok "--seed made .env readable inside the worktree" \
   || bad "seeding failed" "$(grep -h '^+' "$SD/envprobe/patch.diff" 2>/dev/null | head -2)"
-grep -q '^+++ b/\.env' "$SD/envprobe/patch.diff" 2>/dev/null \
-  && bad "seeded .env leaked into the patch" || ok "seeded .env did not leak into the patch"
-grep -q 'node_modules' "$SD/envprobe/patch.diff" 2>/dev/null \
-  && bad "linked node_modules leaked into the patch" || ok "linked node_modules did not leak"
+[ -s "$SD/envprobe/patch.diff" ] && ! grep -q '^+++ b/\.env' "$SD/envprobe/patch.diff" 2>/dev/null \
+  && ok "seeded .env did not leak into the patch" \
+  || bad "seeded .env leaked into the patch" "input was empty or matched: $(head -2 "$SD/envprobe/patch.diff" 2>/dev/null)"
+[ -s "$SD/envprobe/patch.diff" ] && ! grep -q 'node_modules' "$SD/envprobe/patch.diff" 2>/dev/null \
+  && ok "linked node_modules did not leak" \
+  || bad "linked node_modules leaked into the patch" "input was empty or matched: $(head -2 "$SD/envprobe/patch.diff" 2>/dev/null)"
 python3 -c "
 import json,sys
 t=json.load(open('$SD/report.json'))['tasks'][0]
@@ -2275,9 +2322,9 @@ import json,sys; d=json.load(sys.stdin)
 sys.exit(0 if d['verdict']=='accept' and d['verified_by_supervisor'] and len(d['verifications'])==2 else 1)" \
   && ok "finish: verdict records the checks the supervisor actually ran" || bad "finish" "$FIN"
 
-grep -q 'def divide' "$SLAB/calc.py" 2>/dev/null \
-  && bad "task leaked into the source repo" \
-  || ok "source repo untouched — work stayed in the worktree"
+[ -f "$SLAB/calc.py" ] && ! grep -q 'def divide' "$SLAB/calc.py" 2>/dev/null \
+  && ok "source repo untouched — work stayed in the worktree" \
+  || bad "task leaked into the source repo" "input was empty or matched: $(cat "$SLAB/calc.py" 2>/dev/null | head -3)"
 
 python3 "$TASK" cleanup --id divide --out "$SOUT" >/dev/null 2>&1
 [ "$(git -C "$SLAB" worktree list | wc -l)" -eq 1 ] \
@@ -2331,9 +2378,9 @@ d=json.load(open('$LAB/v_sess2.json'))
 sys.exit(0 if d.get('resumed') is True else 1)" \
   && ok "revise reports the session resumed" || bad "revise did not resume"
 
-grep -q 'TIGERMOTH' "$SSOUT/resume/round-2/prompt.txt" \
-  && bad "the revision prompt restated the brief (resume saved nothing)" \
-  || ok "the revision prompt omits the brief"
+[ -s "$SSOUT/resume/round-2/prompt.txt" ] && ! grep -q 'TIGERMOTH' "$SSOUT/resume/round-2/prompt.txt" \
+  && ok "the revision prompt omits the brief" \
+  || bad "the revision prompt restated the brief (resume saved nothing)" "input was empty or matched: $(cat "$SSOUT/resume/round-2/prompt.txt" 2>/dev/null | head -3)"
 
 grep -q 'TIGERMOTH' "$SSOUT/resume/patch.diff" \
   && ok "worker recalled a codeword that exists nowhere on disk" \
