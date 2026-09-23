@@ -13,9 +13,9 @@ set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# Later PRs append their fixed mutant ids here as their checks land, and never remove
-# one, so a regression that re-opens a once-killed hole fails the run again.
-MUST_KILL="M01 M02 M03 M04 M05 M06 M07 M08 M09 M10 M11 M12 M13 M15 M17 M18"
+# Every known mutant is held: a regression that re-opens a once-killed hole
+# fails the run again. A new mutant row appends its id here with its checks.
+MUST_KILL="M01 M02 M03 M04 M05 M06 M07 M08 M09 M10 M11 M12 M13 M14 M15 M16 M17 M18"
 if [ -n "${MUTATE_MUST_KILL:-}" ]; then
   # Self-tests stage a failing run through the environment without touching this file.
   echo "mutate: MUST_KILL overridden by environment: $MUTATE_MUST_KILL" >&2
