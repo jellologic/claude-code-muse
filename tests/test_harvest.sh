@@ -25,6 +25,8 @@ for a in "$@"; do [ "$prev" = "--workspace" ] && wt="$a"; prev="$a"; done
 printf '{"payload":{"kind":"run_terminal","terminal":"completed","text":"ok"}}\n'
 STUB
 chmod +x "$HV/bin/muse"
+. "$(dirname "${BASH_SOURCE[0]}")/lib_stub.sh"
+win_cmd_shim "$HV/bin/muse"
 HV_PATH="$(shell_path "$HV/bin"):$PATH"
 
 hv_repo() {  # hv_repo <dir> -- tracks files under three DEFAULT_EXCLUDES entries

@@ -10,7 +10,9 @@ if ! declare -F ok >/dev/null 2>&1; then
   bad() { FAIL=$((FAIL+1)); printf '  \033[31mFAIL\033[0m  %s\n' "$1"; [ -n "${2:-}" ] && echo "        $2"; }
   SKILL="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
   LAB="$(mktemp -d "${TMPDIR:-/tmp}/musetest.XXXXXX")"
+  shell_path() { if command -v cygpath >/dev/null 2>&1; then cygpath -u "$1"; else printf '%s' "$1"; fi; }
 fi
+. "$(dirname "${BASH_SOURCE[0]}")/lib_stub.sh"
 
 CL_mkrepo() {  # CL_mkrepo <path>
   rm -rf "$1"; mkdir -p "$1"; git init -q -b main "$1"
@@ -175,10 +177,11 @@ for i in 1 2 3; do echo "f$i" > "$wt/feature$i.py"; done
 echo '{"payload":{"kind":"run_terminal","terminal":"completed","text":"done"}}'
 STUB
 chmod +x "$LAB/v_cl_fleet_bin/muse"
+win_cmd_shim "$LAB/v_cl_fleet_bin/muse"
 printf '[{"id":"a","prompt":"p"}]\n' > "$LAB/v_cl_fleet_tasks.json"
 CL_FOUT="$LAB/v_cl_fleet_out"
 CL_FWTROOT="$LAB/v_cl_fleet_wt"
-CL_OUT3="$(PATH="$LAB/v_cl_fleet_bin:$PATH" python3 "$SKILL/scripts/muse_fleet.py" --tasks "$LAB/v_cl_fleet_tasks.json" --repo "$CL_FLEET" --out "$CL_FOUT" --worktree-root "$CL_FWTROOT" --model x 2>&1)"
+CL_OUT3="$(PATH="$(shell_path "$LAB/v_cl_fleet_bin"):$PATH" python3 "$SKILL/scripts/muse_fleet.py" --tasks "$LAB/v_cl_fleet_tasks.json" --repo "$CL_FLEET" --out "$CL_FOUT" --worktree-root "$CL_FWTROOT" --model x 2>&1)"
 CL_RC3=$?
 if [ "$CL_RC3" -ne 0 ]; then
   ok "cleanup T3 pre: fleet with a failed harvest exits non-zero"
@@ -234,7 +237,7 @@ CL_FC="$LAB/v_cl_fleetc"
 CL_mkrepo "$CL_FC"
 CL_FCOUT="$LAB/v_cl_fleetc_out"
 CL_FCWTROOT="$LAB/v_cl_fleetc_wt"
-CL_OUT3B="$(PATH="$LAB/v_cl_fleet_bin:$PATH" python3 "$SKILL/scripts/muse_fleet.py" --tasks "$LAB/v_cl_fleet_tasks.json" --repo "$CL_FC" --out "$CL_FCOUT" --worktree-root "$CL_FCWTROOT" --model x --cleanup 2>&1)"
+CL_OUT3B="$(PATH="$(shell_path "$LAB/v_cl_fleet_bin"):$PATH" python3 "$SKILL/scripts/muse_fleet.py" --tasks "$LAB/v_cl_fleet_tasks.json" --repo "$CL_FC" --out "$CL_FCOUT" --worktree-root "$CL_FCWTROOT" --model x --cleanup 2>&1)"
 CL_RC3B=$?
 if [ -d "$CL_FCWTROOT/v_cl_fleetc_out-a" ] && [ -f "$CL_FCWTROOT/v_cl_fleetc_out-a/feature1.py" ]; then
   ok "cleanup T3b: --cleanup keeps the failed-harvest worktree"

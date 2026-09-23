@@ -33,8 +33,12 @@ else
 fi
 
 CV_row() {  # CV_row <dir>: prints severity, then value, of the claude CLI row
-  env PATH="$(shell_path "$1"):$PATH" python3 "$SKILL/scripts/muse_doctor.py" \
-    --repo "$SKILL" --json 2>/dev/null | python3 -c "
+  # doctor exits 1 whenever ANY row is blocking (CI has no muse, no credentials), so its
+  # exit code says nothing about this row; only the parse's exit code is asserted.
+  local j
+  j="$(env PATH="$(shell_path "$1"):$PATH" python3 "$SKILL/scripts/muse_doctor.py" \
+    --repo "$SKILL" --json 2>/dev/null)"
+  printf '%s' "$j" | python3 -c "
 import json,sys
 d = json.load(sys.stdin)
 assert isinstance(d.get('checks'), list) and d['checks'], 'empty checks list'

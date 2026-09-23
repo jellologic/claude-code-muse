@@ -15,7 +15,7 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # Later PRs append their fixed mutant ids here as their checks land, and never remove
 # one, so a regression that re-opens a once-killed hole fails the run again.
-MUST_KILL="M01 M02 M03 M04 M05 M08 M09 M11 M12 M13 M15 M17"
+MUST_KILL="M01 M02 M03 M04 M05 M08 M09 M11 M12 M13 M15 M17 M18"
 if [ -n "${MUTATE_MUST_KILL:-}" ]; then
   # Self-tests stage a failing run through the environment without touching this file.
   echo "mutate: MUST_KILL overridden by environment: $MUTATE_MUST_KILL" >&2
@@ -47,6 +47,7 @@ M = [
  ("M15", "scripts/muse_ask.sh", '\' "$SKILL_DIR/scripts/muse_core.py" 2>/dev/null)"', '\' "$SKILL_DIR/muse_core.py" 2>/dev/null)"', "muse_ask.sh points at the wrong muse_core.py"),
  ("M16", "scripts/muse_status.py", '        out.append("last check exited {}".format(r["last_exit"]))', '        pass', 'status drops the "last check exited N" flag'),
  ("M17", "scripts/muse_core.py", '    raw = os.environ.get("CLAUDE_PLUGIN_OPTION_" + key.upper())', '    raw = os.environ.get("CLAUDE_PLUGIN_OPTION_" + key)', "userConfig env var name case bug"),
+ ("M18", "scripts/muse_core.py", '            os.killpg(os.getpgid(p.pid), signal.SIGKILL)', '            raise OSError("mutate.sh: killpg removed")', "worker timeout kills only the direct child, not its process group"),
 ]
 
 def lookup(mid):

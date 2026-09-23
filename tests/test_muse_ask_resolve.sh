@@ -42,7 +42,7 @@ chmod +x "$AR_BIN/muse"
 printf '{"rows":[{"model_id":"muse-spark-7.7-contributor","release_date":"2031-01-01","visibility":"visible"}]}' > "$AR_CAT/c.json"
 AR_ERR="$AR_BASE/stderr.log"
 AR_OUT="$AR_BASE/stdout.log"
-( cd "$AR_REPO" && PATH="$(shell_path "$AR_BIN"):$PATH" MUSE_STUB_MODEL_LOG="$(native_path "$AR_LOG")" MUSE_CATALOG_GLOB="$(native_path "$AR_CAT/*.json")" CLAUDE_PLUGIN_DATA="$AR_BASE/data" bash "$SKILL/scripts/muse_ask.sh" "q" >"$AR_OUT" 2>"$AR_ERR" )
+( cd "$AR_REPO" && PATH="$(shell_path "$AR_BIN"):$PATH" MUSE_STUB_MODEL_LOG="$(native_path "$AR_LOG")" MUSE_CATALOG_GLOB="$(native_path "$AR_CAT")/*.json" CLAUDE_PLUGIN_DATA="$AR_BASE/data" bash "$SKILL/scripts/muse_ask.sh" "q" >"$AR_OUT" 2>"$AR_ERR" )
 AR_RC=$?
 AR_GOT="$(cat "$AR_LOG" 2>/dev/null)"
 AR_ERRTAIL="$(tail -3 "$AR_ERR" 2>/dev/null)"
