@@ -21,9 +21,34 @@ export const meta = {
 const ROOT_TOKEN = '${CLAUDE_PLUGIN_ROOT}'
 // A model can invoke this workflow with no args at all, and then a bare
 // `args.pluginRoot` is a TypeError before anything has been validated. Every arg below
-// is read through ARGS, which is always an object.
+// is read through NARGS (the placeholder-normalized copy of ARGS), which is always an object.
 const ARGS = (typeof args === 'object' && args !== null) ? args : {}
-const PLUGIN = ARGS.pluginRoot || (ROOT_TOKEN.indexOf('$') === -1 ? ROOT_TOKEN : null)
+// Unset userConfig keys stay literal: the runtime substitutes a key into the
+// calling prose only when the user configured it, so an unset key arrives here
+// as the literal placeholder string (dollar, brace, user_config.KEY, brace).
+// (Spelled out because check 14 in tests/test_userconfig.sh fails any raw
+// placeholder-shaped text under workflows/.) A placeholder naming the arg's
+// own key means unconfigured (undefined, so the built-in defaults below
+// apply); one naming a different key is a wiring bug and refuses. Without this
+// a `$` would trip the shell-safety check below and refuse every install with
+// an unset key.
+const NARGS = Object.assign({}, ARGS)
+const PH_RE = /^\$\{user_config\.([A-Za-z0-9_]+)\}$/
+const PH_PROBLEMS = []
+function phNorm(value, ownKey, argName) {
+  if (typeof value !== 'string') return value
+  const m = PH_RE.exec(value.trim())
+  if (!m) return value
+  if (m[1] === ownKey) return undefined
+  PH_PROBLEMS.push(argName + " is an unsubstituted placeholder for a different key (" + m[1] + ")")
+  return value
+}
+NARGS.maxRounds = phNorm(NARGS.maxRounds, 'max_rounds', 'maxRounds')
+NARGS.defaultEffort = phNorm(NARGS.defaultEffort, 'default_effort', 'defaultEffort')
+NARGS.model = phNorm(NARGS.model, 'default_model', 'model')
+NARGS.worktreeRoot = phNorm(NARGS.worktreeRoot, 'worktree_root', 'worktreeRoot')
+NARGS.refuseOnSecrets = phNorm(NARGS.refuseOnSecrets, 'refuse_on_secrets', 'refuseOnSecrets')
+const PLUGIN = NARGS.pluginRoot || (ROOT_TOKEN.indexOf('$') === -1 ? ROOT_TOKEN : null)
 // bin/ is on an agent's PATH only while the plugin is enabled in the running
 // session; outside such a session bare muse-task exits 127, so the absolute shim
 // from pluginRoot is the documented fallback.
@@ -35,21 +60,21 @@ const STATUS = PLUGIN ? `"${PLUGIN}/bin/muse-status"` : 'muse-status'
 // than the cwd, which fixes the common case -- but only when every subcommand runs inside
 // that repository, and a workflow's agents make no such promise. Pass args.repo as an
 // absolute path and this question does not arise.
-const REPO  = ARGS.repo || '.'
-const STAMP = ARGS.stamp
-const OUT   = ARGS.out  || `${REPO}/.muse-fleet/supervised/${STAMP}`
-const ROUNDS = ARGS.maxRounds || 3
+const REPO  = NARGS.repo || '.'
+const STAMP = NARGS.stamp
+const OUT   = NARGS.out  || `${REPO}/.muse-fleet/supervised/${STAMP}`
+const ROUNDS = NARGS.maxRounds || 3
 // Fleet-wide userConfig values, substituted into the args by the caller (the
 // skill and the fleet command). Absent means unconfigured, so each takes the
 // built-in default the plugin used before there was any configuration.
-const DEFAULT_EFFORT = (ARGS.defaultEffort === undefined || ARGS.defaultEffort === null)
-  ? 'low' : ARGS.defaultEffort
-const MODEL = (ARGS.model === undefined || ARGS.model === null)
-  ? 'latest-contributor' : ARGS.model
-const WORKTREE_ROOT = (ARGS.worktreeRoot === undefined || ARGS.worktreeRoot === null)
-  ? '' : ARGS.worktreeRoot
-const REFUSE_ON_SECRETS = (ARGS.refuseOnSecrets === undefined || ARGS.refuseOnSecrets === null)
-  ? true : ARGS.refuseOnSecrets
+const DEFAULT_EFFORT = (NARGS.defaultEffort === undefined || NARGS.defaultEffort === null)
+  ? 'low' : NARGS.defaultEffort
+const MODEL = (NARGS.model === undefined || NARGS.model === null)
+  ? 'latest-contributor' : NARGS.model
+const WORKTREE_ROOT = (NARGS.worktreeRoot === undefined || NARGS.worktreeRoot === null)
+  ? '' : NARGS.worktreeRoot
+const REFUSE_ON_SECRETS = (NARGS.refuseOnSecrets === undefined || NARGS.refuseOnSecrets === null)
+  ? true : NARGS.refuseOnSecrets
 
 // The model can also invoke this workflow with missing or hostile args, and several of
 // these values are interpolated inside double quotes in generated shell -- where a `"`,
@@ -61,32 +86,32 @@ const REFUSE_ON_SECRETS = (ARGS.refuseOnSecrets === undefined || ARGS.refuseOnSe
 // that both plan a task called tests-parser -- had every supervisor refuse at step one
 // with "task already exists". That is the re-run guard firing correctly against a
 // namespace that should never have collided.
-const WF_PROBLEMS = []
-if (typeof ARGS.job !== 'string' || !ARGS.job.trim()) {
+const WF_PROBLEMS = [...PH_PROBLEMS]
+if (typeof NARGS.job !== 'string' || !NARGS.job.trim()) {
   WF_PROBLEMS.push('job is missing or blank (pass args.job with a job description)')
 }
-if (typeof ARGS.stamp !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(ARGS.stamp)) {
+if (typeof NARGS.stamp !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(NARGS.stamp)) {
   WF_PROBLEMS.push('stamp is missing or unsafe (pass args.stamp starting with a letter or digit, with only letters, digits, dot, underscore or hyphen, max 64 chars, taken from date +%Y%m%d-%H%M%S)')
 }
 // model and worktreeRoot ride in the same loop: both are interpolated inside
 // double quotes in the run line below, so the same metacharacters escape there.
 for (const k of ['pluginRoot', 'repo', 'out', 'model', 'worktreeRoot']) {
-  const v = ARGS[k]
+  const v = NARGS[k]
   if (v !== undefined && v !== null && (typeof v !== 'string' || /["$`\\\n\r]/.test(v))) {
     WF_PROBLEMS.push(k + ' is present but not a plain shell-safe path (pass a string with no double quote, dollar, backtick, backslash, newline or carriage return, since it is interpolated inside double quotes in generated shell)')
   }
 }
-if (ARGS.maxRounds !== undefined && ARGS.maxRounds !== null &&
-    (!Number.isInteger(ARGS.maxRounds) || ARGS.maxRounds < 1 || ARGS.maxRounds > 10)) {
+if (NARGS.maxRounds !== undefined && NARGS.maxRounds !== null &&
+    (!Number.isInteger(NARGS.maxRounds) || NARGS.maxRounds < 1 || NARGS.maxRounds > 10)) {
   WF_PROBLEMS.push('maxRounds is present but not an integer from 1 to 10 (pass 1-10 or omit it)')
 }
-if (ARGS.defaultEffort !== undefined && ARGS.defaultEffort !== null &&
-    ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].indexOf(ARGS.defaultEffort) === -1) {
+if (NARGS.defaultEffort !== undefined && NARGS.defaultEffort !== null &&
+    ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].indexOf(NARGS.defaultEffort) === -1) {
   WF_PROBLEMS.push('defaultEffort is present but not one of none, minimal, low, medium, high, xhigh, max (pass one of those or omit it)')
 }
-if (ARGS.refuseOnSecrets !== undefined && ARGS.refuseOnSecrets !== null &&
-    ARGS.refuseOnSecrets !== true && ARGS.refuseOnSecrets !== false &&
-    ARGS.refuseOnSecrets !== 'true' && ARGS.refuseOnSecrets !== 'false') {
+if (NARGS.refuseOnSecrets !== undefined && NARGS.refuseOnSecrets !== null &&
+    NARGS.refuseOnSecrets !== true && NARGS.refuseOnSecrets !== false &&
+    NARGS.refuseOnSecrets !== 'true' && NARGS.refuseOnSecrets !== 'false') {
   WF_PROBLEMS.push('refuseOnSecrets is present but not true or false (pass a boolean or omit it)')
 }
 if (WF_PROBLEMS.length) {
@@ -119,7 +144,7 @@ const PLAN_SCHEMA = {
 // ---- Plan. Claude, because a bad partition poisons everything downstream. --------
 phase('Plan')
 const plan = await agent(
-  `Split this job into independent tasks for delegation to cheap coding agents: ${ARGS.job}
+  `Split this job into independent tasks for delegation to cheap coding agents: ${NARGS.job}
 
    Repo: ${REPO}
 
