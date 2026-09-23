@@ -4,6 +4,112 @@ All notable changes to this plugin are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Work since 1.3.0 (epic #49): supervision is enforced rather than described, the
+credential scan covers what the worker actually receives, configuration refuses bad
+values instead of silently defaulting, and prose counts are held against the code by a
+new offline check.
+
+### Added
+
+- **A PreToolUse guard denies a supervisor's writes** (Refs #43). Omitting `Write` and
+  `Edit` from `allowed-tools` only left them prompted, and the skill pre-approved broad
+  `Bash` grants — so the supervisor kept `Bash` and a hook (`hooks/supervisor_guard.py`,
+  matcher `Bash|Write|Edit|NotebookEdit`) now denies its Write/Edit/NotebookEdit and any
+  Bash beyond muse shims, read-only git, readers and the recorded check. The skill
+  pre-approves only read-only status/doctor shims and readers.
+- **A SubagentStop block plus a PostToolUse census for the central claim** (Refs #40).
+  SessionEnd output is discarded, so leftover worktrees were reported to nobody, and the
+  stop check never matched the supervisor's agent type. SubagentStop now matches
+  `^muse:muse-supervisor$` and blocks (at most twice per task) a supervisor that stops
+  with no verdict, PostToolUse on `Agent` tells the orchestrator where the on-disk
+  artifacts disagree with the summary, SessionEnd is removed, and the SessionStart
+  preflight names recorded muse/ and fleet/ worktrees still open.
+- **Fleet supervisors run as muse-supervisor, and unverified tasks are counted from disk**
+  (Refs #44). The workflow spawned supervisors without the agent type, trusted each
+  supervisor's self-reported verified flag, and interpolated briefs into double-quoted
+  shell; the census now reads each `task.json`, and briefs and checks travel via files.
+- **Shims on PATH with narrow grants** (Refs #42). `bin/` ships `muse-ask`,
+  `muse-cleanup`, `muse-doctor`, `muse-fleet`, `muse-model`, `muse-status` and
+  `muse-task`; docs and grants name them bare.
+- **An offline stub round trip against a moving base branch** (Refs #32), so diffing
+  against a ref name can no longer silently stand in for the pinned sha.
+- **`scripts/mutate.sh` plants each known bug and fails when a must-kill one survives**
+  (Refs #32).
+- **A frontmatter checker with a probe self-test, and a pinned CI toolchain**
+  (Refs #34). `claude plugin validate --strict` catches YAML parse errors only
+  (measured on 2.1.280), so `scripts/check_frontmatter.py` holds keys and value types;
+  CI installs the CLI at `MIN_CLAUDE_VERSION`, pins actions by SHA, and runs shellcheck
+  at severity=error.
+- **A doc-claims check holds prose counts against the code** (Refs #47).
+  `tests/test_doc_claims.sh` fails when a command, shim, auto-triggering surface, flag
+  or hook event is added without updating the prose — each with a probe proving the
+  failure names the planted defect.
+
+### Changed
+
+- **userConfig refuses bad values and reaches every driver** (Refs #41). Unparseable
+  values were silently replaced by defaults, and some keys never reached fleet, ask or
+  the workflow. Every driver now refuses before spawning, all five keys reach task,
+  fleet, ask and the supervised workflow as flags, worktree roots resolve against the
+  repo and refuse one inside it, and doctor reports each value with its source. Each
+  script resolves flag first, then `CLAUDE_PLUGIN_OPTION_<KEY>`, then the default, and
+  refuses a set-but-invalid value rather than falling back.
+- **The credential scan covers exactly what the worker receives** (Refs #39). It missed
+  dotfiles, used narrow patterns, and scanned a different directory than the worker
+  started in; one scan now covers `git ls-files` plus seeded and linked paths and the
+  gitignored files of the worker's start directory, and all three drivers honour it.
+- **The token diet** (Refs #47). The supervisor agent's description carried three
+  `<example>` blocks (~600 always-on tokens) and invited auto-triggering, which the docs
+  never intended. It is now a two-line description; the skill description is trimmed to
+  about half with every trigger cue and exclusion kept. Always-on falls from ~1,202 to
+  ~564 tokens, against the 750 ceiling.
+- **The Windows Git Bash leg is blocking** (Refs #32). It runs the same free offline
+  suite; the tests stub their host dependencies instead of asserting the runner's
+  health, strip CR from Python output, resolve executables through `shutil.which`, and
+  kill the whole tree on timeout.
+
+### Fixed
+
+- **Worktree safety: cleanup, harvest, resolution, collisions** (Refs #36, Refs #35,
+  Refs #45, Refs #46). Cleanup could delete the repo, human worktrees and unharvested
+  work; harvest dropped tracked build files and binaries and mishandled nested
+  excludes; `--out` and the repo resolved against the cwd instead of the owning
+  repository; fleet never checked branch or patch collisions. Each now refuses or
+  resolves correctly, with an offline reproduction ending in the data intact.
+- **Robustness: bytes, signals and round-in-flight** (Refs #37, Refs #38). Non-UTF-8
+  worker or check output raised after the round ran but before it was recorded, so the
+  round never counted; a signal left the worker running under a reaped worktree; a
+  second round could start on the same task. Output is bytes-safe with the round
+  recorded before fingerprinting, signals kill the process tree, and a marker answers
+  `round_in_flight` while the worker lives.
+- **Test and CI integrity: count guard, mutate.sh and the frontmatter checker refuse
+  what they let through** (Refs #32). A misspelled mutate id ran only the control and
+  exited 0, totals were hard-coded, a hung mutant had no timeout and a crash counted as
+  killed; the count guard counted skips; the stamp guard grepped instead of parsing.
+
+### Corrected
+
+Claims in 1.3.0 that were false, corrected here rather than silently edited there:
+
+- The **SessionEnd** hook reported open worktrees to nobody — SessionEnd output is
+  discarded — and is removed in favour of the SessionStart leftover report (Refs #40).
+- **SubagentStop** plain output never reached the orchestrator; the hook now blocks, and
+  the PostToolUse census carries the report (Refs #40).
+- The 1.3.0 note that the validator rejects `options` on userConfig does not hold on
+  2.1.280, which accepts it; `plugin.json` now uses `options` on `default_effort`
+  (Refs #41).
+- `model: haiku` on the reporting commands (Refs #29) is unverified: headless runs of
+  `/muse:model` and `/muse:status` ran on the session model. The frontmatter is left as
+  is, and the claim is stated plainly as unverified rather than delivered.
+- `SKILL.md` said six commands and lists seven; the Running-it table and the details
+  section pointed at `references/workflow.md` as the workflow script, which that file
+  says it is not; `--out` was said to resolve against the agent's cwd, when it resolves
+  against the owning repository; and the docs said one auto-triggering surface where
+  there are three — one skill, the supervisor agent, the registered workflow
+  (Refs #47).
+
 ## [1.3.0] - 2026-09-22
 
 Epic #7: an adversarial review found the plugin's central claim — *`accept` means a

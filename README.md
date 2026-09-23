@@ -84,7 +84,9 @@ toolset enforced this would be the more comfortable sentence and the false one.
 ```
 
 Requires the Muse Code CLI (`muse`) on `PATH`, plus `git`, Python 3.9+ and Claude Code.
-CI exercises Python 3.9, 3.11 and 3.13 on Linux; development is on macOS.
+CI exercises Python 3.9, 3.11 and 3.13 on Linux, plus a blocking Windows Git Bash leg
+(`.github/workflows/validate.yml` job "offline suite (windows)"); development is on
+macOS.
 
 **Then start a new session** (or `/clear`). Plugin commands, skills and agents register at
 session start, so `/muse:*` will not exist in the session you installed from. This is the
@@ -112,23 +114,41 @@ root is writable — with a fix on every failing line.
 | `/muse:model` | Which contributor model delegation will use |
 | `/muse:cleanup` | Reap worktrees, branches and artifacts a run left behind |
 
-Three surfaces can fire without a slash command: the `muse-fleet` skill, the
-`muse-supervisor` agent (its description says when to trigger), and the registered
-workflow, which appears in the skill list as `muse:muse-supervised-fleet`. Called without
-`job`/`stamp`, or with unsafe values, the workflow returns `{refused:true, reason}` and
-spawns no agent. Every `/muse:*` command stays opt-in — and `/muse:cleanup` guessing that
-you meant it would remove worktrees.
+Three surfaces can fire without a slash command: (1) the `muse-fleet` skill, which
+fires on its description; (2) the `muse-supervisor` agent, which the main agent can pick
+through the Agent tool on its description, which now describes rather than invites —
+`/muse:delegate` and the `muse-supervised-fleet` workflow spawn it by type; and (3) the
+registered workflow, listed as `muse:muse-supervised-fleet`, which on an inferred trigger
+must state its plan and cost and get a yes first. Called without `job`/`stamp`, or with
+unsafe values, the workflow returns `{refused:true, reason}` and spawns no agent. Every
+`/muse:*` command stays opt-in — and `/muse:cleanup` guessing that you meant it would
+remove worktrees.
 
-Three hooks, all silent unless they have something to say: **SessionStart** warns when
-delegation would fail (no binary, no credentials, a muse version this plugin has not been
-verified against), **SubagentStop** reports what a finished task's artifacts say where
-they disagree with the supervisor's summary, and **SessionEnd** names delegation
-worktrees still holding unapplied patches.
+Four hook events are registered, all exec-form, and none adds model context cost unless
+it speaks: **SessionStart** (`hooks/preflight.sh`) warns when delegation would fail (no
+binary, no credentials, an unverified muse version), and through
+`hooks/leftover_worktrees.py` names recorded muse/ and fleet/ worktrees still open with
+their verdict — SessionStart stdout reaches the model;
+**SubagentStop**, matcher `^muse:muse-supervisor$` (`hooks/supervisor_stop.py`), blocks a
+supervisor that stops while the task it owns has no verdict, giving at most two blocks per
+task before letting it go; **PostToolUse** on `Agent` (`hooks/supervisor_result.py`) tells
+the orchestrator where the on-disk artifacts disagree with a returning supervisor's
+summary; **PreToolUse**, matcher `Bash|Write|Edit|NotebookEdit`
+(`hooks/supervisor_guard.py`), denies the muse-supervisor agent's Write/Edit/NotebookEdit
+and any Bash beyond muse-* shims, read-only git, readers and the recorded check, and
+prints nothing on allow.
 
 The `muse-fleet` skill also triggers on its own when a job obviously wants fan-out — a
 phrasing like *"this is a lot of grunt work"*, *"don't burn my tokens on this"*, *"farm
 this out"*, or naming Muse Code directly. The explicit commands are more reliable;
 natural language is the convenience path.
+
+### What's on PATH
+
+The plugin's `bin/` holds seven shims — `muse-ask`, `muse-cleanup`, `muse-doctor`,
+`muse-fleet`, `muse-model`, `muse-status` and `muse-task` — on PATH while the plugin is
+enabled. Each one execs its script under `scripts/`, so docs and grants name them bare
+(`muse-task`, never `scripts/muse_task.py`).
 
 ### Writing a delegation that comes back right
 
@@ -188,7 +208,8 @@ itself*, and it is applied to itself:
 
 - **A free offline suite** — `bash scripts/validate.sh --offline` spawns no muse, needs no
   credentials, and runs in seconds. CI runs it on every pull request across three Python
-  versions.
+  versions, plus a blocking Windows Git Bash leg (`.github/workflows/validate.yml` job
+  "offline suite (windows)").
 - **A paid live suite** — the full `bash scripts/validate.sh` drives real muse runs through
   the fleet, the supervised loop, seeding, re-run safety and session resume.
 - **Every guard is negative-controlled.** A check that inspects nothing passes exactly like
@@ -243,6 +264,16 @@ plugin did before there was any configuration — skip every prompt and nothing 
 | **Model** | `latest-contributor`, resolved from muse's catalog at run time. Pin `muse-spark-1.3` for proprietary code. |
 
 Every flag still overrides the configured value for one run.
+
+How the values travel: Claude Code substitutes `${user_config.KEY}` into the command,
+agent and skill bodies, and those pass each value as a CLI flag
+(`--effort`, `--max-rounds`, `--model`, `--worktree-root`, `--refuse-on-secrets`).
+The workflow gets them as args instead.
+Each script then resolves flag first, then `CLAUDE_PLUGIN_OPTION_<KEY>`, then the
+default — see `option_with_source` in `scripts/muse_core.py` — and refuses a
+set-but-invalid value rather than falling back.
+`default_effort` now carries `options` in `.claude-plugin/plugin.json`, and
+`/muse:doctor` reports each value with its source.
 
 ## Guardrails
 
