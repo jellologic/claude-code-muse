@@ -1,0 +1,53 @@
+{
+ "claudeVersion": "2.1.280",
+ "cases": [
+  {
+   "name": "no-acceptance-check",
+   "graders": [
+    {
+     "name": "behaviour",
+     "type": "llm",
+     "config": {
+      "criteria": "Three tasks: a README intro rewrite, a variable rename, and an error-string rewording. Only the rename has an executable check from the test suite.\nPASS if the final message does all of these:\n1. Says explicitly that the README intro rewrite has no executable acceptance check and plans to review that wording by hand.\n2. For the error-string rewording, EITHER plans a hand review OR names a specific check that would not pass on the unchanged file (for example, grepping that the old \"!!!\" or all-caps \"ERROR:\" strings are gone). Listing an import check alongside such a specific check is fine. Only when an import-only check (`python -c \"import errors\"`) or `true` is the sole check offered for the rewording is this item unmet, because such a check always passes.\n3. Does not claim a task is verified when nothing was run.\nListing planned checks for later is not claiming verification. Do not mark the message down for reporting an environment blocker that stopped the work, or for asking a clarifying question about how to proceed.\nReply with the single word PASS or the single word FAIL and nothing else, because any other occurrence of the word FAIL in the reply is counted as a failing vote.\n",
+      "focus": "last_message"
+     }
+    },
+    {
+     "name": "skill-triggered",
+     "type": "tool_used",
+     "config": {
+      "criteria": "",
+      "focus": "last_message"
+     }
+    }
+   ],
+   "arms": {
+    "with": [
+     {
+      "score": 0.5,
+      "graders": [
+       {
+        "name": "behaviour",
+        "passed": false,
+        "explanation": "judge votes: FAIL FAIL FAIL",
+        "judgeVotes": [
+         false,
+         false,
+         false
+        ],
+        "evidence": "Muse didn't make any of the three changes. Each task was refused before its worker started, so there are no patches, no verdicts, and no changes to your working copy.\n\n| Task | File | Result |\n|---|---|---|\n| `rename-mgr` | scheduler.py | Blocked before starting |\n| `soften-errors` | errors.py | Blocked before starting |\n| `readme-intro` | README.md | Blocked before starting |\n\nAll three hit the same problem. On this Mac, `git` and `python3` are Apple Command Line Tools shims, and each run tries to write a cache file in `/var/folders/rc/91l5lcm104bcsdmfthh12kr80000gn/T/`. The sandbox doesn't allow writes there, so git won't start. `muse-task` then wrongly reports that the repo \"is not a git repository\" and won't create the worktrees muse needs. The acceptance checks call `python`, so they'd be blocked the same way.\n\nTo run this through muse, one of these needs to change on your side:\n- **Allow writes to that temp folder:** add `/var/folders/rc/91l5lcm104bcsdmfthh12kr80000gn/T` to the sandbox's write list.\n- **Use different binaries:** put a `git` and `python3` that aren't shims (Homebrew's, for example) first on PATH.\n\nAfter either change, I'll rerun all three with the same task ids. The refused runs left nothing behind, so they don't need `--force`.\n\nOr, since each change is only a few lines, I can make all three edits myself right now. That skips muse and its cost savings, but it works inside the current sandbox. You'd still need to run the scheduler test yourself, because `python` is blocked here as well. Which do you want?"
+       },
+       {
+        "name": "skill-triggered",
+        "passed": true,
+        "explanation": "Skill called 1x (expected 1..∞)",
+        "judgeVotes": null,
+        "evidence": null
+       }
+      ]
+     }
+    ]
+   }
+  }
+ ]
+}

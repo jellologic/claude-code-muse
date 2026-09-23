@@ -160,6 +160,43 @@ skill-not-triggered grader is unchanged. With the branches named,
 behaviour PASS x3 and skill-not-triggered passed (Skill called 0x) in the
 recorded run.
 
+On a macOS host the eval sandbox also blocks the agent from running
+the Command Line Tools themselves: `git` and `python3` are xcrun
+shims, and cases whose behaviour needs them (no-acceptance-check
+delegates to muse, which needs git) can end with the agent reporting
+an environment blocker instead of doing the work.
+
+The measured evidence: the w13 final-tree run (CLI 2.1.280,
+2026-09-23) scored no-acceptance-check 0.5 with judge votes FAIL
+FAIL FAIL, because the final message was a blocker report
+("couldn't create cache file ... xcrun_db ... (errno=Operation not
+permitted)"). An env-based workaround was then measured and
+rejected: the agent's Bash does not inherit the operator PATH
+(`which muse` resolved to `~/.local/bin/muse`, not the stub),
+redirecting xcrun's cache still left `Failed to locate 'git'`
+from `xcode-select`, and `ls
+/Library/Developer/CommandLineTools/usr/bin/git` returned
+"Operation not permitted". Do not add git/python3 shims or
+cache-redirect env files.
+
+Linux is the reference host for those cases:
+`.github/workflows/evals.yml` runs on `ubuntu-latest`, which has a
+real git and python3 and no xcrun.
+
+How the rewritten no-acceptance-check criterion treats a blocker
+report: reporting a blocker, asking a clarifying question or
+offering to make the edits directly is not in itself a reason to
+fail, but it passes only if the message still meets items 1 and 2
+(it says what would check the README and errors.py tasks). A
+blocker report with no check plan fails. Validated by exact-prompt
+replay with `evals/_lib/judge_replay.py`: the saved w13 evidence
+got FAIL 6/6, the positive control (blocker plus plan) got PASS
+3/3, and three negative controls got FAIL 3/3 each (a verification
+claim with nothing run, `true`/import-only checks reported as
+verified, a plan relying on `true`/import-only). The replay of the
+saved evidence is held offline by `tests/test_eval_envblock.sh`
+against `tests/fixtures/eval_nac_w13_report.json`.
+
 ## How to add a case
 
 1. Create `evals/<name>/` with `case.yaml` (schema below), `prompt.md`
