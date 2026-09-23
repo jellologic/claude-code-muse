@@ -203,7 +203,7 @@ def git(repo: Path, *args: str, **kw) -> str:
     return r.stdout.strip()
 
 
-def drop_worktree(repo: Path, wt: Path, branch: str) -> None:
+def drop_worktree(repo: Path, wt: Path, branch: str, force_branch: bool = True) -> None:
     """Tear down a worktree and its branch, tolerating every half-state git can leave.
 
     A branch cannot be deleted while some worktree still has it checked out, and a
@@ -223,7 +223,8 @@ def drop_worktree(repo: Path, wt: Path, branch: str) -> None:
             subprocess.run(["git", "-C", str(repo), "worktree", "remove", "--force", path],
                            capture_output=True)
     subprocess.run(["git", "-C", str(repo), "worktree", "prune"], capture_output=True)
-    subprocess.run(["git", "-C", str(repo), "branch", "-D", branch], capture_output=True)
+    subprocess.run(["git", "-C", str(repo), "branch",
+                    "-D" if force_branch else "-d", branch], capture_output=True)
 
 
 def seed_worktree(repo: Path, wt: Path, copies, links):

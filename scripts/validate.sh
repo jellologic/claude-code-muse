@@ -73,7 +73,7 @@ PASS=0; FAIL=0; SKIP=0
 # compares PASS+FAIL against this, so a removed block lowers the tally. Skips do
 # not count -- a SKIP is a check that did not run, and counting it lets a machine
 # without node stay green with fewer executed checks.
-EXPECTED_OFFLINE=199
+EXPECTED_OFFLINE=229
 
 ok()   { PASS=$((PASS+1)); printf '  \033[32mPASS\033[0m  %s\n' "$1"; }
 bad()  { FAIL=$((FAIL+1)); printf '  \033[31mFAIL\033[0m  %s\n' "$1"; [ -n "${2:-}" ] && echo "        $2"; }
@@ -1223,6 +1223,7 @@ git -C "$SC" branch --format='%(refname:short)' | grep -q '^fleet/s/c$' \
   && ok "cleanup --all reaps the rest" || bad "worktrees left after --all"
 [ ! -d "$SC/.muse-fleet" ] \
   && ok "cleanup --artifacts removes the artifact root" || bad "artifact root survived"
+. "$SKILL/tests/test_cleanup.sh"
 
 # Fixed scratch paths collide between users on a shared host and can be pre-created as
 # symlinks before the suite writes them. LAB is already a mktemp dir; everything scratch

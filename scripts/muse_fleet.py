@@ -171,6 +171,12 @@ def run_task(task: dict, repo: Path, out: Path, args) -> dict:
     if args.commit and rec["patch_lines"]:
         core.commit_worktree(wt, f"muse({tid}): {(rec['summary'] or tid)[:70]}")
 
+    # A failed harvest means the work exists only in the worktree: reporting
+    # "completed" would let cleanup reap a tree whose patch was never saved.
+    if h["harvest_error"] and rec["status"] == "completed":
+        rec["status"] = "harvest_failed"
+        rec["reason"] = ("harvest failed ({}); the work exists only in "
+                         "worktree {}".format(h["harvest_error"], wt))
     # muse_status and muse_cleanup both key on state.json/task.json. Without them a
     # fleet's worktrees are unreapable (cleanup sees no record and refuses as
     # "unfinished") and status reports this path as having produced nothing at all.
@@ -183,7 +189,8 @@ def run_task(task: dict, repo: Path, out: Path, args) -> dict:
         "rounds": [{"n": 1, "kind": "initial", "status": rec.get("status"),
                     "resumed": False}],
         "verifications": [],
-        "done": True,
+        "done": not bool(rec.get("harvest_error")),
+        "harvest_error": rec.get("harvest_error"),
         "verdict": None,
         "final_patch_lines": rec.get("patch_lines", 0),
         "final_files_changed": rec.get("files_changed") or [],
@@ -199,8 +206,12 @@ def run_task(task: dict, repo: Path, out: Path, args) -> dict:
         "unsupervised": True,
     }, indent=2), encoding="utf-8")
 
-    if args.cleanup:
+    # Never sweep a worktree whose harvest failed under --cleanup: the patch was
+    # never saved, so the tree is the only copy of the work.
+    if args.cleanup and not rec.get("harvest_error"):
         drop_worktree(repo, wt, branch)
+    elif args.cleanup and rec.get("harvest_error"):
+        rec["kept_worktree"] = True
     return rec
 
 
