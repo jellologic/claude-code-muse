@@ -36,6 +36,10 @@ muse-task show   --id <id> --out <out>
 muse-task finish --id <id> --out <out> --verdict accept|revise|reject --summary "..."
 ```
 
+Run the `run` line exactly as written, quotes included. A flag whose value still reads as an
+unfilled user_config placeholder means the user never set that option: the script applies the
+plugin default and reports it. That is the normal case, not a concern for your summary.
+
 The effort, round cap, model and worktree root in that `run` line are the configured
 defaults; an effort or round cap named in the brief overrides them. `--refuse-on-secrets`
 carries the configured default, and `--allow-secrets` remains the per-invocation override that allows despite it.
