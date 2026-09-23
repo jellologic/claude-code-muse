@@ -1,0 +1,103 @@
+#!/bin/sh
+# Offline stand-in for the muse CLI, used only by the eval suite.
+#
+# The operator puts this dir on PATH from their own shell
+# (PATH="$PWD/evals/_lib/bin:$PATH"), because case.yaml `execution.env`
+# accepts only EVAL_* keys. Nothing in production reads this dir: the stub
+# reaches the agent through the operator's PATH, exactly like a real install.
+# It never touches the network: --version answers locally and `exec` edits
+# the handed workspace and emits a terminal record.
+set -eu
+
+if [ "${1:-}" = "--version" ]; then
+  # Read the floor from the one place the value lives, so this can never
+  # drift behind scripts/muse_core.py (preflight compares major.minor).
+  core="$(dirname "$0")/../../../scripts/muse_core.py"
+  ver=""
+  if [ -f "$core" ]; then
+    ver="$(sed -n 's/^MUSE_TESTED_VERSION = "\(.*\)"/\1/p' "$core")"
+  fi
+  if [ -z "$ver" ]; then
+    echo "eval stub muse: cannot read MUSE_TESTED_VERSION from $core" >&2
+    exit 1
+  fi
+  echo "muse $ver"
+  exit 0
+fi
+
+if [ "${1:-}" != "exec" ]; then
+  echo "eval stub muse: $* is not emulated" >&2
+  exit 1
+fi
+
+# muse_core always hands a --workspace; the prompt arrives either through
+# --prompt-file (prompts over 16 KiB) or inline after `--`. Collect both.
+ws=""
+pf=""
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "--workspace" ]; then
+    ws="$a"
+  elif [ "$prev" = "--prompt-file" ]; then
+    pf="$a"
+  fi
+  prev="$a"
+done
+# Native Windows paths (C:\...) reach here untouched: normalise so the
+# workspace check and the file writes below work on either separator.
+ws="$(printf '%s' "$ws" | tr '\\' '/')"
+pf="$(printf '%s' "$pf" | tr '\\' '/')"
+if [ -z "$ws" ] || [ ! -d "$ws" ]; then
+  echo "eval stub muse: $* is not emulated" >&2
+  exit 1
+fi
+
+text=""
+if [ -n "$pf" ] && [ -f "$pf" ]; then
+  text="$(cat "$pf" 2>/dev/null || true)"
+fi
+# The inline prompt follows `--`; it carries the same words when there is
+# no prompt file, so scan it too. Only positional tail words are prompt
+# text — flags before `--` are muse's own, never the brief.
+seen_dashdash=0
+for a in "$@"; do
+  if [ "$seen_dashdash" = "1" ]; then
+    text="$text $a"
+  elif [ "$a" = "--" ]; then
+    seen_dashdash=1
+  fi
+done
+
+# First tests/test_<name>.py the brief names decides the edit, so one stub
+# round writes exactly one file and the harvested patch stays attributable.
+target="$(printf '%s' "$text" | grep -oE 'tests/test_[A-Za-z0-9_]+\.py' | head -1 || true)"
+if [ -n "$target" ]; then
+  name="$(printf '%s' "$target" | sed -n 's|^tests/test_\(.*\)\.py$|\1|p')"
+  mkdir -p "$ws/tests"
+  # The repo root goes on sys.path first: without it `import <name>` fails
+  # from tests/ (script dir shadows it), and `import parser` would resolve
+  # to the py3.9 stdlib module of that name instead of the fixture.
+  cat > "$ws/$target" <<EOF
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import $name
+
+
+def test_imports():
+    assert $name is not None
+
+
+if __name__ == "__main__":
+    test_imports()
+    print("ok")
+EOF
+  what="wrote $target"
+else
+  printf 'eval stub change\n' >> "$ws/EVAL_STUB_CHANGES.md"
+  what="appended EVAL_STUB_CHANGES.md"
+fi
+printf '{"payload":{"kind":"run_terminal","terminal":"completed","text":"eval stub: %s"}}\n' "$what"
+exit 0

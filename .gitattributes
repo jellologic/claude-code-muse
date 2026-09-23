@@ -1,1 +1,3 @@
 bin/* text eol=lf
+evals/_lib/bin/* text eol=lf
+evals/**/*.sh text eol=lf

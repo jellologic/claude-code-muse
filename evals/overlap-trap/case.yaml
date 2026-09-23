@@ -1,0 +1,11 @@
+schema_version: "1.1"
+name: overlap-trap
+description: Three overlapping edits to one file must not be fanned out blindly.
+tags: [positive]
+runs: 3
+context:
+  scaffold_script: scaffold.sh
+execution:
+  max_turns: 15
+  timeout_seconds: 600
+  allowed_tools: [Read, Glob, Grep, Skill, Bash, Edit, Write, Agent, Workflow]

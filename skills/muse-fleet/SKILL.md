@@ -3,11 +3,14 @@ name: muse-fleet
 description: >-
   Delegate several independent mechanical edits to Muse Code (`muse exec`)
   workers in isolated git worktrees, each supervised until its patch is right.
-  Repetitive refactors or tests across many files, naming Muse Code or `muse exec`,
-  offloading to a cheaper model, fan-out, grunt work or "don't burn my tokens on this".
-  Requires the `muse` binary on PATH. Not for a single coherent change, debugging,
-  design decisions, or parallelism unrelated to muse — human worktrees, Task-tool
-  subagents, background jobs.
+  Use whenever the user names Muse Code, `muse exec`, or a muse run or its
+  results — including asking to put muse on a single coherent change,
+  debugging, or design decisions (the skill tells you to push back), and
+  judging or merging the patches a muse run produced. Also for repetitive
+  refactors or tests across many files, offloading to a cheaper model,
+  fan-out to muse workers, grunt work or "don't burn my tokens on this".
+  Requires the `muse` binary on PATH. Not for parallelism unrelated to
+  muse: human git worktrees, Task-tool/Agent subagents, background jobs.
 allowed-tools: Bash(muse-status:*), Bash(muse-doctor:*), Read, Grep, Glob
 ---
 

@@ -1,6 +1,1 @@
----
-name: bulk-tests-fanout
-tags: [positive]
-runs: 3
----
 This repo has four modules with no test coverage at all: parser.py, validator.py, cache.py and retry.py. I need a pytest file for each one covering the public functions. It's a lot of grunt work and I don't want to burn my Claude limits on it — can you farm it out?
