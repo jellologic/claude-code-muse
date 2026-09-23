@@ -73,7 +73,7 @@ PASS=0; FAIL=0; SKIP=0
 # compares PASS+FAIL against this, so a removed block lowers the tally. Skips do
 # not count -- a SKIP is a check that did not run, and counting it lets a machine
 # without node stay green with fewer executed checks.
-EXPECTED_OFFLINE=361
+EXPECTED_OFFLINE=383
 
 ok()   { PASS=$((PASS+1)); printf '  \033[32mPASS\033[0m  %s\n' "$1"; }
 bad()  { FAIL=$((FAIL+1)); printf '  \033[31mFAIL\033[0m  %s\n' "$1"; [ -n "${2:-}" ] && echo "        $2"; }
@@ -236,7 +236,7 @@ PY
 # flag. The manifest default and the code default drifting apart is the silent failure --
 # the prompt would say 3 and the script would use something else.
 python3 - <<'PY' && ok "userConfig changes behaviour when set and nothing when unset" || bad "user configuration is decorative or drifts from the code"
-import importlib.util, json, os, pathlib, sys
+import importlib.util, json, os, pathlib, re, sys
 ROOT = pathlib.Path(os.environ["PLUGIN_ROOT"])
 spec = importlib.util.spec_from_file_location("mc", ROOT / "scripts/muse_core.py")
 mc = importlib.util.module_from_spec(spec); spec.loader.exec_module(mc)
@@ -276,16 +276,20 @@ try:
         src = (ROOT / "scripts/muse_task.py").read_text(encoding="utf-8")
         for key in ("max_rounds", "default_effort", "default_model", "worktree_root",
                     "refuse_on_secrets"):
-            if 'user_option("%s"' % key not in src:
+            if not re.search(r'(user_option|option_with_source)\(\s*"%s"' % key, src):
                 problems.append("%s is prompted for and never read by muse_task" % key)
 finally:
     for k in ("MAX_ROUNDS", "REFUSE_ON_SECRETS", "DEFAULT_EFFORT"):
         os.environ.pop("CLAUDE_PLUGIN_OPTION_" + k, None)
 
-# Garbage must not become behaviour.
+# Garbage must refuse, never silently become behaviour. A set-but-unusable value
+# running on the default would bill a delegation on settings nobody asked for.
 os.environ["CLAUDE_PLUGIN_OPTION_MAX_ROUNDS"] = "not-a-number"
-if mc.user_option("max_rounds", 3) != 3:
+try:
+    mc.user_option("max_rounds", 3)
     problems.append("an unparseable option value was taken as behaviour")
+except mc.ConfigError:
+    pass
 os.environ.pop("CLAUDE_PLUGIN_OPTION_MAX_ROUNDS")
 
 if problems:
@@ -510,7 +514,8 @@ def run_header(src, argv):
 
 problems = []
 for i, b in enumerate(blocks, 1):
-    ok_run = run_header(b, {"pluginRoot": "/p", "repo": "/r", "stamp": "STAMP1234"})
+    ok_run = run_header(b, {"pluginRoot": "/p", "repo": "/r", "stamp": "STAMP1234",
+                           "maxRounds": 3, "defaultEffort": "low"})
     if ok_run.returncode != 0:
         problems.append("block %d: header failed with a stamp: %s"
                         % (i, (ok_run.stderr or "").strip().splitlines()[-1][:90]))
@@ -1998,6 +2003,7 @@ sys.exit(0 if c and not any('PARTIAL' in x['value'] for x in c) else 1)" \
 . "$SKILL/tests/test_collision.sh"
 . "$SKILL/tests/test_ci_green.sh"
 . "$SKILL/tests/test_workflow.sh"
+. "$SKILL/tests/test_userconfig.sh"
 # ------------------------------------------------------------ 4. live runs
 # The guard counts itself out: no ok here, so deleting a block lowers the tally.
 offline_count_guard

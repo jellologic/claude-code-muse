@@ -91,10 +91,11 @@ EV_MODEL_ID = "model_id"
 def user_option(key, default):
     """A `userConfig` value if the runtime supplied one, else the built-in default.
 
-    The runtime exports these to HOOKS as CLAUDE_PLUGIN_OPTION_<KEY>. Whether a Bash tool
-    call in a session sees them is not documented and was not verified here, so this is a
-    fallback rather than the mechanism -- the commands and the skill pass
-    ${user_config.<key>} explicitly, which is the documented path.
+    The mechanism is Claude Code substituting ${user_config.KEY} into the agent,
+    skill and command markdown bodies (non-sensitive values), which then reach the
+    scripts as CLI flags. The CLAUDE_PLUGIN_OPTION_<KEY> environment variable is the
+    hook/test path: the runtime exports it to HOOKS, so hooks and the offline suite
+    use it to observe the same values without a live substitution.
 
     Every default below is what the plugin did before there was any configuration, so an
     install that skips the prompts behaves exactly as it used to. That is the property
@@ -104,16 +105,153 @@ def user_option(key, default):
     raw = os.environ.get("CLAUDE_PLUGIN_OPTION_" + key.upper())
     if raw is None or raw == "":
         return default
+    return coerce_option(key, raw, default)
+
+
+def option_with_source(key, cli_value, default):
+    """Resolve one userConfig key and say where the value came from.
+
+    One precedence rule for every driver: a non-empty CLI flag wins (source
+    "flag"), then a non-empty CLAUDE_PLUGIN_OPTION_<KEY> (source "env"), then
+    the built-in default (source "default"). An empty-string flag counts as not
+    given, because that is what an empty userConfig value substitutes to in the
+    supervisor's `run` line. Flag and env values are validated with
+    coerce_option, so a bad value raises ConfigError naming the key.
+    """
+    if cli_value is not None and not (isinstance(cli_value, str) and cli_value == ""):
+        return (coerce_option(key, cli_value, default), "flag")
+    env_raw = os.environ.get("CLAUDE_PLUGIN_OPTION_" + key.upper())
+    if env_raw is not None and env_raw != "":
+        return (coerce_option(key, env_raw, default), "env")
+    return (default, "default")
+
+
+def coerce_option(key, raw, default=None):
+    """Validate a userConfig value and return its coerced form, or refuse it.
+
+    Refusal is loud on purpose: silently falling back to the default when someone
+    explicitly configured a value would run their delegation on settings they did
+    not ask for, and the bill would be the first sign. Raises ConfigError naming
+    the key, the rejected value and what is allowed.
+    """
+    text = raw.strip() if isinstance(raw, str) else str(raw).strip()
+    if key == "default_effort":
+        if text in EFFORTS:
+            return text
+        raise ConfigError(
+            "userConfig default_effort={!r} is not one of: {}".format(
+                raw, ", ".join(EFFORTS)))
+    if key == "max_rounds":
+        # Digits only, matched in full: int() also accepts "+5", "1_0" and
+        # non-ASCII digits, and a float branch once accepted "5.0" — a round cap
+        # is a count, so anything that is not plain digits refuses.
+        if re.fullmatch(r"[0-9]+", text) is None:
+            raise ConfigError(
+                "userConfig max_rounds={!r} is not an integer within {}..{}".format(
+                    raw, MAX_ROUNDS_MIN, MAX_ROUNDS_MAX))
+        value = int(text)
+        if not (MAX_ROUNDS_MIN <= value <= MAX_ROUNDS_MAX):
+            raise ConfigError(
+                "userConfig max_rounds={!r} is not an integer within {}..{}".format(
+                    raw, MAX_ROUNDS_MIN, MAX_ROUNDS_MAX))
+        return value
+    if key == "refuse_on_secrets":
+        lowered = text.lower()
+        if lowered in ("true", "1"):
+            return True
+        if lowered in ("false", "0"):
+            return False
+        raise ConfigError(
+            "userConfig refuse_on_secrets={!r} is not a boolean: use true or false".format(raw))
+    if key in ("default_model", "worktree_root"):
+        return text
+    # Unknown keys keep the historical type-based behaviour, except a bad int now
+    # refuses instead of silently keeping the default.
     if isinstance(default, bool):
-        return raw.strip().lower() not in ("0", "false", "no", "off")
+        return text.lower() not in ("0", "false", "no", "off")
     if isinstance(default, int):
         try:
-            return int(raw)
+            return int(text)
         except ValueError:
-            return default
+            raise ConfigError(
+                "userConfig {}={!r} is not an integer".format(key, raw))
     return raw
 
 
+def resolve_worktree_root(repo: Path, raw) -> Path:
+    """Where task worktrees live for `repo`, honouring a configured root.
+
+    None or "" means unset, which keeps the historical default beside the repo.
+    A relative path joins against `repo`, never the cwd: the cwd resets between
+    agent tool calls, so resolving there would scatter worktrees across whatever
+    directory happened to be current. A root equal to the repo or inside it would
+    remove the isolation --untracked worktree metadata inside the checkout that
+    then shows up as dirt -- so it is refused rather than created.
+    """
+    repo = Path(repo)
+    if raw is None or (isinstance(raw, str) and raw.strip() == ""):
+        return repo.parent / ".muse-fleet-wt-{}".format(repo.name)
+    text = raw.strip() if isinstance(raw, str) else str(raw).strip()
+    candidate = Path(os.path.expanduser(text))
+    if not candidate.is_absolute():
+        candidate = repo / candidate
+    resolved = candidate.resolve()
+    # Fold case on both sides when the repo's own filesystem ignores it:
+    # realpath keeps the given case for a non-existent tail, so without the
+    # fold `/tmp/x/RepoCase` and `/tmp/x/repocase/wts` compare as unrelated on
+    # APFS and the inside-the-repo root is accepted.
+    fold = _fs_case_insensitive(repo)
+    anchored = _fs_compare_key(repo.resolve(), fold)
+    got = _fs_compare_key(resolved, fold)
+    if got == anchored or got.startswith(anchored + os.sep):
+        raise ConfigError(
+            "userConfig worktree_root={!r} resolves to {!r}, which is the repository "
+            "itself or inside it; worktrees there would dirty the checkout they are "
+            "isolated from".format(raw, str(resolved)))
+    return resolved
+
+
+def _fs_case_insensitive(directory: Path) -> bool:
+    """Whether `directory` lives on a case-insensitive filesystem, by probing it.
+
+    Platform checks lie here: macOS APFS is case-insensitive by default while
+    Linux ext4 is not, and either can be reformatted. So swap the case of the
+    deepest path component containing a letter — if the swapped spelling exists
+    and is the same directory, the filesystem folds case. A path with no letters
+    anywhere cannot be case-swapped, so treat it as case-sensitive.
+    """
+    try:
+        current = Path(os.path.realpath(directory))
+    except OSError:
+        return False
+    parts = list(current.parts)
+    for i in range(len(parts) - 1, -1, -1):
+        if any(ch.isalpha() for ch in parts[i]):
+            swapped = list(parts)
+            swapped[i] = parts[i].swapcase()
+            probe = os.path.join(*swapped)
+            try:
+                if os.path.isdir(probe) and os.path.samefile(probe, str(current)):
+                    return True
+            except OSError:
+                return False
+            return False
+    return False
+
+
+def _fs_compare_key(path: Path, fold_case: bool) -> str:
+    """The string two paths are compared by when testing containment.
+
+    realpath first so different spellings of the same directory compare equal,
+    then normcase for Windows separators, then a casefold when the caller found
+    the repo's filesystem case-insensitive.
+    """
+    key = os.path.normcase(os.path.realpath(path))
+    return key.casefold() if fold_case else key
+
+
+MAX_ROUNDS_MIN = 1
+MAX_ROUNDS_MAX = 10
 DEFAULT_EFFORT = "low"
 # Must stay below the Bash tool's 600s ceiling. Otherwise the tool kills the parent
 # mid-round and the worker outlives it. Long rounds belong in `run_in_background`.
@@ -393,6 +531,15 @@ class PreflightError(Exception):
     Raised rather than sys.exit'd so the caller can honour its own output contract --
     muse_task promises exactly one JSON object on stdout, and a bare exit leaves the
     supervisor parsing an empty stream."""
+
+
+class ConfigError(PreflightError):
+    """A userConfig value that is set but unusable.
+
+    Separate from a generic preflight failure so callers that grep for a refused
+    configuration can tell "you configured it wrong" apart from "the machine is
+    not ready". Never a silent fallback: running on defaults the user did not ask
+    for would bill them for settings they explicitly overrode."""
 
 
 # Used for a worktree directory name and a git branch component, so it has to be safe for
