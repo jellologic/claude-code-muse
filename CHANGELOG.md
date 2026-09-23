@@ -118,9 +118,13 @@ Claims in 1.3.0 that were false, corrected here rather than silently edited ther
 - The 1.3.0 note that the validator rejects `options` on userConfig does not hold on
   2.1.280, which accepts it; `plugin.json` now uses `options` on `default_effort`
   (Refs #41).
-- `model: haiku` on the reporting commands (Refs #29) is unverified: headless runs of
-  `/muse:model` and `/muse:status` ran on the session model. The frontmatter is left as
-  is, and the claim is stated plainly as unverified rather than delivered.
+- `model: haiku` on the reporting commands (Refs #29, Refs #57) is now measured on
+  2.1.280: headless runs with `--model sonnet` serve `/muse:status` from
+  claude-haiku-4-5-20251001 in default permission mode, and a `model: haiku`
+  skill control is likewise served by claude-haiku-4-5-20251001 in acceptEdits
+  and bypassPermissions modes, while auto and plan keep the session model with
+  the debug warning that names skills and commands together as one mechanism.
+  The frontmatter stays, and the runs are recorded in references/field-notes.md.
 - `SKILL.md` said six commands and lists seven; the Running-it table and the details
   section pointed at `references/workflow.md` as the workflow script, which that file
   says it is not; `--out` was said to resolve against the agent's cwd, when it resolves
