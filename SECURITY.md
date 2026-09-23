@@ -57,13 +57,18 @@ to slow down on. After a run they are also recorded in `<out>/<id>/state.json` u
   For proprietary or client-confidential code, either pass `--model muse-spark-1.3` and pay
   full rate, or do not delegate that code at all. That judgment is yours; the plugin cannot
   make it for you.
-- **It does make one part of it mechanical.** Before spawning a worker, `run` scans the
-  worktree — after seeding, so it sees the `.env` you asked it to copy — and **refuses** if
-  it finds a structurally unmistakable credential: a PEM private-key block, an AWS key id,
+- **It does make one part of it mechanical.** Before spawning a worker, `muse-task run`
+  scans the worktree — after seeding, so it sees the `.env` you asked it to copy — and
+  so does `muse-fleet` for every task worktree and `muse-ask --write` (read-only ask never
+  reaches a worker, so it does not scan). Each scan covers every file the worker could
+  read — tracked, untracked and gitignored files, including seeded files and followed
+  symlinks, with only .git pruned — and **refuses** if it finds a structurally
+  unmistakable credential: a PEM private-key block, an AWS key id,
   a GitHub/Slack/Stripe/Anthropic-format token. Credential-shaped assignments only warn,
   because blocking those would make the plugin unusable on any repo with test fixtures.
   `--allow-secrets` proceeds anyway, `--no-secret-scan` skips the check, and
-  `/muse:doctor --scan` runs it on demand. Findings record the file, line and kind and
+  `/muse:doctor --scan` runs it on demand. The scan stops at a file cap, and a truncated
+  scan says so. Findings record the file, line and kind and
   never the matched text — copying a secret into an artifact that then gets read and
   shared would defeat the point. `muse-ask` scans in both modes: a read-only worker
   can still read a secret and send it to the contributor tier.

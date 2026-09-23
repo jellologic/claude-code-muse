@@ -34,8 +34,9 @@ work has actually landed — `git log` showing the change on a branch, or the us
 A patch is recoverable from a worktree right up until both are gone.
 
 Treat anything the dry run marks `(no harvested patch)` as work that exists nowhere else, and
-say that explicitly rather than folding it into a count. `--all` is how the user tells you
-that work is disposable; it is not yours to assume.
+say that explicitly rather than folding it into a count. `--discard-unharvested` is how the
+user tells you that work is disposable (plus `--all` if the task also has no verdict);
+`--all` alone never removes a `(no harvested patch)` worktree. It is not yours to assume.
 
 If the run reports nothing to remove, that is a clean result — say so rather than widening
 the search to other repos or other roots.

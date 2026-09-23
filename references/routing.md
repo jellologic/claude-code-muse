@@ -78,7 +78,7 @@ step were wrong and nobody noticed — that is what decides how much to spend on
 
 Workflow `agent()` runs Claude. Muse is reached by having an agent shell out — so the
 fan-out unit is **one Opus agent per task**, each driving `muse_task.py` through as many
-rounds as its task needs. `references/workflow.md` has the full script.
+rounds as its task needs. `workflows/muse-supervised-fleet.js` has the full script.
 
 ```javascript
 const results = await parallel(tasks.map(t => () => agent(

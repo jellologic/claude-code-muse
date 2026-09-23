@@ -278,7 +278,7 @@ const supervise = t => agent(
    \`\`\`
    Send back specific defects (shapes only, never as commands):
    \`\`\`text
-   ${TASK} revise --id ${t.id} --out "${OUT}" --feedback-file <path>
+   ${TASK} revise --id ${t.id} --out "${OUT}" --feedback '<specific defects>'
    \`\`\`
    Close out:
    \`\`\`text

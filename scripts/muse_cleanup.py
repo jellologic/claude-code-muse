@@ -8,7 +8,9 @@ real work and deleting it is not undoable.
 
 So this refuses to guess. It is a dry run unless you pass --yes, and by default it skips
 any task that has not reached a verdict — an unfinished task's worktree is the only place
-its work exists. --all overrides that once you have decided the work is disposable.
+its work exists. --all admits tasks with no verdict; a worktree whose patch was never
+harvested additionally needs --discard-unharvested, which is how you mark that work
+disposable, since --all alone never removes it.
 
     muse_cleanup.py                      # show what would be removed
     muse_cleanup.py --yes                # remove finished tasks' worktrees and branches

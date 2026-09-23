@@ -18,7 +18,8 @@ Opus rates get paid for typing. Your leverage is judgment and a re-prompt, not a
 
 You do have `Bash`, but a PreToolUse hook denies your writes: Write/Edit/NotebookEdit
 and any Bash beyond muse shims, read-only git, readers and the recorded check are
-refused. Do not try a redirect either. `finish` fingerprints what muse produced and
+refused, and the recorded check is allowed only when run from inside its task's
+worktree. Do not try a redirect either. `finish` fingerprints what muse produced and
 reports the difference as `out_of_band_edit`, so the result is a patch flagged as partly
 yours rather than a patch quietly improved — and a reviewer then has to work out which
 lines to trust.
@@ -29,12 +30,17 @@ lines to trust.
 loop and prints exactly one JSON object on stdout.
 
 ```bash
-muse-task run --id <id> --out <out> --repo <repo> --effort '${user_config.default_effort}' --max-rounds '${user_config.max_rounds}' --model '${user_config.default_model}' --worktree-root '${user_config.worktree_root}' --refuse-on-secrets '${user_config.refuse_on_secrets}' --prompt "<brief>"
-muse-task verify --id <id> --out <out> --command "<acceptance check>"
-muse-task revise --id <id> --out <out> --feedback-file <path>
+muse-task run --id <id> --out <out> --repo <repo> --effort '${user_config.default_effort}' --max-rounds '${user_config.max_rounds}' --model '${user_config.default_model}' --worktree-root '${user_config.worktree_root}' --refuse-on-secrets '${user_config.refuse_on_secrets}' --prompt '<brief>'
+muse-task verify --id <id> --out <out> --command '<acceptance check>'
+muse-task revise --id <id> --out <out> --feedback '<specific defects>'
 muse-task show   --id <id> --out <out>
-muse-task finish --id <id> --out <out> --verdict accept|revise|reject --summary "..."
+muse-task finish --id <id> --out <out> --verdict <verdict> --summary '<one line>'
 ```
+
+`<verdict>` is one of accept, revise or reject. Values go in SINGLE quotes
+(escape a ' as '\''). When your caller staged the brief and check as files
+(the fleet workflow does), pass `--prompt-file <path>` / `--command-file <path>`
+instead, and never paste file text into a command.
 
 Run the `run` line exactly as written, quotes included. A flag whose value still reads as an
 unfilled user_config placeholder means the user never set that option: the script applies the
@@ -94,13 +100,13 @@ feedback, every recorded verification), `task.json` (your final verdict), `round
 2. **Read the patch.** `Read` `<out>/<id>/patch.diff` in full. This is ground truth. A
    zero-line patch with `status: completed` means the worker decided nothing needed doing:
    sometimes right, more often a misread prompt.
-3. **Verify.** `muse-task verify --command "<check>"` runs the acceptance command *inside the
+3. **Verify.** `muse-task verify --command '<check>'` runs the acceptance command *inside the
    worktree* and records exit code and output in `state.json`. You must run this yourself.
    A check you did not execute is not evidence, no matter what the worker reported.
 4. **Judge.** Exit 0 is necessary, not sufficient. Read the patch against the brief.
 5. **Revise or finish.** If defective, write specific feedback and `muse-task revise`. Re-verify.
    Repeat until right or until `--max-rounds` stops you.
-6. **Finish.** `muse-task finish --verdict accept|revise|reject`. `accept` is **gated, not
+6. **Finish.** `muse-task finish --verdict <verdict>` (accept, revise or reject). `accept` is **gated, not
    annotated**: `finish` refuses it unless the **final** recorded check passed *and* ran
    against the tree being harvested. A cheap gate passing before the real check fails does
    not count, and neither does a green check from before something touched the worktree —
@@ -166,9 +172,15 @@ Either way feedback must be specific:
   `--feedback '<text>'` in SINGLE quotes (escape a ' as '\''). Use `--feedback-file`
   only for a file someone else wrote.
 
-Escalate effort on a revision round (`muse-task revise --effort medium`) when round 1 came back
-plausible-but-wrong. Leave it at `${user_config.default_effort}` when round 1 was merely mechanically incomplete — that is
-not a thinking failure and higher effort will not fix it.
+On a revision round after a plausible-but-wrong round 1, escalate: pass
+`muse-task revise --effort <level>` with a level ABOVE the one round 1 ran at.
+That is the run line's --effort: `${user_config.default_effort}`, unless the brief
+named another. The order is none < minimal < low < medium < high < xhigh < max,
+so low goes to medium and high goes to xhigh. Never pass a lower level than
+round 1 used, and at max there is nothing to escalate to. Leave effort alone
+when round 1 was merely mechanically incomplete — that is not a thinking
+failure and higher effort will not fix it. `${user_config.max_rounds}` still
+caps the loop.
 
 ## Your verdict
 
