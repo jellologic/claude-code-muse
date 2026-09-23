@@ -41,8 +41,26 @@ else
   # 4. The model catalog. Its absence is not fatal: resolve_model falls back to a known-good
   #    id rather than refusing to run. But the fallback is pinned and goes stale, which is
   #    exactly the silent generation-drift the resolve-at-runtime design exists to avoid.
-  if ! grep -qs -- '-contributor' "$MUSE_DATA"/model-catalog/*.json 2>/dev/null; then
-    problems+=("muse's model catalog has no contributor models cached at $MUSE_DATA/model-catalog/ — delegation will fall back to a hardcoded model id instead of resolving the newest. Run any \`muse exec\` once to populate it.")
+  #    The glob lives in muse_core, the single source -- asking it keeps this check and
+  #    `doctor` pointed at the same files when MUSE_DATA_DIR moves them.
+  if command -v python3 >/dev/null 2>&1; then
+    CATALOG_OUT=$(python3 -c "import glob, importlib.util, os, sys; spec = importlib.util.spec_from_file_location(\"muse_core\", sys.argv[1]); mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod); print(os.path.expanduser(mod.CATALOG_GLOB)); [print(f) for f in glob.glob(os.path.expanduser(mod.CATALOG_GLOB))]" "${CLAUDE_PLUGIN_ROOT:-.}/scripts/muse_core.py" 2>/dev/null)
+    if [ -n "$CATALOG_OUT" ]; then
+      CATALOG_GLOB_RESOLVED=$(printf '%s\n' "$CATALOG_OUT" | sed -n '1p')
+      CATALOG_FILES=$(printf '%s\n' "$CATALOG_OUT" | tail -n +2)
+      CATALOG_HIT=""
+      while IFS= read -r f; do
+        if [ -n "$f" ] && grep -qs -- "-contributor" "$f" 2>/dev/null; then
+          CATALOG_HIT=1
+          break
+        fi
+      done <<CATALOG_EOF
+$CATALOG_FILES
+CATALOG_EOF
+      if [ -z "$CATALOG_HIT" ]; then
+        problems+=("muse's model catalog has no contributor models cached at $CATALOG_GLOB_RESOLVED — delegation will fall back to a hardcoded model id instead of resolving the newest. Run any \`muse exec\` once to populate it.")
+      fi
+    fi
   fi
 fi
 

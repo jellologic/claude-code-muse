@@ -107,16 +107,18 @@ def artifact_root(args) -> Path:
     reported `no_such_task`, and the supervisor's natural recovery -- `run --force` --
     discards the patch the first one had just made.
 
-    A relative `--out` resolves against the repository, which is what it is actually
-    relative to. An absolute one is untouched. Outside a repository there is nothing
-    better than the cwd, which is where this started."""
+    A relative `--out` resolves against the owning repository, which is what it is
+    actually relative to. A task worktree and a linked worktree share the owning
+    repo's common dir, so `--show-toplevel` would return the worktree itself and
+    lose the task. An absolute `--out` is untouched. Outside a repository there is
+    nothing better than the cwd, which is where this started."""
     out = Path(args.out)
     if out.is_absolute():
         return out.resolve()
     # On `run` the repository is whatever --repo names; everywhere else the only thing
     # available is the cwd, and cmd_run refuses the combination where those disagree.
     anchor = Path(getattr(args, "repo", ".") or ".")
-    top = core.git_toplevel(anchor if anchor.exists() else Path.cwd())
+    top = core.owning_repo(anchor if anchor.exists() else Path.cwd())
     return ((top or Path.cwd()) / out).resolve()
 
 
@@ -243,8 +245,8 @@ def cmd_run(args) -> int:
     # looks like a missing task rather than a mis-resolved path -- so refuse here, where
     # the absolute path to pass is still known.
     if not Path(args.out).is_absolute():
-        here = core.git_toplevel(Path.cwd())
-        there = core.git_toplevel(repo)
+        here = core.owning_repo(Path.cwd())
+        there = core.owning_repo(repo)
         if there is not None and (here is None or here.resolve() != there.resolve()):
             emit({"id": args.id, "status": "refused",
                   "reason": "--out {!r} is relative and --repo points at a different "

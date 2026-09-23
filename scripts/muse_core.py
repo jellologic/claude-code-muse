@@ -34,12 +34,14 @@ from pathlib import Path
 # what a stale `model` pin in ~/.config/muse/settings.json does.
 LATEST = "latest-contributor"
 FALLBACK_MODEL = "muse-spark-1.3-contributor"
+MUSE_DATA_DIR = os.environ.get("MUSE_DATA_DIR") or "~/.local/share/muse"
 # Overridable so model resolution can be tested anywhere, including a machine with no
 # muse install. Without a seam the only way to test it is to trust whatever catalog
 # happens to be on the host, which makes the result environment-dependent.
+# The data dir feeds the default glob so MUSE_DATA_DIR alone redirects the catalog;
+# MUSE_CATALOG_GLOB stays the explicit override seam.
 CATALOG_GLOB = os.environ.get(
-    "MUSE_CATALOG_GLOB", "~/.local/share/muse/model-catalog/*.json")
-MUSE_DATA_DIR = os.environ.get("MUSE_DATA_DIR", "~/.local/share/muse")
+    "MUSE_CATALOG_GLOB") or os.path.join(MUSE_DATA_DIR, "model-catalog", "*.json")
 
 # ---------------------------------------------------------------- muse coupling
 #
@@ -281,15 +283,20 @@ def preflight(repo: Path, require_clean: bool) -> str:
         )
 
     # Worktrees created under the repo would otherwise show up as untracked noise.
-    excl = repo / ".git" / "info" / "exclude"
+    # In a linked worktree .git is a file, so the exclude lives in the common dir,
+    # which git applies to every worktree sharing it.
+    excl = exclude_path(repo)
+    if excl is None:
+        excl = repo / ".git" / "info" / "exclude"
     try:
         cur = excl.read_text(encoding="utf-8") if excl.exists() else ""
         add = [p for p in (".muse/", ".muse-fleet/") if p not in cur]
         if add:
             excl.parent.mkdir(parents=True, exist_ok=True)
             excl.write_text(cur.rstrip("\n") + "\n" + "\n".join(add) + "\n", encoding="utf-8")
-    except OSError:
-        pass
+    except OSError as e:
+        print("muse: could not update {} ({}); later runs may be refused as dirty".format(
+            excl, e), file=sys.stderr)
 
     try:
         return git(repo, "rev-parse", "HEAD")
@@ -375,6 +382,54 @@ def git_toplevel(start: Path):
         return None
     top = (r.stdout or "").strip()
     return Path(top) if r.returncode == 0 and top else None
+
+
+def _git_abs_path(start: Path, *revparse_args: str):
+    """Resolve one `git rev-parse` path to absolute, or None outside a repo.
+
+    Newer git prints absolute paths with `--path-format=absolute`; older git
+    ignores the flag and prints a relative path, which is relative to the cwd
+    git ran in, so join it onto `start`. Retrying without the flag covers git
+    too old to accept it. `.resolve()` matters because macOS /var is a symlink
+    to /private/var, so unresolved paths compare unequal."""
+    for flag in (("--path-format=absolute",), ()):
+        try:
+            r = subprocess.run(
+                ["git", "-C", str(start), "rev-parse", *flag, *revparse_args],
+                capture_output=True, text=True)
+        except OSError:
+            return None
+        if r.returncode != 0:
+            continue
+        out = (r.stdout or "").strip()
+        if not out:
+            continue
+        p = Path(out)
+        if not p.is_absolute():
+            p = start / p
+        return p.resolve()
+    return None
+
+
+def owning_repo(start: Path):
+    """The main checkout owning `start`, or None if `start` is not in a git repo.
+
+    A task worktree and a linked worktree share the owning repo's common dir,
+    so `--show-toplevel` would return the worktree itself and lose the task.
+    When the common dir's basename is `.git` its parent is the main checkout;
+    otherwise (bare repo, submodule, `--separate-git-dir`) fall back to
+    `git_toplevel`."""
+    common = _git_abs_path(start, "--git-common-dir")
+    if common is None:
+        return None
+    if common.name == ".git":
+        return common.parent
+    return git_toplevel(start)
+
+
+def exclude_path(repo: Path):
+    """The `info/exclude` file git actually consults for `repo`, or None."""
+    return _git_abs_path(repo, "--git-path", "info/exclude")
 
 
 def session_workspace(session_id: str):

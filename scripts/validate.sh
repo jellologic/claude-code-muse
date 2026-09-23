@@ -73,7 +73,7 @@ PASS=0; FAIL=0; SKIP=0
 # compares PASS+FAIL against this, so a removed block lowers the tally. Skips do
 # not count -- a SKIP is a check that did not run, and counting it lets a machine
 # without node stay green with fewer executed checks.
-EXPECTED_OFFLINE=229
+EXPECTED_OFFLINE=237
 
 ok()   { PASS=$((PASS+1)); printf '  \033[32mPASS\033[0m  %s\n' "$1"; }
 bad()  { FAIL=$((FAIL+1)); printf '  \033[31mFAIL\033[0m  %s\n' "$1"; [ -n "${2:-}" ] && echo "        $2"; }
@@ -1841,6 +1841,7 @@ HS2=$(echo '{}' | CLAUDE_PROJECT_DIR="$HK" python3 "$SKILL/hooks/supervisor_stop
 [ -z "$HS2" ] && ok "SubagentStop is silent when the artifacts are clean" \
   || bad "SubagentStop speaks on a clean run" "$HS2"
 . "$SKILL/tests/test_preflight.sh"
+. "$SKILL/tests/test_worktree_resolution.sh"
 
 head_ "3c. Data-loss and process guards"
 
