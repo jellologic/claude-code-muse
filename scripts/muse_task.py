@@ -98,6 +98,54 @@ def emit(obj: dict) -> None:
     print(json.dumps(obj, indent=2))
 
 
+def marker_live(m) -> bool:
+    """Whether a round_in_flight marker names a worker that is still running."""
+    if not isinstance(m, dict) or not isinstance(m.get("pid"), int):
+        return False
+    if not core.HAVE_PROCESS_GROUPS:
+        # No signal-0 probe there, and os.kill on Windows TERMINATES the process.
+        return False
+    try:
+        os.kill(m["pid"], 0)
+        return True
+    except PermissionError:
+        return True
+    except ProcessLookupError:
+        pass
+    except OSError:
+        return False
+    pgid = m.get("pgid")
+    if isinstance(pgid, int):
+        try:
+            os.killpg(pgid, 0)
+            return True
+        except PermissionError:
+            return True
+        except (ProcessLookupError, OSError):
+            pass
+    return False
+
+
+def refuse_if_in_flight(tdir: Path, st: dict) -> bool:
+    """Refuse to start a second worker while the recorded round is still alive."""
+    m = st.get("round_in_flight")
+    if not m:
+        return False
+    if marker_live(m):
+        emit({"id": st["id"], "status": "round_in_flight",
+              "pid": m.get("pid"), "pgid": m.get("pgid"), "started": m.get("started"),
+              "reason": ("a muse round is still running in this worktree (pid {})"
+                         "; starting another would put two workers in one tree and one "
+                         "session. Wait for it, or kill that process group, then retry."
+                         .format(m.get("pid")))})
+        return True
+    st.pop("round_in_flight", None)
+    save_state(tdir, st)
+    print("muse_task[{}]: cleared a stale round_in_flight marker".format(st["id"]),
+          file=sys.stderr)
+    return False
+
+
 def artifact_root(args) -> Path:
     """Where `<out>/<id>/` lives, resolved so it does not move with the cwd.
 
@@ -169,8 +217,37 @@ def do_round(st: dict, tdir: Path, prompt: str, args, kind: str,
         "resumed" if resumed else ("new" if resumed is None else "NOT RESUMED")),
         file=sys.stderr)
 
-    res = core.run_muse(cmd, prompt, repo, rdir / "events.jsonl",
-                        rdir / "stderr.log", int(st.get("timeout") or core.DEFAULT_TIMEOUT))
+    def on_spawn(p):
+        st["round_in_flight"] = {
+            "pid": p.pid,
+            "pgid": p.pid if core.HAVE_PROCESS_GROUPS else None,
+            "started": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+        }
+        save_state(tdir, st)
+
+    try:
+        res = core.run_muse(cmd, prompt, repo, rdir / "events.jsonl",
+                            rdir / "stderr.log",
+                            int(st.get("timeout") or core.DEFAULT_TIMEOUT),
+                            on_spawn=on_spawn)
+    except BaseException:
+        # The round spent money and touched the tree, so it must count against
+        # max_rounds. Stdout must still carry one JSON object.
+        reason = ("supervisor received a termination signal; "
+                  "the worker's process group was killed")
+        rnd = {"n": n, "kind": kind, "status": "interrupted", "reason": reason,
+               "session_id": st.get("session_id"), "resumed": bool(resumed),
+               "patch_lines": 0, "files_changed": [],
+               "events": str(rdir / "events.jsonl"),
+               "stderr": str(rdir / "stderr.log")}
+        st.pop("round_in_flight", None)
+        st["rounds"].append(rnd)
+        save_state(tdir, st)
+        emit({"id": st["id"], "round": n, "kind": kind, "status": "interrupted",
+              "reason": reason, "worktree": st["worktree"],
+              "rounds_used": n,
+              "rounds_left": max(0, int(st["max_rounds"]) - n)})
+        raise
 
     rnd = {
         "n": n, "kind": kind, "status": res["status"], "reason": res["reason"],
@@ -204,6 +281,7 @@ def do_round(st: dict, tdir: Path, prompt: str, args, kind: str,
     if h["harvest_error"]:
         rnd["harvest_error"] = h["harvest_error"]
 
+    st.pop("round_in_flight", None)
     st["rounds"].append(rnd)
     save_state(tdir, st)
 
@@ -290,6 +368,17 @@ def cmd_run(args) -> int:
                         "mid-write. Inspect or remove it, or pass --force to start over "
                         "(which discards any patch already harvested there)."
                         .format(state_path(tdir))})
+        return 1
+    if isinstance(prior, dict) and marker_live(prior.get("round_in_flight")):
+        # Even with --force: it force-removes the worktree a live worker is writing
+        # into. A stale marker needs no action: run replaces the state.
+        m = prior.get("round_in_flight")
+        emit({"id": args.id, "status": "round_in_flight",
+              "pid": m.get("pid"), "pgid": m.get("pgid"), "started": m.get("started"),
+              "reason": ("a muse round is still running in this worktree (pid {})"
+                         "; starting another would put two workers in one tree and one "
+                         "session. Wait for it, or kill that process group, then retry."
+                         .format(m.get("pid")))})
         return 1
     if prior is not None and not args.force:
         emit({
@@ -487,6 +576,8 @@ For reference, the original brief was:
 def cmd_revise(args) -> int:
     tdir = task_dir(args)
     st = load_state(tdir)
+    if refuse_if_in_flight(tdir, st):
+        return 1
     if st.get("done"):
         emit({"id": st["id"], "status": "refused",
               "reason": "task already finished. Start a fresh attempt with a new --id, or "
@@ -775,6 +866,7 @@ def cmd_cleanup(args) -> int:
 # --------------------------------------------------------------------- main
 
 def main() -> int:
+    core.install_signal_handlers()
     ap = argparse.ArgumentParser(
         description="One muse task in a persistent worktree, driven round by round.")
     sub = ap.add_subparsers(dest="cmd", required=True)

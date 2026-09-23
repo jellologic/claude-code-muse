@@ -231,6 +231,7 @@ def new_stamp() -> str:
 # ---------------------------------------------------------------------- main
 
 def main() -> int:
+    core.install_signal_handlers(interrupt=True)
     ap = argparse.ArgumentParser(description="Fan work out to concurrent Muse Code instances.")
     ap.add_argument("--tasks", required=True, help="JSON file: list of {id, prompt, ...}")
     ap.add_argument("--repo", default=".")

@@ -25,6 +25,7 @@ import re
 import shutil
 import signal
 import subprocess
+import threading
 import uuid
 import sys
 from pathlib import Path
@@ -113,7 +114,9 @@ def user_option(key, default):
 
 
 DEFAULT_EFFORT = "low"
-DEFAULT_TIMEOUT = 900
+# Must stay below the Bash tool's 600s ceiling. Otherwise the tool kills the parent
+# mid-round and the worker outlives it. Long rounds belong in `run_in_background`.
+DEFAULT_TIMEOUT = 540
 EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
 
 # Junk an agent creates while verifying its work. Harvesting with `git add -A` sweeps
@@ -625,6 +628,55 @@ def scan_secrets(root: Path, max_files: int = SCAN_MAX_FILES):
 HAVE_PROCESS_GROUPS = (hasattr(os, "killpg") and hasattr(os, "getpgid")
                        and hasattr(signal, "SIGKILL"))
 
+# Popen objects of running muse children. A plain list, mutated only with
+# append/remove, which are atomic under the GIL. No Lock: the signal handler runs on
+# the main thread and may interrupt code holding such a lock, which deadlocks. The
+# handler reads a snapshot _LIVE[:].
+_LIVE = []
+_SHUTDOWN = threading.Event()
+
+
+def _signal_group(p) -> None:
+    """SIGKILL the child's process group without waiting.
+
+    The pgid equals p.pid because of start_new_session=True. Do not call getpgid:
+    the pid may already be reaped. Never calls p.wait(): Popen's internal
+    _waitpid_lock is not re-entrant, and the main thread may be inside p.wait()
+    when the signal lands.
+    """
+    if HAVE_PROCESS_GROUPS:
+        try:
+            os.killpg(p.pid, signal.SIGKILL)
+        except OSError:
+            pass
+    else:
+        try:
+            p.kill()
+        except OSError:
+            pass
+
+
+def install_signal_handlers(interrupt=False) -> None:
+    """Forward termination signals to every running muse child, then die loudly.
+
+    With interrupt=True the handler raises KeyboardInterrupt; otherwise it raises
+    SystemExit(128 + signum).
+    """
+    for name in ("SIGTERM", "SIGINT", "SIGHUP"):
+        if not hasattr(signal, name):
+            continue
+        signum = getattr(signal, name)
+
+        def _handler(sig, _frame, _signum=signum, _interrupt=interrupt):
+            _SHUTDOWN.set()
+            for child in _LIVE[:]:
+                _signal_group(child)
+            if _interrupt:
+                raise KeyboardInterrupt
+            raise SystemExit(128 + _signum)
+
+        signal.signal(signum, _handler)
+
 
 def muse_version():
     """The version string `muse --version` reports, or None if it cannot be obtained.
@@ -699,7 +751,8 @@ def kill_process_tree(p) -> None:
         pass
 
 
-def run_muse(cmd, prompt: str, repo: Path, events: Path, stderr: Path, timeout: int):
+def run_muse(cmd, prompt: str, repo: Path, events: Path, stderr: Path, timeout: int,
+             on_spawn=None):
     """Run one muse round to completion. Returns a dict of what the event stream said.
 
     Run from the repo root, not the worktree: muse treats cwd as the source repository
@@ -708,6 +761,12 @@ def run_muse(cmd, prompt: str, repo: Path, events: Path, stderr: Path, timeout: 
     started = _time.time()
     out = {"status": "completed", "reason": None, "model_actual": None,
            "text": "", "elapsed_s": 0.0, "exit_code": None, "stderr_tail": ""}
+
+    if _SHUTDOWN.is_set():
+        out["status"] = "interrupted"
+        out["reason"] = "not started: the parent received a termination signal"
+        out["elapsed_s"] = round(_time.time() - started, 1)
+        return out
 
     events.parent.mkdir(parents=True, exist_ok=True)
     with events.open("w", encoding="utf-8") as fo, stderr.open("w", encoding="utf-8") as fe:
@@ -720,14 +779,37 @@ def run_muse(cmd, prompt: str, repo: Path, events: Path, stderr: Path, timeout: 
         exe = shutil.which(cmd[0]) or cmd[0]
         p = subprocess.Popen([exe, *cmd[1:], prompt], cwd=str(repo), stdout=fo, stderr=fe,
                              text=True, start_new_session=True)
+        _LIVE.append(p)
         try:
-            p.wait(timeout=timeout)
-            out["exit_code"] = p.returncode
-        except subprocess.TimeoutExpired:
-            kill_process_tree(p)
-            out["status"] = "timeout"
-            out["reason"] = "exceeded {}s".format(timeout)
+            # A signal may have arrived between the shutdown check and the spawn; the
+            # handler cannot see a child it does not know about, so re-check now that
+            # the child is registered.
+            if _SHUTDOWN.is_set():
+                _signal_group(p)
+            try:
+                if on_spawn:
+                    on_spawn(p)
+                p.wait(timeout=timeout)
+                out["exit_code"] = p.returncode
+            except subprocess.TimeoutExpired:
+                kill_process_tree(p)
+                out["status"] = "timeout"
+                out["reason"] = "exceeded {}s".format(timeout)
+            except BaseException:
+                # The handler already SIGKILLed the group; reap it here, outside the
+                # handler, where blocking is safe.
+                kill_process_tree(p)
+                raise
+        finally:
+            try:
+                _LIVE.remove(p)
+            except ValueError:
+                pass
     out["elapsed_s"] = round(_time.time() - started, 1)
+    if _SHUTDOWN.is_set():
+        out["status"] = "interrupted"
+        out["reason"] = ("the parent received a termination signal; "
+                         "the worker's process group was killed")
 
     # muse's exit code and stderr are the only things that distinguish an unknown flag
     # from a bad model id from an expired credential -- and every one of those used to
@@ -739,7 +821,7 @@ def run_muse(cmd, prompt: str, repo: Path, events: Path, stderr: Path, timeout: 
         tail = ""
     out["stderr_tail"] = tail[-2000:].strip()
 
-    if out["status"] == "timeout":
+    if out["status"] in ("timeout", "interrupted"):
         return out
 
     # run_terminal is the single authoritative record; everything else is noise.

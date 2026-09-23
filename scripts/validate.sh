@@ -73,7 +73,7 @@ PASS=0; FAIL=0; SKIP=0
 # compares PASS+FAIL against this, so a removed block lowers the tally. Skips do
 # not count -- a SKIP is a check that did not run, and counting it lets a machine
 # without node stay green with fewer executed checks.
-EXPECTED_OFFLINE=237
+EXPECTED_OFFLINE=246
 
 ok()   { PASS=$((PASS+1)); printf '  \033[32mPASS\033[0m  %s\n' "$1"; }
 bad()  { FAIL=$((FAIL+1)); printf '  \033[31mFAIL\033[0m  %s\n' "$1"; [ -n "${2:-}" ] && echo "        $2"; }
@@ -1844,6 +1844,7 @@ HS2=$(echo '{}' | CLAUDE_PROJECT_DIR="$HK" python3 "$SKILL/hooks/supervisor_stop
 . "$SKILL/tests/test_worktree_resolution.sh"
 
 head_ "3c. Data-loss and process guards"
+. "$SKILL/tests/test_signals.sh"
 
 # harvest ignored git's exit status, so a missing worktree or a held index.lock
 # overwrote a good patch.diff with an empty file and reported "no changes".
