@@ -112,9 +112,12 @@ root is writable — with a fix on every failing line.
 | `/muse:model` | Which contributor model delegation will use |
 | `/muse:cleanup` | Reap worktrees, branches and artifacts a run left behind |
 
-Only the `muse-fleet` skill fires on its own; every `/muse:*` command is opt-in, because
-one carefully-scoped auto-triggering surface beats eight competing for the same prompts —
-and `/muse:cleanup` guessing that you meant it would remove worktrees.
+Three surfaces can fire without a slash command: the `muse-fleet` skill, the
+`muse-supervisor` agent (its description says when to trigger), and the registered
+workflow, which appears in the skill list as `muse:muse-supervised-fleet`. Called without
+`job`/`stamp`, or with unsafe values, the workflow returns `{refused:true, reason}` and
+spawns no agent. Every `/muse:*` command stays opt-in — and `/muse:cleanup` guessing that
+you meant it would remove worktrees.
 
 Three hooks, all silent unless they have something to say: **SessionStart** warns when
 delegation would fail (no binary, no credentials, a muse version this plugin has not been

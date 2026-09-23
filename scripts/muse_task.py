@@ -358,6 +358,19 @@ def cmd_run(args) -> int:
                             "no_such_task. Pass --out {}."
                             .format(args.out, (there / args.out).resolve())})
             return 1
+    if args.prompt_file:
+        # Read before preflight spawns or writes anything: a missing file refuses the
+        # same way a dirty repo does, with one JSON object on stdout, mirroring
+        # --feedback-file in cmd_revise (which needs no such guard -- the task exists
+        # by then and main() already guarantees JSON on a raise).
+        try:
+            args.prompt = Path(args.prompt_file).read_text(
+                encoding="utf-8", errors="replace")
+        except OSError as e:
+            emit({"id": args.id, "status": "refused",
+                  "reason": "--prompt-file {!r} is not readable ({}).".format(
+                      args.prompt_file, e)})
+            return 1
     try:
         core.validate_task_id(args.id)
         head = core.preflight(repo, require_clean=not args.allow_dirty)
@@ -643,6 +656,24 @@ def cmd_verify(args) -> int:
         emit({"id": st["id"], "status": "worktree_missing", "passed": False,
               "reason": "worktree {} is gone".format(wt)})
         return 1
+    if args.command_file:
+        # Read here, after the state is loaded so the refusal can name the task: the
+        # recorded `command` below is then the file's text, not its path, so status
+        # and finish keep showing the real check.
+        try:
+            args.command = Path(args.command_file).read_text(
+                encoding="utf-8", errors="replace")
+        except OSError as e:
+            emit({"id": st["id"], "status": "refused", "passed": False,
+                  "reason": "--command-file {!r} is not readable ({}).".format(
+                      args.command_file, e)})
+            return 1
+        # Exactly one trailing newline: the file was written with one, and the check
+        # as recorded should match what --command would have carried.
+        if args.command.endswith("\r\n"):
+            args.command = args.command[:-2]
+        elif args.command.endswith("\n"):
+            args.command = args.command[:-1]
 
     tail = lambda s: s[-args.max_output:] if len(s) > args.max_output else s
     fp = lambda: core.patch_fingerprint(wt, harvest_base(st), st["excludes"])
@@ -875,7 +906,12 @@ def main() -> int:
 
     p = sub.add_parser("run", help="create the worktree and run muse once")
     common(p)
-    p.add_argument("--prompt", required=True)
+    # Mutually exclusive: a long brief pasted through --prompt crosses a shell quoting
+    # boundary twice, so --prompt-file carries it as bytes instead.
+    pg = p.add_mutually_exclusive_group(required=True)
+    pg.add_argument("--prompt", default=None)
+    pg.add_argument("--prompt-file", default=None,
+                    help="read the brief from a file (avoids shell-quoting a long brief)")
     p.add_argument("--repo", default=".")
     # Defaults come from userConfig where the runtime supplied it, and are otherwise
     # exactly what they have always been -- an install that skipped the prompts must
@@ -920,7 +956,12 @@ def main() -> int:
 
     p = sub.add_parser("verify", help="run the acceptance command inside the worktree")
     common(p)
-    p.add_argument("--command", required=True)
+    # Mutually exclusive, like --prompt/--prompt-file above: a model-written check
+    # interpolated into --command crosses a shell boundary, so --command-file does not.
+    cg = p.add_mutually_exclusive_group(required=True)
+    cg.add_argument("--command", default=None)
+    cg.add_argument("--command-file", default=None,
+                    help="read the acceptance command from a file (avoids shell-quoting)")
     p.add_argument("--timeout", type=int, default=600)
     p.add_argument("--max-output", type=int, default=4000,
                    help="truncate captured output to this many chars")
