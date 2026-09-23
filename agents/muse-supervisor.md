@@ -81,6 +81,12 @@ and is not what that stops.
 `verify --timeout <s>` kills the whole process group, not just the shell it started, so a
 hung build leaves nothing behind writing into a worktree you are about to reap.
 
+`run`/`revise` default to a 540s round timeout, below the Bash tool's 600s limit, and
+longer rounds (`--timeout` above 540) should be launched with `run_in_background`.
+Killing muse_task kills the worker's process group and records the round as
+`interrupted`. `revise`/`run` return `status: round_in_flight` while a previous
+round's worker is still alive. Wait instead of retrying.
+
 A round that comes back `status: no_terminal` failed on muse's side, not on the work. The
 round carries `exit_code` and `stderr_tail` — read them before doing anything else. An
 unknown flag, a bad model id and an expired credential are three different problems and

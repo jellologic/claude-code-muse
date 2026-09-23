@@ -147,13 +147,21 @@ fi
 # leaves its `sleep` running, and an orphaned watchdog would still fire later against a
 # PID the kernel has since recycled. INT/TERM matter as much as EXIT -- those are the
 # paths where the watchdog would otherwise outlive the script.
+PID=""
 cleanup() {
   if [[ -n "${WATCHDOG:-}" ]]; then
     kill -- -"$WATCHDOG" 2>/dev/null || kill "$WATCHDOG" 2>/dev/null
   fi
   rm -f "$EVENTS"
 }
-trap cleanup EXIT INT TERM
+# Signal the muse group BEFORE cleanup kills the watchdog: muse runs --yolo in its
+# own process group, so killing only the watchdog left it running unbounded. The
+# explicit exit stops the script from falling through to parse a half-written file.
+on_signal() { if [[ -n "${PID:-}" ]]; then kill -9 -- -"$PID" 2>/dev/null || kill -9 "$PID" 2>/dev/null; fi; cleanup; trap - EXIT; exit "$1"; }
+trap cleanup EXIT
+trap 'on_signal 130' INT
+trap 'on_signal 143' TERM
+trap 'on_signal 129' HUP
 
 # Printed so a follow-up is possible: pass it back with --session to continue this
 # conversation instead of re-explaining the context. stderr, so it never pollutes the
