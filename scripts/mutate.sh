@@ -1,0 +1,256 @@
+#!/usr/bin/env bash
+# Mutation harness for the offline suite (issue #32).
+#
+# How much the suite actually catches is measured, not claimed: this script plants
+# each known bug one at a time into a scratch copy of HEAD and runs
+# `bash scripts/validate.sh --offline` against it. A mutant the suite still passes
+# has "survived"; one that makes it fail is "killed".
+#
+# Every mutant is checked statically before anything runs. A mutant whose snippet no
+# longer matches HEAD exactly once is STALE -- a guard that cannot fire -- so the run
+# fails up front instead of spending minutes on validates that prove nothing.
+set -uo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Later PRs append their fixed mutant ids here as their checks land, and never remove
+# one, so a regression that re-opens a once-killed hole fails the run again.
+MUST_KILL="M03 M04 M13 M17"
+if [ -n "${MUTATE_MUST_KILL:-}" ]; then
+  # Self-tests stage a failing run through the environment without touching this file.
+  echo "mutate: MUST_KILL overridden by environment: $MUTATE_MUST_KILL" >&2
+  MUST_KILL="$MUTATE_MUST_KILL"
+fi
+
+JOBS="${MUTATE_JOBS:-4}"
+
+mutants() {
+python3 - "$@" <<'PY'
+import sys
+
+M = [
+ ("M00", "scripts/muse_task.py", 'def harvest_base(st: dict) -> str:', 'def harvest_base(st: dict) -> str:  # mutate.sh control: comment only', "control: comment-only change, suite must stay green"),
+ ("M01", "scripts/muse_task.py", '    h = core.harvest(wt, harvest_base(st), st["excludes"], tdir / "patch.diff")', '    h = core.harvest(wt, st["base"], st["excludes"], tdir / "patch.diff")', "round harvest diffs against the ref name, not base_sha"),
+ ("M02", "scripts/muse_fleet.py", '        base = git(repo, "rev-parse", "--verify", base).strip() or base', '        base = base', "fleet never pins the base to a sha"),
+ ("M03", "scripts/muse_task.py", '    verified = passed and certified', '    verified = passed', "accept gate ignores certification"),
+ ("M04", "scripts/muse_task.py", '        if scan["certain"] and not args.allow_secrets:', '        if scan["certain"] and args.allow_secrets:', "secret refusal inverted"),
+ ("M05", "scripts/muse_core.py", '        for name in filenames:', '        for name in [n for n in filenames if not n.startswith(".")]:', "secret scan skips dotfiles, so .env is never scanned"),
+ ("M06", "hooks/supervisor_stop.py", '        print("  - " + n)', '        print("  - " + n, file=sys.stderr)', "SubagentStop hook writes to stderr instead of stdout"),
+ ("M07", "hooks/supervisor_stop.py", '        if task.get("verdict") == "accept" and not task.get("verified_by_supervisor"):', '        if False:', 'SubagentStop drops the "accepted without a passing check" note'),
+ ("M08", "scripts/muse_task.py", '        "max_rounds": args.max_rounds,', '        "max_rounds": DEFAULT_MAX_ROUNDS,', "--max-rounds parsed but a constant stored"),
+ ("M09", "hooks/preflight.sh", '  if [ ! -s "$MUSE_CONFIG/auth.json" ]; then', '  if [ -s "$MUSE_CONFIG/auth.json" ]; then', "preflight auth check inverted"),
+ ("M10", "hooks/session_end.py", 'OURS = re.compile(r"^refs/heads/(muse|fleet)/")', 'OURS = re.compile(r"^refs/heads/(muse)/")', "SessionEnd ignores fleet/ worktrees"),
+ ("M11", "scripts/muse_cleanup.py", '    if rp == cwd or rp in cwd.parents:', '    if False:', "cleanup stops refusing the cwd or its ancestors"),
+ ("M12", "scripts/muse_task.py", '    if used >= int(st["max_rounds"]):', '    if used > int(st["max_rounds"]):', "round breaker off by one (>= changed to >)"),
+ ("M13", "scripts/muse_task.py", '        core.kill_process_tree(p)', '        p.kill()', "verify timeout kills only the shell"),
+ ("M14", "scripts/muse_doctor.py", '    note = core.version_mismatch(core.muse_version())', '    note = None', "doctor never compares the muse version"),
+ ("M15", "scripts/muse_ask.sh", '\' "$SKILL_DIR/scripts/muse_core.py" 2>/dev/null)"', '\' "$SKILL_DIR/muse_core.py" 2>/dev/null)"', "muse_ask.sh points at the wrong muse_core.py"),
+ ("M16", "scripts/muse_status.py", '        out.append("last check exited {}".format(r["last_exit"]))', '        pass', 'status drops the "last check exited N" flag'),
+ ("M17", "scripts/muse_core.py", '    raw = os.environ.get("CLAUDE_PLUGIN_OPTION_" + key.upper())', '    raw = os.environ.get("CLAUDE_PLUGIN_OPTION_" + key)', "userConfig env var name case bug"),
+]
+
+def lookup(mid):
+    for (i, f, old, new, _d) in M:
+        if i == mid:
+            return (f, old, new)
+    return None
+
+cmd = sys.argv[1]
+if cmd == "ids":
+    for (i, _f, _o, _n, _d) in M:
+        print(i)
+elif cmd == "desc":
+    row = lookup(sys.argv[2])
+    if row is not None:
+        for (i, _f, _o, _n, d) in M:
+            if i == sys.argv[2]:
+                print(d)
+elif cmd == "check":
+    root = sys.argv[2]
+    bad = 0
+    for (i, f, old, new, _d) in M:
+        try:
+            text = open(root + "/" + f, encoding="utf-8").read()
+        except OSError:
+            print("STALE %s: %s missing" % (i, f))
+            bad = 1
+            continue
+        n = text.count(old)
+        if n != 1:
+            print("STALE %s: snippet found %d times in %s, want exactly 1" % (i, n, f))
+            bad = 1
+        elif old == new:
+            print("STALE %s: replacement is identical to the original" % i)
+            bad = 1
+    sys.exit(1 if bad else 0)
+elif cmd == "apply":
+    mid = sys.argv[2]
+    root = sys.argv[3]
+    row = lookup(mid)
+    if row is None:
+        print("STALE %s: unknown mutant id" % mid)
+        sys.exit(3)
+    (f, old, new) = row
+    try:
+        text = open(root + "/" + f, encoding="utf-8").read()
+    except OSError:
+        print("STALE %s: %s missing" % (mid, f))
+        sys.exit(3)
+    if text.count(old) != 1 or old == new:
+        print("STALE %s: snippet no longer applies cleanly to %s" % (mid, f))
+        sys.exit(3)
+    open(root + "/" + f, "w", encoding="utf-8").write(text.replace(old, new, 1))
+else:
+    print("unknown mutants subcommand: %s" % cmd)
+    sys.exit(2)
+PY
+}
+
+run_one() {  # run_one <id>: plant one mutant, run the suite, record the verdict
+  id="$1"
+  d="$WORK/$id"
+  mkdir -p "$d/tree" "$d/tmp"
+  tar -x -C "$d/tree" -f "$WORK/head.tar"
+  if ! mutants apply "$id" "$d/tree" >"$d/apply.log" 2>&1; then
+    # Unreachable when the static check passed, but every selected id needs a
+    # verdict file or the report below would misread a missing one as a survivor.
+    echo "stale" > "$d/verdict"
+    return 0
+  fi
+  # Each validate gets its own TMPDIR so parallel runs never share a LAB, and an
+  # emptied MUSE_FLEET_LAB so validate mktemps a fresh one inside it; the EXIT trap
+  # reaps the whole WORK tree afterwards.
+  if TMPDIR="$d/tmp" MUSE_FLEET_LAB= bash "$d/tree/scripts/validate.sh" --offline >"$d/log" 2>&1; then
+    echo "survived" > "$d/verdict"
+  else
+    echo "killed" > "$d/verdict"
+  fi
+}
+
+MODE="run"
+if [ "${1:-}" = "--check" ]; then
+  MODE="check"
+fi
+
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/musemutate.XXXXXX")"
+# Every path below is built from WORK, so a failed mktemp must stop here instead of
+# scattering mutant trees across whatever the empty string resolves to.
+if [ -z "$WORK" ] || [ ! -d "$WORK" ]; then
+  echo "mutate: cannot create scratch dir" >&2
+  exit 2
+fi
+cleanup() {
+  # An orphan left by a mutant that disables process-tree kill keeps writing into
+  # its tmp dir after its validate has exited, so one rm races it and leaves the
+  # whole WORK tree behind; retry a few times, then name the leftover path.
+  n=0
+  rm -rf "$WORK" 2>/dev/null || true
+  while [ -e "$WORK" ] && [ "$n" -lt 5 ]; do
+    sleep 1
+    rm -rf "$WORK" 2>/dev/null || true
+    n=$((n+1))
+  done
+  if [ -e "$WORK" ]; then
+    echo "mutate: warning: could not remove scratch dir $WORK" >&2
+  fi
+}
+if [ -n "${MUTATE_KEEP:-}" ]; then
+  # Keep the mutant trees around for inspection after the run.
+  echo "work: $WORK"
+else
+  trap cleanup EXIT
+fi
+
+# Mutate the committed HEAD, never the working tree, so results reproduce from a
+# clean checkout instead of depending on whatever happens to be uncommitted.
+if [ -n "$(git -C "$REPO" status --porcelain)" ]; then
+  echo "mutate: warning: uncommitted changes are NOT in what gets mutated (HEAD snapshot)" >&2
+fi
+git -C "$REPO" archive HEAD > "$WORK/head.tar"
+
+mkdir -p "$WORK/check"
+tar -x -C "$WORK/check" -f "$WORK/head.tar"
+CHECK_RC=0
+CHECK_OUT="$(mutants check "$WORK/check" 2>&1)" || CHECK_RC=$?
+if [ "$CHECK_RC" -ne 0 ]; then
+  # A stale mutant is a guard that cannot fire: fail before running anything,
+  # because a green run past this point would prove nothing.
+  [ -n "$CHECK_OUT" ] && printf '%s\n' "$CHECK_OUT"
+  exit 1
+fi
+
+if [ "$MODE" = "check" ]; then
+  # Fast guard only: proves the harness can still fire, runs no validate.
+  echo "mutate: all 18 mutants apply cleanly"
+  exit 0
+fi
+
+# MUTATE_ONLY filters the run to a few ids. M00 always stays: every other verdict is
+# meaningless if the unmutated suite is not green, so the control gates everything.
+ONLY=" $(printf '%s' "${MUTATE_ONLY:-}" | tr ',' ' ') "
+IDS=""
+for id in $(mutants ids); do
+  if [ "$id" = "M00" ]; then
+    IDS="$IDS $id"
+  elif [ -z "${MUTATE_ONLY:-}" ]; then
+    IDS="$IDS $id"
+  else
+    case "$ONLY" in
+      *" $id "*) IDS="$IDS $id" ;;
+    esac
+  fi
+done
+
+export -f run_one mutants
+export WORK
+# Word-splitting IDS here is the point: one id per xargs line, run in parallel.
+# shellcheck disable=SC2086
+printf '%s\n' $IDS | xargs -P "$JOBS" -I{} bash -c 'run_one "$1"' _ {}
+
+ESC="$(printf '\033')"
+KILLED=0
+for id in $IDS; do
+  verdict="$(cat "$WORK/$id/verdict" 2>/dev/null || echo MISSING)"
+  desc="$(mutants desc "$id")"
+  line="$id  $verdict  $desc"
+  if [ "$verdict" = "killed" ]; then
+    if [ "$id" != "M00" ]; then
+      KILLED=$((KILLED+1))
+    fi
+    fail="$(grep -m1 FAIL "$WORK/$id/log" 2>/dev/null | sed "s/${ESC}\[[0-9;]*m//g" || true)"
+    [ -n "$fail" ] && line="$line  $fail"
+  fi
+  printf '%s\n' "$line"
+done
+
+CONTROL="green"
+if [ "$(cat "$WORK/M00/verdict" 2>/dev/null || echo MISSING)" != "survived" ] \
+    || ! grep -q " 0 failed" "$WORK/M00/log" 2>/dev/null; then
+  # The control must both exit 0 and report zero failures: a passing exit with a
+  # skipped or miscounted suite would otherwise certify every mutant below it.
+  CONTROL="RED"
+fi
+printf 'killed %d of 17 (M00 control: %s)\n' "$KILLED" "$CONTROL"
+
+RC=0
+if [ "$CONTROL" != "green" ]; then
+  echo "mutate: control M00 did not stay green" >&2
+  RC=1
+fi
+for id in $IDS; do
+  if [ "$(cat "$WORK/$id/verdict" 2>/dev/null || echo MISSING)" = "stale" ]; then
+    cat "$WORK/$id/apply.log" 2>/dev/null || true
+    RC=1
+  fi
+done
+for id in $MUST_KILL; do
+  case " $IDS " in
+    *" $id "*) ;;
+    *) continue ;;
+  esac
+  if [ "$(cat "$WORK/$id/verdict" 2>/dev/null || echo MISSING)" != "killed" ]; then
+    echo "MUST_KILL $id survived"
+    RC=1
+  fi
+done
+exit "$RC"
