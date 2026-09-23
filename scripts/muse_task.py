@@ -435,34 +435,17 @@ def cmd_run(args) -> int:
         emit({"id": args.id, "status": "refused",
               "reason": "--base {!r} does not resolve to a commit".format(base)})
         return 1
-    # A re-run of the same id must not inherit the previous attempt's tree. But dropping
-    # unconditionally ends in `git branch -D`, which discards unmerged commits without
-    # asking -- and this branch name can collide with one that is not ours (same --id and
-    # --stamp under a different --out, or any pre-existing branch of that name).
-    collides = core.git(repo, "rev-parse", "--verify", "--quiet", branch,
-                        check=False).strip()
     ours = bool(prior) and prior.get("branch") == branch
-    if collides and not ours and not args.force:
-        emit({"id": args.id, "status": "refused",
-              "reason": "branch {} already exists and was not created by this task. "
-                        "Removing it would discard any unmerged commits on it. Use a "
-                        "different --id or --branch-prefix, or pass --force."
-                        .format(branch),
-              "branch": branch})
-        return 1
-    # The branch check above catches a name collision, and it is not the same question.
-    # A live worktree can sit at this path under a DIFFERENT branch -- another run with
-    # --branch-prefix, a branch someone renamed, a stamp passed in explicitly -- and
-    # drop_worktree would force-remove it along with whatever was in flight there.
-    # Refuse instead; with an entropic stamp reaching this means two runs really are
-    # sharing a namespace.
-    if wt.exists() and any(wt.iterdir()) and not args.force:
-        emit({"id": args.id, "status": "refused",
-              "reason": "worktree {} already exists and is not empty. Something else is "
-                        "probably using this --worktree-root; removing it would destroy "
-                        "that run's in-flight work. Use a different --id or "
-                        "--worktree-root, or pass --force.".format(wt),
-              "worktree": str(wt)})
+    hit = None if args.force else core.collision(repo, wt, branch, ours_branch=ours)
+    if hit:
+        rec = {"id": args.id, "status": "refused",
+               "reason": hit["reason"] + " Use a different --id or "
+                         "--branch-prefix/--worktree-root, or pass --force."}
+        if hit["kind"] == "branch":
+            rec["branch"] = branch
+        elif hit["kind"] == "worktree":
+            rec["worktree"] = str(wt)
+        emit(rec)
         return 1
     core.drop_worktree(repo, wt, branch)
     try:

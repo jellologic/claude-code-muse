@@ -117,12 +117,15 @@ def run_task(task: dict, repo: Path, out: Path, args) -> dict:
     # Refuse rather than force-remove if something is already there. With a unique run
     # stamp this should be impossible, so reaching it means two runs are sharing a
     # namespace -- almost certainly the same explicit --out -- and the existing tree is
-    # another run's live work.
-    if wt.exists() and any(wt.iterdir()):
+    # another run's live work. The shared check also covers a committed branch or a
+    # harvested patch left by an earlier run of this --out, which dropping would reset
+    # and overwrite.
+    hit = core.collision(repo, wt, branch, patch=tdir / "patch.diff")
+    if hit:
         rec["status"] = "setup_failed"
-        rec["reason"] = ("worktree {} already exists and is not empty. Another fleet is "
-                         "probably using this --out; removing it would destroy that run's "
-                         "in-flight work.".format(wt))
+        rec["reason"] = (hit["reason"] + " This --out was used before; use a fresh "
+                         "--out (or omit it), or apply/copy the patch and remove the "
+                         "branch/patch first.")
         return rec
     drop_worktree(repo, wt, branch)
     try:
