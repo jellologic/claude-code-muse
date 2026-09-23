@@ -825,6 +825,15 @@ SCAN_MAX_BYTES = 1_000_000     # a file larger than this is not hand-written con
 SCAN_MAX_FILES = int(os.environ.get("MUSE_SCAN_MAX_FILES", "20000"))
 
 
+class ScanError(Exception):
+    """The credential scan could not run because the file listing is unknown.
+
+    Not a PreflightError: callers fail closed on it (refuse the task) rather
+    than treating it as a misconfigured value. Kept separate so --allow-secrets
+    (which waives a confirmed credential) cannot waive an unknown tree.
+    """
+
+
 def worker_files(root) -> list:
     """Everything a process whose cwd is `root` can read.
 
@@ -838,6 +847,12 @@ def worker_files(root) -> list:
         r = subprocess.run(
             ["git", "-C", str(root), "ls-files", "-z", "--cached", "--others"],
             capture_output=True, timeout=30)
+    except subprocess.TimeoutExpired:
+        # No fallback to the whole directory: that would scan an unknown set of
+        # files and report a clean verdict on it. The caller fails closed.
+        raise ScanError(
+            "git ls-files timed out after 30s listing {}, so what the worker "
+            "can read is unknown and the credential scan could not run".format(root))
     except OSError:
         return [Path(root)]
     if r.returncode != 0:
@@ -938,7 +953,15 @@ def preflight_secrets(paths, opts):
                 "files_scanned": 0, "truncated": False, "reason": None}
     certain, possible, scanned, truncated = [], [], 0, False
     for root in paths or []:
-        r = scan_secrets(root)
+        try:
+            r = scan_secrets(root)
+        except ScanError as e:
+            # Fail closed even when allow_secrets is true: that flag waives a
+            # confirmed credential, not delegation without a scan.
+            return {"refuse": True, "skipped": False, "certain": certain,
+                    "possible": possible, "files_scanned": scanned,
+                    "truncated": truncated,
+                    "reason": "{}; pass --no-secret-scan to skip the scan".format(e)}
         certain += r["certain"]
         possible += r["possible"]
         scanned += r["files_scanned"]

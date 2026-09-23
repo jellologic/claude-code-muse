@@ -44,7 +44,13 @@ else
   #    The glob lives in muse_core, the single source -- asking it keeps this check and
   #    `doctor` pointed at the same files when MUSE_DATA_DIR moves them.
   if command -v python3 >/dev/null 2>&1; then
+    # A missing python3 or an unloadable muse_core.py must still be said once, under
+    # the same header: without either, the catalog was not checked, and the silence
+    # below would otherwise read as "everything is fine".
     CATALOG_OUT=$(python3 -c "import glob, importlib.util, os, sys; spec = importlib.util.spec_from_file_location(\"muse_core\", sys.argv[1]); mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod); print(os.path.expanduser(mod.CATALOG_GLOB)); [print(f) for f in glob.glob(os.path.expanduser(mod.CATALOG_GLOB))]" "${CLAUDE_PLUGIN_ROOT:-.}/scripts/muse_core.py" 2>/dev/null | tr -d '\r')
+    if [ -z "$CATALOG_OUT" ]; then
+      problems+=("could not load ${CLAUDE_PLUGIN_ROOT:-.}/scripts/muse_core.py with python3 — the model catalog check was skipped; reinstall the plugin or run /muse:doctor.")
+    fi
     if [ -n "$CATALOG_OUT" ]; then
       CATALOG_GLOB_RESOLVED=$(printf '%s\n' "$CATALOG_OUT" | sed -n '1p')
       CATALOG_FILES=$(printf '%s\n' "$CATALOG_OUT" | tail -n +2)
@@ -61,6 +67,8 @@ CATALOG_EOF
         problems+=("muse's model catalog has no contributor models cached at $CATALOG_GLOB_RESOLVED — delegation will fall back to a hardcoded model id instead of resolving the newest. Run any \`muse exec\` once to populate it.")
       fi
     fi
+  else
+    problems+=("python3 is not on PATH — the model catalog check was skipped, and muse-task / muse-fleet cannot run without it.")
   fi
 fi
 

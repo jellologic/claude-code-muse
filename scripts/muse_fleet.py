@@ -404,8 +404,9 @@ def main() -> int:
                       f"{rec.get('patch_lines',0)} patch lines", file=sys.stderr)
     except KeyboardInterrupt:
         interrupted = True
-        print("\ninterrupted — cancelling queued tasks; already-started ones finish. "
-              "The report below covers what completed.", file=sys.stderr)
+        print("\ninterrupted — queued tasks cancelled and running workers killed; "
+              "the report below covers what finished before the signal.",
+              file=sys.stderr)
         try:
             ex.shutdown(wait=True, cancel_futures=True)
         except TypeError:   # cancel_futures is 3.9+

@@ -324,7 +324,13 @@ def check_scripts(out):
 
 
 def check_secrets(out, core, repo: Path):
-    scan = core.scan_secrets(repo)
+    try:
+        scan = core.scan_secrets(repo)
+    except core.ScanError as e:
+        out.append(("FAIL", "credential scan", str(e),
+                    "The file listing could not run; pass --no-secret-scan to skip "
+                    "the scan, or investigate why git ls-files is slow."))
+        return
     # Stated first and separately, because a partial scan that found nothing is not a
     # clean scan and the two used to print the same line.
     if scan["truncated"]:
