@@ -9,6 +9,9 @@ on:
 permissions:
   contents: read
 
+env:
+  MIN_CLAUDE_VERSION: "2.1.280"
+
 jobs:
   offline:
     # The scripts use nothing newer than 3.7 (deferred annotations everywhere, and
@@ -22,15 +25,15 @@ jobs:
       matrix:
         python: ["3.9", "3.11", "3.13"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # node parses the workflow script in references/workflow.md; without it that check
       # skips silently, which would make a syntax error in the fleet script invisible here.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "20"
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "${{ matrix.python }}"
 
@@ -47,15 +50,6 @@ jobs:
       # preflight section so the repo guards stay testable on a runner without it.
       - name: Offline suite
         run: bash scripts/validate.sh --offline
-
-      - name: Manifests parse
-        run: |
-          python3 - <<'PY'
-          import json
-          for p in [".claude-plugin/plugin.json", ".claude-plugin/marketplace.json", "hooks/hooks.json"]:
-              json.load(open(p))
-              print("ok", p)
-          PY
 
       - name: Hook events are wrapped correctly
         run: |
@@ -86,19 +80,26 @@ jobs:
     name: claude plugin validate --strict
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "20"
 
+      # Behaviour this repo depends on (hyphen-exact matchers, ${user_config}
+      # rejection in shell-form hooks since 2.1.207) differs between CLI versions,
+      # and an unpinned install got 2.1.197 in CI while local was 2.1.280, so the
+      # install below is pinned to the version in env above.
       - name: Install the Claude Code CLI
-        run: npm install -g @anthropic-ai/claude-code
+        run: npm install -g "@anthropic-ai/claude-code@${MIN_CLAUDE_VERSION}"
 
       # Both manifests, by path. Validating the PLUGIN manifest also walks every
-      # command, agent and skill -- measured; that walk is what caught three commands
-      # whose frontmatter did not parse. Naming the component directories separately
-      # does not work: a bare directory is treated as a plugin root and refused for
-      # having no manifest of its own.
+      # command, agent and skill -- measured; that walk rejects component
+      # frontmatter that fails to PARSE, but not unknown keys or wrong value
+      # types (measured on 2.1.280: an unknown key, a non-integer maxTurns and
+      # ignored-on-agents keys all pass it). scripts/check_frontmatter.py in the
+      # offline suite is what holds those. Naming the component directories
+      # separately does not work: a bare directory is treated as a plugin root
+      # and refused for having no manifest of its own.
       - name: Validate both manifests
         run: |
           set -euo pipefail
@@ -142,11 +143,11 @@ jobs:
     name: offline suite (windows)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "20"
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.11"
 
@@ -175,3 +176,15 @@ jobs:
       - name: Offline suite under Git Bash
         shell: bash
         run: bash scripts/validate.sh --offline
+
+  # Bash 3.2 on macOS accepts things ubuntu bash rejects and vice versa, and
+  # every script here runs on both -- so the linter is a job, not a suggestion.
+  shellcheck:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: shellcheck (severity=error)
+        run: |
+          shellcheck --version
+          shellcheck --severity=error hooks/*.sh scripts/*.sh tests/*.sh

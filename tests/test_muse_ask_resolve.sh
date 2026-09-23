@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # muse_ask's default model goes through the resolution at muse_ask.sh:71-86, which
 # imports "$SKILL_DIR/scripts/muse_core.py". Loading $CORE directly would pass while
 # that path stayed broken (mutant M15), so this runs the real script with no --model.

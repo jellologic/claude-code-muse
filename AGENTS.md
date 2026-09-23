@@ -67,8 +67,11 @@ In rough order of usefulness:
    default rather than a boundary, and the enforcement is `finish` measuring the delta
    and reporting `out_of_band_edit`. Do not restore the stronger claim; it was false.
    The suite now asserts the tool list and the `maxTurns` ceiling directly — note that
-   `claude plugin validate --strict` does **not** check component frontmatter, measured,
-   so the manifest validator in CI is not a substitute.
+   `claude plugin validate --strict` does walk component frontmatter but catches
+   YAML parse errors only (measured on 2.1.280: an unknown key, `maxTurns: sixty`
+   and `permissionMode` on a plugin agent all pass it), so
+   `scripts/check_frontmatter.py` in the offline suite is what holds keys and
+   value types.
 4. **Never blur `completed` into `accept`.** `completed` means the worker stopped.
    `accept` means a supervisor ran a check, the **final** one passed, and it ran against
    the tree that was harvested. `finish` enforces all three and refuses otherwise;

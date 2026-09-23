@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Exercises hooks/preflight.sh through the real script, never its source text.
 # Check 2 (authenticated + matching + catalog = silent) and check 3 (absent auth
 # warns) both fail when line 25 is inverted to `-s`, which is mutant M09.
