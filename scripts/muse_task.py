@@ -42,6 +42,7 @@ import os
 import secrets
 import subprocess
 import sys
+import traceback
 from pathlib import Path
 
 _spec = importlib.util.spec_from_file_location(
@@ -204,7 +205,7 @@ def do_round(st: dict, tdir: Path, prompt: str, args, kind: str,
     n = len(st["rounds"]) + 1
     rdir = tdir / "round-{}".format(n)
     rdir.mkdir(parents=True, exist_ok=True)
-    (rdir / "prompt.txt").write_text(prompt, encoding="utf-8")
+    (rdir / "prompt.txt").write_bytes(prompt.encode("utf-8", "surrogateescape"))
 
     cmd = core.muse_cmd(
         st["model"], st.get("effort", core.DEFAULT_EFFORT), wt,
@@ -258,7 +259,13 @@ def do_round(st: dict, tdir: Path, prompt: str, args, kind: str,
         "exit_code": res.get("exit_code"), "stderr_tail": res.get("stderr_tail", "")[-800:],
         "events": str(rdir / "events.jsonl"),
         "stderr": str(rdir / "stderr.log"),
+        "patch_lines": 0, "files_changed": [], "patch_fingerprint": None,
     }
+    # The round spent money, and an exception later in harvest or fingerprinting used
+    # to un-count it, letting max_rounds be bypassed. Record it before that can happen.
+    st.pop("round_in_flight", None)
+    st["rounds"].append(rnd)
+    save_state(tdir, st)
 
     # Structured self-report, when a schema was supplied. This is a set of CLAIMS by the
     # same cheap model that did the work -- the supervisor checks it against the patch
@@ -273,16 +280,17 @@ def do_round(st: dict, tdir: Path, prompt: str, args, kind: str,
         rnd["text"] = res["text"][:2000]
 
     h = core.harvest(wt, harvest_base(st), st["excludes"], tdir / "patch.diff")
+    try:
+        fp = core.patch_fingerprint(wt, harvest_base(st), st["excludes"])
+    except Exception as e:
+        fp = None
+        rnd["fingerprint_error"] = "{}: {}".format(type(e).__name__, e)[:300]
     rnd.update({"patch_lines": h["patch_lines"], "files_changed": h["files_changed"],
                 # The deliverable as muse left it. finish compares against this to tell
                 # muse's work apart from anything written into the worktree afterwards.
-                "patch_fingerprint": core.patch_fingerprint(
-                    wt, harvest_base(st), st["excludes"])})
+                "patch_fingerprint": fp})
     if h["harvest_error"]:
         rnd["harvest_error"] = h["harvest_error"]
-
-    st.pop("round_in_flight", None)
-    st["rounds"].append(rnd)
     save_state(tdir, st)
 
     out = {
@@ -310,6 +318,8 @@ def do_round(st: dict, tdir: Path, prompt: str, args, kind: str,
         out["text"] = rnd["text"]
     if h["harvest_error"]:
         out["harvest_error"] = h["harvest_error"]
+    if rnd.get("fingerprint_error"):
+        out["fingerprint_error"] = rnd["fingerprint_error"]
     return out
 
 
@@ -606,7 +616,7 @@ def cmd_revise(args) -> int:
         st["effort"] = args.effort
     feedback = args.feedback
     if args.feedback_file:
-        feedback = Path(args.feedback_file).read_text(encoding="utf-8")
+        feedback = Path(args.feedback_file).read_text(encoding="utf-8", errors="replace")
     # Pass the worktree: a session bound to a different workspace is not resumable, and
     # muse fails the whole run rather than starting fresh if you try.
     resumed = core.session_exists(st.get("session_id") or "", workspace=st["worktree"])
@@ -666,14 +676,15 @@ def cmd_verify(args) -> int:
     # for. This comment used to claim the group kill happened; it did not.
     p = subprocess.Popen(args.command, cwd=str(wt), shell=True,
                          stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                         text=True, start_new_session=True)
+                         start_new_session=True)
+    dec = lambda b: (b or b"").decode("utf-8", "replace")
     try:
         stdout, stderr = p.communicate(timeout=args.timeout)
         rec.update({
             "exit_code": p.returncode,
             "passed": p.returncode == 0,
-            "stdout_tail": tail(stdout or ""),
-            "stderr_tail": tail(stderr or ""),
+            "stdout_tail": tail(dec(stdout)),
+            "stderr_tail": tail(dec(stderr)),
         })
     except subprocess.TimeoutExpired:
         # A hung check must come back as a parseable failure. Raising here would hand
@@ -685,10 +696,10 @@ def cmd_verify(args) -> int:
             # writer holding the other end of these pipes has just been signalled.
             stdout, stderr = p.communicate(timeout=10)
         except (subprocess.TimeoutExpired, ValueError, OSError):
-            stdout = stderr = ""
+            stdout = stderr = b""
         rec.update({
             "exit_code": None, "passed": False, "timed_out": True,
-            "stdout_tail": tail(stdout or ""),
+            "stdout_tail": tail(dec(stdout)),
             "stderr_tail": "acceptance check exceeded {}s".format(args.timeout),
         })
     # Taken AFTER the command, and this is the one finish compares against. A check is
@@ -960,7 +971,13 @@ def main() -> int:
     except core.PreflightError as e:
         emit({"id": args.id, "status": "refused", "reason": str(e)})
         return 1
-    return args.fn(args)
+    try:
+        return args.fn(args)
+    except Exception as e:
+        traceback.print_exc(file=sys.stderr)
+        emit({"id": args.id, "status": "error", "error_type": type(e).__name__,
+              "reason": "{}: {}".format(type(e).__name__, e)[:2000]})
+        return 1
 
 
 if __name__ == "__main__":
