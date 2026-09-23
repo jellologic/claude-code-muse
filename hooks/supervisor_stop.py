@@ -114,7 +114,10 @@ def main() -> int:
 
     # One runnable finish command per owned task: finish takes a single
     # --id, a fleet task needs its stamp dir as --out rather than the
-    # default tasks root, and the only verdicts are accept|revise|reject.
+    # default tasks root, and the verdict is one concrete choice (revise
+    # claims the least) with the other choices named on a following line --
+    # a placeholder word would fail argparse, and the old accept|revise|reject
+    # spelling is a bash pipe that exits 127 when pasted.
     # shlex.quote keeps an odd id runnable; as_posix keeps a Windows C:/...
     # out usable from Git Bash instead of losing backslashes to shlex.
     summaries = []
@@ -123,12 +126,15 @@ def main() -> int:
         summaries.append("task {} has {} round(s) and no verdict".format(tid, n))
         out = Path(os.path.abspath(d.parent)).as_posix()
         commands.append(
-            "muse-task finish --id {} --out {} --verdict accept|revise|reject --summary \"...\"".format(
+            "muse-task finish --id {} --out {} --verdict revise --summary \"...\"".format(
                 shlex.quote(str(tid)), shlex.quote(out)
             )
         )
-    reason = "{}: run one finish command per task before stopping.\n{}".format(
-        "; ".join(summaries), "\n".join(commands)
+    reason = "{}: run one finish command per task before stopping.\n{}\n{}".format(
+        "; ".join(summaries), "\n".join(commands),
+        "The verdict is one of accept, revise, reject: replace revise with "
+        "accept (finish refuses it unless the final recorded check passed on "
+        "this tree) or reject as your judgement says.",
     )
     print(json.dumps({"decision": "block", "reason": reason}))
     return 0

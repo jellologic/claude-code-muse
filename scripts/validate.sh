@@ -73,7 +73,7 @@ PASS=0; FAIL=0; SKIP=0
 # compares PASS+FAIL against this, so a removed block lowers the tally. Skips do
 # not count -- a SKIP is a check that did not run, and counting it lets a machine
 # without node stay green with fewer executed checks.
-EXPECTED_OFFLINE=530
+EXPECTED_OFFLINE=542
 
 ok()   { PASS=$((PASS+1)); printf '  \033[32mPASS\033[0m  %s\n' "$1"; }
 bad()  { FAIL=$((FAIL+1)); printf '  \033[31mFAIL\033[0m  %s\n' "$1"; [ -n "${2:-}" ] && echo "        $2"; }
@@ -2036,6 +2036,7 @@ sys.exit(0 if c and not any('PARTIAL' in x['value'] for x in c) else 1)" \
 . "$SKILL/tests/test_placeholder.sh"
 . "$SKILL/tests/test_quoting.sh"
 . "$SKILL/tests/test_doc_claims.sh"
+. "$SKILL/tests/test_guard_docs.sh"
 . "$SKILL/tests/test_mutant_gaps.sh"
 . "$SKILL/tests/test_caps.sh"
 . "$SKILL/tests/test_interrupt.sh"

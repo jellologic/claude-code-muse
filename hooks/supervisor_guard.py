@@ -6,14 +6,16 @@ still available on prompt -- so omitting Write/Edit never stopped it writing
 through a redirect either. This hook is the boundary both of those honesty rules
 could not be: it denies Write/Edit/NotebookEdit outright, and it denies any Bash
 beyond the read-only set (muse shims, read-only git, small readers, and the one
-recorded check verify already ran).
+recorded check verify already ran, which is allowed only from inside its
+task's worktree).
 
 It prints nothing on allow, because emitting permissionDecision "allow" would
 bypass the user's own permission prompts. It is scoped by agent_type because hook
 matchers cannot see which agent is calling.
 
 Honestly: muse-task verify can still run an arbitrary recorded command, so this
-is a strong boundary rather than a total one.
+is a strong boundary rather than a total one. The recorded check must run
+from inside its task's worktree; the same command from any other cwd denies.
 """
 
 from __future__ import annotations
@@ -127,17 +129,21 @@ def search_bases(payload):
 
 
 def owns_task(state, payload_cwd):
-    # A task owns the call if its worktree contains the payload cwd, or if its
-    # "done" is not true (it is still the live task for this session).
-    if state.get("done") is not True:
-        return True
+    # A task owns the call only if the payload cwd is its worktree or lies
+    # under it. A missing or non-str worktree or cwd is never owned, and the
+    # "done" flag grants nothing -- otherwise a recorded check would run from
+    # any cwd once verify had logged it.
     worktree = state.get("worktree")
-    if not isinstance(worktree, str) or not isinstance(payload_cwd, str):
+    if not isinstance(worktree, str) or not worktree:
+        return False
+    if not isinstance(payload_cwd, str) or not payload_cwd:
         return False
     try:
         wt = os.path.normcase(os.path.realpath(worktree))
         cwd = os.path.normcase(os.path.realpath(payload_cwd))
     except OSError:
+        return False
+    if not wt or not cwd:
         return False
     return cwd == wt or cwd.startswith(wt + os.sep)
 
