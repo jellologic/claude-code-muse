@@ -22,7 +22,7 @@ if [ -n "${MUTATE_MUST_KILL:-}" ]; then
   MUST_KILL="$MUTATE_MUST_KILL"
 fi
 
-JOBS="${MUTATE_JOBS:-4}"
+JOBS=4
 
 mutants() {
 python3 - "$@" <<'PY'
@@ -230,12 +230,81 @@ fi
 # below without a second literal to update.
 N_TABLE=$(mutants ids | wc -l | tr -d ' ')
 
-MUTATE_TIMEOUT="${MUTATE_TIMEOUT:-300}"
-case "$MUTATE_TIMEOUT" in
-  ''|*[!0-9]*) echo "mutate: MUTATE_TIMEOUT must be a positive integer, got '$MUTATE_TIMEOUT'" >&2; exit 2 ;;
+MUTATE_TIMEOUT_GIVEN=0
+if [ -n "${MUTATE_TIMEOUT:-}" ]; then
+  MUTATE_TIMEOUT_GIVEN=1
+  case "$MUTATE_TIMEOUT" in
+    ''|*[!0-9]*) echo "mutate: MUTATE_TIMEOUT must be a positive integer, got '$MUTATE_TIMEOUT'" >&2; exit 2 ;;
+  esac
+  if [ -z "$(printf '%s' "$MUTATE_TIMEOUT" | tr -d '0')" ]; then
+    echo "mutate: MUTATE_TIMEOUT must be a positive integer, got '$MUTATE_TIMEOUT'" >&2; exit 2
+  fi
+fi
+
+MUTATE_TIMEOUT_FLOOR="${MUTATE_TIMEOUT_FLOOR:-300}"
+case "$MUTATE_TIMEOUT_FLOOR" in
+  ''|*[!0-9]*) echo "mutate: MUTATE_TIMEOUT_FLOOR must be a positive integer, got '$MUTATE_TIMEOUT_FLOOR'" >&2; exit 2 ;;
 esac
-if [ -z "$(printf '%s' "$MUTATE_TIMEOUT" | tr -d '0')" ]; then
-  echo "mutate: MUTATE_TIMEOUT must be a positive integer, got '$MUTATE_TIMEOUT'" >&2; exit 2
+if [ -z "$(printf '%s' "$MUTATE_TIMEOUT_FLOOR" | tr -d '0')" ]; then
+  echo "mutate: MUTATE_TIMEOUT_FLOOR must be a positive integer, got '$MUTATE_TIMEOUT_FLOOR'" >&2; exit 2
+fi
+
+# Load-aware jobs, resolved before --check so a bad value fails fast.
+# A default of 4 parallel validates is only safe on an idle box; under load
+# every tree slows down together and each timeout blames its mutant instead of
+# the machine. Ordering matters: JOBS only affects the batch after the control.
+if [ -n "${MUTATE_JOBS:-}" ]; then
+  case "$MUTATE_JOBS" in
+    ''|*[!0-9]*) echo "mutate: MUTATE_JOBS must be a positive integer, got '$MUTATE_JOBS'" >&2; exit 2 ;;
+  esac
+  if [ -z "$(printf '%s' "$MUTATE_JOBS" | tr -d '0')" ]; then
+    echo "mutate: MUTATE_JOBS must be a positive integer, got '$MUTATE_JOBS'" >&2; exit 2
+  fi
+  JOBS="$MUTATE_JOBS"
+  JSRC="MUTATE_JOBS"
+else
+  JOBS=4
+  JSRC="default"
+  # One probe: MUTATE_LOAD from the environment stands in for the measured
+  # 1-minute average when set (a float() failure exits 2); otherwise the
+  # measured average is used, or "unknown" where os.getloadavg is missing
+  # (Windows) so the default stands. Prints "unknown" or "<load> <cpus> <high>".
+  _loadinfo="$(MUTATE_LOAD="${MUTATE_LOAD:-}" python3 -c '
+import os
+override = os.environ.get("MUTATE_LOAD", "")
+if override != "":
+    try:
+        load = float(override)
+    except (TypeError, ValueError):
+        raise SystemExit(2)
+else:
+    try:
+        load = float(os.getloadavg()[0])
+    except (AttributeError, OSError, ValueError):
+        print("unknown")
+        raise SystemExit(0)
+cpus = os.cpu_count() or 1
+print("%.1f %s %d" % (load, cpus, 1 if load > cpus else 0))
+' 2>/dev/null)" || {
+    if [ -n "${MUTATE_LOAD:-}" ]; then
+      echo "mutate: MUTATE_LOAD must be a number, got '$MUTATE_LOAD'" >&2; exit 2
+    fi
+    _loadinfo=""
+  }
+  case "$_loadinfo" in
+    unknown|"" ) ;;
+    *)
+      _L="$(printf '%s' "$_loadinfo" | cut -d' ' -f1)"
+      _C="$(printf '%s' "$_loadinfo" | cut -d' ' -f2)"
+      _H="$(printf '%s' "$_loadinfo" | cut -d' ' -f3)"
+      if [ "$_H" = "1" ]; then
+        JOBS=1
+        JSRC="load $_L > $_C CPUs"
+      fi
+      unset _L _C _H
+      ;;
+  esac
+  unset _loadinfo
 fi
 
 # A typo in MUTATE_ONLY must fail here, in milliseconds. Without this the run
@@ -279,10 +348,57 @@ for id in $(mutants ids); do
 done
 
 export -f run_one mutants
-export WORK MUTATE_TIMEOUT
-# Word-splitting IDS here is the point: one id per xargs line, run in parallel.
+export WORK
+# The control runs alone in the foreground: a parallel control shares the CPU
+# with the mutants, so its time says nothing about a lone suite and the derived
+# timeout would be inflated. Time it with SECONDS (portable, works on Windows
+# Git Bash), rounded up with a minimum of 1.
+echo "mutate: running control M00 alone"
+if [ "$MUTATE_TIMEOUT_GIVEN" -eq 1 ]; then
+  CONTROL_TIMEOUT="$MUTATE_TIMEOUT"
+  export MUTATE_TIMEOUT
+else
+  CONTROL_TIMEOUT=3600
+  MUTATE_TIMEOUT="$CONTROL_TIMEOUT"
+  export MUTATE_TIMEOUT
+fi
+_control_start=$SECONDS
+run_one M00
+_control_end=$SECONDS
+CONTROL_SECS=$((_control_end - _control_start))
+if [ "$CONTROL_SECS" -lt 1 ]; then
+  CONTROL_SECS=1
+fi
+unset _control_start _control_end
+# Derived timeout: only when the user did not set MUTATE_TIMEOUT. The floor
+# override exists so tests can see the 4x term without sleeping 75+ seconds.
+if [ "$MUTATE_TIMEOUT_GIVEN" -eq 1 ]; then
+  TSRC="MUTATE_TIMEOUT"
+else
+  _quad=$((4 * CONTROL_SECS))
+  if [ "$_quad" -gt "$MUTATE_TIMEOUT_FLOOR" ]; then
+    MUTATE_TIMEOUT="$_quad"
+  else
+    MUTATE_TIMEOUT="$MUTATE_TIMEOUT_FLOOR"
+  fi
+  unset _quad
+  TSRC="derived: max($MUTATE_TIMEOUT_FLOOR, 4 x control ${CONTROL_SECS}s)"
+fi
+export MUTATE_TIMEOUT
+printf 'mutate: timeout %ss (%s), jobs %s (%s)\n' "$MUTATE_TIMEOUT" "$TSRC" "$JOBS" "$JSRC"
+# Word-splitting BATCH here is the point: one id per xargs line, run in parallel.
+# M00 already ran above and must not run twice.
+BATCH=""
+for id in $IDS; do
+  if [ "$id" != "M00" ]; then
+    BATCH="$BATCH $id"
+  fi
+done
 # shellcheck disable=SC2086
-printf '%s\n' $IDS | xargs -P "$JOBS" -I{} bash -c 'run_one "$1"' _ {}
+if [ -n "$BATCH" ]; then
+  printf '%s\n' $BATCH | xargs -P "$JOBS" -I{} bash -c 'run_one "$1"' _ {}
+fi
+unset BATCH
 
 ESC="$(printf '\033')"
 RC=0
@@ -308,6 +424,20 @@ for id in $IDS; do
       # A hang or a crash is neither evidence the suite caught the mutant nor
       # that it missed it: show the tail and fail the run.
       printf 'mutate: %s %s\n' "$id" "$verdict"
+      if [ "$verdict" = "timeout" ]; then
+        # Name the id, the seconds, where the limit came from, and the knob:
+        # without MUTATE_TIMEOUT= here a loaded-machine timeout looks like guilt.
+        # The control's cap is not the derived value (it ran before the control
+        # time existed), so reporting the derived value for M00 would misstate
+        # the limit it actually ran under.
+        if [ "$MUTATE_TIMEOUT_GIVEN" -eq 1 ]; then
+          printf 'mutate: %s timeout after %ss (set by MUTATE_TIMEOUT; raise it with MUTATE_TIMEOUT=<seconds>)\n' "$id" "$MUTATE_TIMEOUT"
+        elif [ "$id" = "M00" ]; then
+          printf 'mutate: %s timeout after %ss (control cap; raise it with MUTATE_TIMEOUT=<seconds>)\n' "$id" "$CONTROL_TIMEOUT"
+        else
+          printf 'mutate: %s timeout after %ss (derived as max(%s, 4 x control %ss); raise it with MUTATE_TIMEOUT=<seconds>)\n' "$id" "$MUTATE_TIMEOUT" "$MUTATE_TIMEOUT_FLOOR" "$CONTROL_SECS"
+        fi
+      fi
       tail -5 "$WORK/$id/log" 2>/dev/null || true
       RC=1 ;;
   esac
