@@ -6,10 +6,35 @@ All notable changes to this plugin are documented here. Format follows
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-09-23
+
+
 Work since 1.3.0 (epic #49): supervision is enforced rather than described, the
 credential scan covers what the worker actually receives, configuration refuses bad
 values instead of silently defaulting, and prose counts are held against the code by a
 new offline check.
+
+### Follow-ups (epic #58)
+
+- **Interruption and scanning** (Refs #52). A signal after the worker returned but
+  before the round was saved un-counted the round and left a stale in-flight marker; an
+  ordinary error was recorded as an interruption; a slow `git ls-files` crashed task and
+  fleet; read-only `muse-ask` never scanned for credentials. Each is fixed and
+  reproduced offline, and a scan that cannot list files now refuses.
+- **Harvest excludes follow git's glob rules** (Refs #53): `*` and `?` stay inside one
+  path segment, so `--exclude 'a/*.py'` no longer drops `a/b/c.py`.
+- **The supervisor's documented commands pass its own guard** (Refs #54), the block
+  reason prints a runnable finish command, and a recorded check is allowed only inside
+  the owning task's worktree.
+- **Ten more mutants killed** (Refs #55) and tests that could not fail now can
+  (Refs #56). `mutate.sh` derives its per-mutant timeout from a timed control run and
+  drops to one job under load, so a busy host no longer reports false timeouts.
+- **`model:` frontmatter measured per permission mode** (Refs #57): it takes effect in
+  default, acceptEdits and bypassPermissions, and auto and plan keep the session model.
+- **The eval judge is replayed byte-for-byte** (Refs #50) and the README records
+  measured vote splits instead of the best run. On a macOS host the eval sandbox blocks
+  the Command Line Tools, so cases that need git or python3 are measured on Linux
+  (Refs #59).
 
 ### Added
 
