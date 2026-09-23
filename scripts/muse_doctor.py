@@ -28,6 +28,7 @@ import glob
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -80,6 +81,33 @@ def check_muse(out, core):
                               "" if note else " (verified against %s)" % core.MUSE_TESTED_VERSION),
                 note or ""))
     return True
+
+
+def check_claude(out, core):
+    # Never FAIL: an old CLI still delegates, so this is advisory only.
+    if shutil.which("claude") is None:
+        out.append(("WARN", "claude CLI",
+                    "not on PATH -- cannot check the >= %s floor" % core.MIN_CLAUDE_VERSION,
+                    "Install the Claude Code CLI to get the version-gated behaviour."))
+        return
+    rc, ver = run(["claude", "--version"])
+    if rc != 0:
+        out.append(("WARN", "claude CLI", "found but `claude --version` failed: %s" % ver[:60],
+                    "The binary on PATH may be broken or a different program."))
+        return
+    m = re.search(r"(\d+)\.(\d+)\.(\d+)", ver)
+    if not m:
+        out.append(("WARN", "claude CLI", "`claude --version` printed no version number: %s" % ver[:60],
+                    "That is probably not the Claude Code CLI. Check `which claude`."))
+        return
+    v = m.group(0)
+    note = core.claude_below_floor(v)
+    if note:
+        out.append(("WARN", "claude CLI",
+                    "%s (older than MIN_CLAUDE_VERSION %s)" % (v, core.MIN_CLAUDE_VERSION),
+                    "%s. npm install -g @anthropic-ai/claude-code@latest" % note))
+    else:
+        out.append(("OK", "claude CLI", "%s (>= %s)" % (v, core.MIN_CLAUDE_VERSION), ""))
 
 
 def check_credentials(out, core):
@@ -245,9 +273,14 @@ def main() -> int:
     ap.add_argument("--scan", action="store_true",
                     help="also scan the repo for credentials (slower on large trees)")
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--min-claude-version", action="store_true",
+                    help="print MIN_CLAUDE_VERSION and exit")
     args = ap.parse_args()
 
     core = load_core()
+    if args.min_claude_version:
+        print(core.MIN_CLAUDE_VERSION)
+        return 0
     repo = Path(args.repo).resolve()
     out = []
 
@@ -261,6 +294,7 @@ def main() -> int:
             return False
 
     have_muse = guarded("muse binary", check_muse, out, core)
+    guarded("claude CLI", check_claude, out, core)
     guarded("credentials", check_credentials, out, core)
     guarded("model catalog", check_catalog, out, core)
     guarded("model resolution", check_resolution, out, core)

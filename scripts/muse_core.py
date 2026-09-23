@@ -53,6 +53,28 @@ MUSE_DATA_DIR = os.environ.get("MUSE_DATA_DIR", "~/.local/share/muse")
 # wrong far more often than it was right.
 MUSE_TESTED_VERSION = "1.3.0"
 
+# Floor for the Claude Code CLI, and the single place it lives: CI installs this
+# version and the doctor warns below it. Hyphen-exact matchers and
+# ${user_config} rejection in shell-form hooks since 2.1.207 differ by CLI
+# version, and CI once got 2.1.197 while local was 2.1.280.
+MIN_CLAUDE_VERSION = "2.1.280"
+
+
+def claude_below_floor(found):
+    """A one-line note if `found` is older than MIN_CLAUDE_VERSION, else None.
+
+    Compared as integer tuples, never as strings: "2.1.99" is older than
+    "2.1.280" numerically but sorts newer lexicographically.
+    """
+    if not found:
+        return None
+    m = re.search(r"(\d+)\.(\d+)\.(\d+)", found)
+    if not m:
+        return None
+    if tuple(int(g) for g in m.groups()) >= tuple(int(g) for g in MIN_CLAUDE_VERSION.split(".")):
+        return None
+    return ("claude CLI %s is older than the %s floor" % (m.group(0), MIN_CLAUDE_VERSION))
+
 # Event stream (`muse exec --json`): one JSON object per line, the interesting part
 # nested under "payload", discriminated by "kind".
 EV_PAYLOAD = "payload"

@@ -15,7 +15,7 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # Later PRs append their fixed mutant ids here as their checks land, and never remove
 # one, so a regression that re-opens a once-killed hole fails the run again.
-MUST_KILL="M01 M02 M03 M04 M08 M12 M13 M17"
+MUST_KILL="M01 M02 M03 M04 M08 M09 M12 M13 M15 M17"
 if [ -n "${MUTATE_MUST_KILL:-}" ]; then
   # Self-tests stage a failing run through the environment without touching this file.
   echo "mutate: MUST_KILL overridden by environment: $MUTATE_MUST_KILL" >&2
@@ -120,10 +120,46 @@ run_one() {  # run_one <id>: plant one mutant, run the suite, record the verdict
   # Each validate gets its own TMPDIR so parallel runs never share a LAB, and an
   # emptied MUSE_FLEET_LAB so validate mktemps a fresh one inside it; the EXIT trap
   # reaps the whole WORK tree afterwards.
-  if TMPDIR="$d/tmp" MUSE_FLEET_LAB= bash "$d/tree/scripts/validate.sh" --offline >"$d/log" 2>&1; then
-    echo "survived" > "$d/verdict"
+  # GNU `timeout` is not on macOS, so the per-mutant timeout is a python3 wrapper
+  # (python3 is already required). The program string is inline in the function,
+  # because run_one travels via `export -f` + `xargs bash -c` and a variable
+  # holding it would not be exported.
+  if TMPDIR="$d/tmp" MUSE_FLEET_LAB= python3 -c '
+import os, signal, subprocess, sys
+t = int(sys.argv[1])
+mark = sys.argv[2]
+cmd = sys.argv[3:]
+p = subprocess.Popen(cmd, start_new_session=True, stdin=subprocess.DEVNULL)
+try:
+    rc = p.wait(timeout=t)
+except subprocess.TimeoutExpired:
+    try:
+        os.killpg(p.pid, signal.SIGKILL)
+    except (AttributeError, OSError):
+        p.kill()
+    p.wait()
+    open(mark, "w").write("timed out\n")
+    sys.stderr.write("mutate: timed out after %ds\n" % t)
+    sys.exit(124)
+sys.exit(rc if rc >= 0 else 128 - rc)
+' "$MUTATE_TIMEOUT" "$d/timedout" bash "$d/tree/scripts/validate.sh" --offline >"$d/log" 2>&1; then
+    rc=0
   else
+    rc=$?
+  fi
+  # A non-zero exit with no FAIL line and no RESULT is a harness or script crash,
+  # not a suite kill -- and a hang killed by the wrapper above is its own verdict.
+  # Strip ANSI first (a FAIL line arrives colourised); esc is local because the
+  # global ESC is not visible in the xargs subshell.
+  esc="$(printf '\033')"
+  if [ -e "$d/timedout" ]; then
+    echo "timeout" > "$d/verdict"
+  elif [ "$rc" -eq 0 ]; then
+    echo "survived" > "$d/verdict"
+  elif sed "s/${esc}\[[0-9;]*m//g" "$d/log" 2>/dev/null | grep -Eq '^[[:space:]]*FAIL[[:space:]]|RESULT:'; then
     echo "killed" > "$d/verdict"
+  else
+    echo "crashed" > "$d/verdict"
   fi
 }
 
@@ -179,9 +215,39 @@ if [ "$CHECK_RC" -ne 0 ]; then
   exit 1
 fi
 
+# The table is the single source of the totals: a new row changes every count
+# below without a second literal to update.
+N_TABLE=$(mutants ids | wc -l | tr -d ' ')
+
+MUTATE_TIMEOUT="${MUTATE_TIMEOUT:-300}"
+case "$MUTATE_TIMEOUT" in
+  ''|*[!0-9]*) echo "mutate: MUTATE_TIMEOUT must be a positive integer, got '$MUTATE_TIMEOUT'" >&2; exit 2 ;;
+esac
+if [ -z "$(printf '%s' "$MUTATE_TIMEOUT" | tr -d '0')" ]; then
+  echo "mutate: MUTATE_TIMEOUT must be a positive integer, got '$MUTATE_TIMEOUT'" >&2; exit 2
+fi
+
+# A typo in MUTATE_ONLY must fail here, in milliseconds. Without this the run
+# selects only the M00 control, prints a small killed count, and exits 0.
+if [ -n "${MUTATE_ONLY:-}" ]; then
+  _known=" $(mutants ids | tr '\n' ' ') "
+  _tokens=0
+  for _tok in $(printf '%s' "$MUTATE_ONLY" | tr ',' ' '); do
+    _tokens=$((_tokens+1))
+    case "$_known" in
+      *" $_tok "*) ;;
+      *) echo "mutate: unknown mutant id in MUTATE_ONLY: $_tok" >&2; exit 2 ;;
+    esac
+  done
+  if [ "$_tokens" -eq 0 ]; then
+    echo "mutate: MUTATE_ONLY is set but names no mutant ids" >&2; exit 2
+  fi
+  unset _known _tokens _tok
+fi
+
 if [ "$MODE" = "check" ]; then
   # Fast guard only: proves the harness can still fire, runs no validate.
-  echo "mutate: all 18 mutants apply cleanly"
+  echo "mutate: all $N_TABLE mutants apply cleanly"
   exit 0
 fi
 
@@ -202,17 +268,22 @@ for id in $(mutants ids); do
 done
 
 export -f run_one mutants
-export WORK
+export WORK MUTATE_TIMEOUT
 # Word-splitting IDS here is the point: one id per xargs line, run in parallel.
 # shellcheck disable=SC2086
 printf '%s\n' $IDS | xargs -P "$JOBS" -I{} bash -c 'run_one "$1"' _ {}
 
 ESC="$(printf '\033')"
+RC=0
 KILLED=0
+N_SELECTED=0
 for id in $IDS; do
   verdict="$(cat "$WORK/$id/verdict" 2>/dev/null || echo MISSING)"
   desc="$(mutants desc "$id")"
   line="$id  $verdict  $desc"
+  if [ "$id" != "M00" ]; then
+    N_SELECTED=$((N_SELECTED+1))
+  fi
   if [ "$verdict" = "killed" ]; then
     if [ "$id" != "M00" ]; then
       KILLED=$((KILLED+1))
@@ -221,6 +292,14 @@ for id in $IDS; do
     [ -n "$fail" ] && line="$line  $fail"
   fi
   printf '%s\n' "$line"
+  case "$verdict" in
+    timeout|crashed)
+      # A hang or a crash is neither evidence the suite caught the mutant nor
+      # that it missed it: show the tail and fail the run.
+      printf 'mutate: %s %s\n' "$id" "$verdict"
+      tail -5 "$WORK/$id/log" 2>/dev/null || true
+      RC=1 ;;
+  esac
 done
 
 CONTROL="green"
@@ -230,9 +309,8 @@ if [ "$(cat "$WORK/M00/verdict" 2>/dev/null || echo MISSING)" != "survived" ] \
   # skipped or miscounted suite would otherwise certify every mutant below it.
   CONTROL="RED"
 fi
-printf 'killed %d of 17 (M00 control: %s)\n' "$KILLED" "$CONTROL"
+printf 'killed %d of %d (M00 control: %s)\n' "$KILLED" "$N_SELECTED" "$CONTROL"
 
-RC=0
 if [ "$CONTROL" != "green" ]; then
   echo "mutate: control M00 did not stay green" >&2
   RC=1
@@ -248,8 +326,9 @@ for id in $MUST_KILL; do
     *" $id "*) ;;
     *) continue ;;
   esac
-  if [ "$(cat "$WORK/$id/verdict" 2>/dev/null || echo MISSING)" != "killed" ]; then
-    echo "MUST_KILL $id survived"
+  verdict="$(cat "$WORK/$id/verdict" 2>/dev/null || echo MISSING)"
+  if [ "$verdict" != "killed" ]; then
+    echo "MUST_KILL $id not killed ($verdict)"
     RC=1
   fi
 done

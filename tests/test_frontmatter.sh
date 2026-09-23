@@ -115,10 +115,59 @@ fi
 
 rm -rf "$LAB/v_fm_empty"; mkdir -p "$LAB/v_fm_empty"
 FM_OUT="$(python3 "$FM_CHK" --root "$LAB/v_fm_empty" 2>&1)"; FM_RC=$?
-if [ "$FM_RC" -eq 2 ]; then
+if [ "$FM_RC" -eq 2 ] && printf '%s\n' "$FM_OUT" | grep -q "no component files found under" \
+    && printf '%s\n' "$FM_OUT" | grep -q "measuring nothing"; then
   ok "check_frontmatter refuses to pass an empty tree"
 else
   bad "check_frontmatter refuses to pass an empty tree" "rc=$FM_RC out: $FM_OUT"
+fi
+
+FM_fresh_probe
+python3 - "$LAB/v_fm_probe/agents/muse-supervisor.md" <<'PY'
+import sys
+path = sys.argv[1]
+text = open(path, encoding="utf-8").read()
+assert "maxTurns: 60" in text, "control lost its maxTurns line"
+open(path, "w", encoding="utf-8").write(text.replace("maxTurns: 60", "maxTurns: 60 # cap", 1))
+PY
+if cmp -s "$LAB/v_fm_probe/agents/muse-supervisor.md" "$PLUGIN_ROOT/agents/muse-supervisor.md"; then
+  bad "check_frontmatter accepts a YAML inline comment" "mutation left the file byte-identical -- the test measured nothing"
+else
+  FM_OUT="$(python3 "$FM_CHK" --root "$LAB/v_fm_probe" 2>&1)"; FM_RC=$?
+  if [ "$FM_RC" -eq 0 ]; then
+    ok "check_frontmatter accepts a YAML inline comment"
+  else
+    bad "check_frontmatter accepts a YAML inline comment" "rc=$FM_RC out: $FM_OUT"
+  fi
+fi
+
+FM_fresh_probe
+python3 - "$LAB/v_fm_probe/agents/muse-supervisor.md" <<'PY'
+import sys
+path = sys.argv[1]
+text = open(path, encoding="utf-8").read()
+assert "maxTurns: 60" in text, "control lost its maxTurns line"
+open(path, "w", encoding="utf-8").write(text.replace("maxTurns: 60", "maxTurns: sixty # cap", 1))
+PY
+FM_refuses_key "agents/muse-supervisor.md" "maxTurns" "check_frontmatter refuses a non-integer maxTurns with a trailing comment"
+
+FM_QUOTE="$(python3 - "$FM_CHK" <<'PY'
+import importlib.util
+import sys
+spec = importlib.util.spec_from_file_location("fmcheck", sys.argv[1])
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+vals, _ = mod.parse_frontmatter('---\ndescription: "a # b"\nx: a#b\n---\n')
+if vals.get("description") == "a # b" and vals.get("x") == "a#b":
+    print("FM_QUOTE_OK")
+else:
+    print("got %r" % (vals,))
+PY
+)"
+if [ "$FM_QUOTE" = "FM_QUOTE_OK" ]; then
+  ok "check_frontmatter keeps a # inside quotes or without a space before it"
+else
+  bad "check_frontmatter keeps a # inside quotes or without a space before it" "$FM_QUOTE"
 fi
 
 if [ "${FM_STANDALONE:-0}" = 1 ]; then rm -rf "$LAB"; echo "RESULT: $PASS passed, $FAIL failed"; [ "$FAIL" -eq 0 ]; exit $?; fi
