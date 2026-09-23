@@ -46,6 +46,16 @@ new offline check.
   `tests/test_doc_claims.sh` fails when a command, shim, auto-triggering surface, flag
   or hook event is added without updating the prose — each with a probe proving the
   failure names the planted defect.
+- **A monitor and a status line for supervised tasks** (Refs #48). `muse-task` and
+  `muse-fleet` append round, verify and verdict events; a plugin monitor streams each as
+  one notification line, and `settings.json` sets a `subagentStatusLine` showing the
+  task, round N/M and the last check. `claude plugin details` does not inventory monitors
+  or settings on 2.1.280, so `tests/claude_validate_monitors.sh` is the proof they load.
+- **The evals run for real** (Refs #33). Every case is a `case.yaml` whose scaffold builds
+  its fixture repo and puts a stub muse on PATH, so nothing leaves the machine; cases get
+  the tools their behaviour needs (Workflow is gated on 2.1.280) and `evals/README.md`
+  records measured scores. All nine triggering graders pass; one behaviour judge
+  (trust-the-self-report) is still inconsistent.
 
 ### Changed
 
@@ -64,7 +74,8 @@ new offline check.
   `<example>` blocks (~600 always-on tokens) and invited auto-triggering, which the docs
   never intended. It is now a two-line description; the skill description is trimmed to
   about half with every trigger cue and exclusion kept. Always-on falls from ~1,202 to
-  ~564 tokens, against the 750 ceiling.
+  ~625 tokens, against the 750 ceiling (the skill description regained the trigger cues
+  two positive eval cases had stopped firing on).
 - **The Windows Git Bash leg is blocking** (Refs #32). It runs the same free offline
   suite; the tests stub their host dependencies instead of asserting the runner's
   health, strip CR from Python output, resolve executables through `shutil.which`, and
@@ -88,6 +99,13 @@ new offline check.
   what they let through** (Refs #32). A misspelled mutate id ran only the control and
   exited 0, totals were hard-coded, a hung mutant had no timeout and a crash counted as
   killed; the count guard counted skips; the stamp guard grepped instead of parsing.
+  All eighteen known mutants are now killed and `MUST_KILL` holds every one.
+- **An unset userConfig key no longer blocks delegation** (Refs #41). Claude Code
+  substitutes `${user_config.KEY}` only for keys the user set and leaves the rest
+  literal; the prose double-quoted them, so the shell failed with "bad substitution"
+  before any script ran. Placeholders are single-quoted, and a literal placeholder for a
+  flag's own key counts as not given, so the default applies. Found by a real
+  no-config end-to-end delegation, which now completes.
 
 ### Corrected
 
