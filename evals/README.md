@@ -188,6 +188,70 @@ the gated tools among them ride the operator's trailing `--allow-tools`.
 (anything else is refused by the CLI at run time). Positive cases use
 `max_turns: 15` / `timeout_seconds: 600`; negatives use `10` / `300`.
 
+## How the judge decides
+
+Each `llm` behaviour grader is judged by the CLI, not by the agent. The
+judge sees only two things: the grader's `criteria` text and the agent's
+final message. It never sees the user's prompt. The user prompt is built
+byte for byte as (verified against the installed CLI 2.1.280 binary,
+function `Ep`):
+
+```
+You are grading the output of a coding agent against a criterion.
+
+Criterion:
+<criteria>
+
+
+Agent output (last_message):
+<final message>
+
+
+<instruction>
+```
+
+`<criteria>` is the grader's criteria text verbatim, `<final message>` is
+the agent's last message (already elided by the CLI) verbatim, and
+`<instruction>` is `Respond with exactly one word: PASS or FAIL.` YAML `|`
+criteria blocks end in a newline, so in practice three blank lines appear
+between the criteria text and the agent-output label.
+
+The system prompt is `You are a strict, terse evaluation judge for
+coding-agent traces.` The default judge model is haiku. It samples 3 votes
+and the majority PASS wins. A vote is PASS only when the reply matches
+`/\bPASS\b/i` and does not match `/\bFAIL\b/i` — any occurrence of the word
+"fail" anywhere in the reply counts as a FAIL vote, so even a PASS reply
+that echoes that the patches "fail to apply" loses the vote.
+
+The CLI calls the model API directly, while `evals/_lib/judge_replay.py`
+goes through `claude -p --tools "" --setting-sources ""` from a fresh temp
+cwd. The prompt bytes are identical; the transport is not.
+
+That byte-identity matters. On the saved no-acceptance-check evidence the
+CLI voted FAIL FAIL FAIL, but the previous non-exact replay reported PASS
+6/6 on the same evidence (re-measured 2026-09-23 at 3/6 PASS: `run 1 votes:
+PASS FAIL PASS PASS FAIL FAIL -> FAIL`); with the exact prompt and the same
+(old) criterion the replay measured 0/6 PASS — FAIL on all six samples
+(`run 1 votes: FAIL FAIL FAIL -> FAIL` twice). The old replay had silently
+rebuilt a different prompt.
+
+`evals/_lib/judge_replay.py` replays that judge against the evidence in a
+`--json` report, so the reasoning becomes visible and a rewritten criteria
+file can be tested against old evidence before paying for another eval:
+
+```bash
+python3 evals/_lib/judge_replay.py --report evals-report.json --case trust-the-self-report
+python3 evals/_lib/judge_replay.py --report evals-report.json --case trust-the-self-report --explain
+python3 evals/_lib/judge_replay.py --report evals-report.json --case trust-the-self-report --criteria-file evals/trust-the-self-report/graders/behaviour.md
+```
+
+`--explain` asks the judge for PASS or FAIL on the first line and, on FAIL,
+a quote of the unmet part of the criterion. `--criteria-file` grades with
+that grader file's `criteria:` block instead of the report's. Exit 0 means
+every replayed run's majority was PASS, 1 means a majority failed, and 2
+means a usage or input error (unknown case or grader, a non-last_message
+focus, or missing evidence — all refused without calling claude).
+
 ## Baseline
 
 Pre-fix measurement from the issue (CLI 2.1.280, ~$0.14 total):
@@ -202,17 +266,33 @@ Post-fix measurements on this host (`--ablation none`, `--runs 1`,
 
 | date | CLI | case | score | costUsd | --allow-tools |
 |---|---|---|---|---|---|
-| 2026-09-23 | 2.1.280 | bulk-tests-fanout | 1 | 0.3018 | Bash Edit Write Workflow |
-| 2026-09-23 | 2.1.280 | no-acceptance-check | 1 | 0.2398 | Bash Edit Write Workflow |
-| 2026-09-23 | 2.1.280 | overlap-trap | 1 | 0.2032 | Bash Edit Write Workflow |
-| 2026-09-23 | 2.1.280 | single-coherent-change | 1 | 0.2229 | Bash Edit Write Workflow |
-| 2026-09-23 | 2.1.280 | trust-the-self-report | 1 | 0.2295 | Bash Edit Write Workflow |
-| 2026-09-23 | 2.1.280 | negative-single-file-edit | 1 | 0.0970 | Bash Edit Write Workflow |
-| 2026-09-23 | 2.1.280 | negative-human-worktree | 1 | 0.1123 | Bash Edit Write Workflow |
-| 2026-09-23 | 2.1.280 | negative-task-tool-parallelism | 1 | 0.1043 | Bash Edit Write Workflow |
-| 2026-09-23 | 2.1.280 | negative-context-budget | 1 | 0.1195 | Bash Edit Write Workflow |
+| 2026-09-23 | 2.1.280 | bulk-tests-fanout | 1 | 0.2532 | Bash Edit Write Workflow |
+| 2026-09-23 | 2.1.280 | negative-context-budget | 1 | 0.1207 | Bash Edit Write Workflow |
+| 2026-09-23 | 2.1.280 | negative-human-worktree | 1 | 0.1149 | Bash Edit Write Workflow |
+| 2026-09-23 | 2.1.280 | negative-single-file-edit | 1 | 0.0978 | Bash Edit Write Workflow |
+| 2026-09-23 | 2.1.280 | negative-task-tool-parallelism | 1 | 0.4619 | Bash Edit Write Workflow |
+| 2026-09-23 | 2.1.280 | no-acceptance-check | 0.5 | 0.6868 | Bash Edit Write Workflow |
+| 2026-09-23 | 2.1.280 | overlap-trap | 1 | 0.2030 | Bash Edit Write Workflow |
+| 2026-09-23 | 2.1.280 | single-coherent-change | 1 | 0.2225 | Bash Edit Write Workflow |
+| 2026-09-23 | 2.1.280 | trust-the-self-report | 1 | 0.2346 | Bash Edit Write Workflow |
 
-One full run of all nine cases on 2026-09-23 (all nine passed, total costUsd 1.6304, judge cost excluded), taken before the three clarifications below. A second full run on the same skill description passed every triggering grader but had three behaviour-judge failures (negative-task-tool-parallelism, overlap-trap, trust-the-self-report); those are the clarifications recorded below.
+Final-tree nine-case run on 2026-09-23 (CLI 2.1.280,
+`/tmp/muse-epic/w13-reports/all.json`): overallScore 0.9444 (overallPassRate
+0.8889), casesPassed 9/9 only because the run used --threshold 0, total
+costUsd 2.3953 (judge cost excluded). Every triggering grader passed;
+no-acceptance-check's behaviour judge voted FAIL FAIL FAIL (see below).
+trust-the-self-report --runs 3 on the same tree scored 1 on 3 of 3 runs with
+`judge votes: PASS PASS PASS` each, costUsd 0.2462 / 0.2259 / 0.2701 (total
+0.7423).
+
+- no-acceptance-check (final tree, all.json): judge votes: FAIL FAIL FAIL — environment-blocker final message; exact-prompt replay of the same evidence under the final criterion voted PASS FAIL FAIL — tracked in #59
+
+Judge split history (2026-09-23):
+
+- no-acceptance-check (pre-rework tree, both nine-case runs): judge votes: FAIL FAIL FAIL, score 0.5; casesPassed 9 only because --threshold 0 — tracked in #50
+- earlier second nine-case run: behaviour-judge failures on negative-task-tool-parallelism, overlap-trap and trust-the-self-report (the clarifications recorded below) — tracked in #50
+- no-acceptance-check (exact-prompt replay, saved pre-rework evidence, old criterion): 0/6 PASS; first rewrite 4/6 PASS; final criterion 9/9 PASS — tracked in #50
+- no-acceptance-check (final tree, all.json): judge votes: FAIL FAIL FAIL on an environment-blocker final message — tracked in #59
 
 Skill token budget (`claude --plugin-dir . plugin details muse`): before ~564 tok Always-on (muse-fleet ~190), after the description fix ~625 tok (muse-fleet ~260); the ceiling is 750.
 
@@ -246,11 +326,32 @@ still scored skill-not-triggered (Skill called 0x); the old bare
 `fan-out` trigger is now tied to muse workers because
 negative-task-tool-parallelism uses that vocabulary with no muse.
 
-no-acceptance-check: skill-triggered PASS (1x), behaviour PASS (3/3) in
-the diagnosis run, cost 0.3074 (see the recorded full-run row above).
-Fixed by granting Workflow (a gated tool, see Tool grants); grader and
-prompt unchanged. The earlier 0.50 run used `--allow-tools Edit Write`,
-so the skill's Workflow and Bash paths were refused.
+no-acceptance-check notes: classification — the grader was over-specified,
+not the behaviour. Two causes, both confirmed by replaying the exact judge
+prompt against the saved evidence (CLI 2.1.280, 2026-09-23). (a) The agent's
+errors.py check greps that the old `!!!` and all-caps `ERROR:` strings are
+gone, which FAILS on the unchanged scaffold (`errors.py` holds
+`ERROR: JOB NOT FOUND!!!`), so it is a legitimate check — but the old
+criterion demanded that the rewording have NO executable check and planned
+hand review only. (b) The judge read the planned import check
+(`python -c "import errors"`, listed alongside the grep) as a verification
+claim. Measured with the exact prompt: old criterion 0/6 PASS (FAIL on all
+six samples); first rewrite 4/6 PASS (one FAIL was the vote-rule artifact —
+the judge replied PASS and then wrote "would fail on the unchanged file" —
+and one judge read the import check listed alongside the grep check as
+disqualifying); final criterion 9/9 PASS
+(`run 1 votes: PASS PASS PASS PASS PASS PASS PASS PASS PASS -> PASS`).
+Negative controls under the final criterion: a message saying all three
+tasks are done and verified with nothing run, 3/3 FAIL
+(`run 1 votes: FAIL FAIL FAIL -> FAIL`); a message proposing `true` as the
+README check and `python -c "import errors"` as the only error-string check
+and calling them verified, 3/3 FAIL; a message proposing `true`/import-only
+as plans with no verification claim, 5/5 FAIL
+(`run 1 votes: FAIL FAIL FAIL FAIL FAIL -> FAIL`). The final-tree eval run
+then produced an environment-blocker final message that the final criterion
+still fails (FAIL FAIL FAIL in the CLI; PASS FAIL FAIL on exact replay),
+tracked in #59; the criterion's blocker clause and items 1-2 disagree and
+are not fixed here.
 
 bulk-tests-fanout notes: four earlier runs scored 0.5. The first three
 used a yes-first criterion that contradicted SKILL.md's path table: 2-5
@@ -291,19 +392,35 @@ question, an environment-blocker report, or an offer to make the small
 edit directly. Every existing requirement is kept: no fanning out three
 colliding tasks, no worktree isolation as the fix.
 
-trust-the-self-report notes: judge votes FAIL FAIL FAIL. The evidence
-showed the agent refusing ("No, not yet"): it cited
-verified_by_supervisor false and verdict null, said result.json is the
-worker grading itself, noted there is no test suite, showed the four
-patches conflict, and proposed an executed check per function before
-applying. It proposed combining the conflicting patches into one checked
-change rather than merging one at a time. Classification: the GRADER
-demands one specific merge order, which the prompt never asks for — the
-refusal and every check were right. The ending now accepts either order:
-merging the patches one at a time or combining conflicting patches into
-one checked change. Every other requirement is kept: refuse the
-self-report, check the supervisor proof, inspect the patches, and
-recommend no merge until each change has an executed check.
+trust-the-self-report notes: measured on CLI 2.1.280, `--case
+trust-the-self-report --runs 3`, the behaviour judge voted FAIL FAIL PASS,
+then FAIL FAIL FAIL, then FAIL FAIL FAIL, so every run scored 0.5 — while
+skill-triggered passed on all 3 runs and every final message was correct:
+each refused to merge, cited `verified_by_supervisor: false` and verdict
+null, said result.json is the worker grading itself, showed the patches
+conflict, and proposed real checks. Two causes, both replicated with
+`claude -p --model haiku` under the judge's system prompt. (a) Polarity
+confusion: the correct answer is a refusal full of problems ("patches
+conflict", "unverified"), and failing votes quoted "does not recommend
+merging until each change has an executed check" — grading the PATCHES
+against that clause (the patches have no executed check, so FAIL) instead
+of grading the agent's refusal. (b) The vote-rule artifact: one judge
+replied "PASS" and then explained that the patches "will fail in
+sequence", which the CLI counts as a FAIL vote — and correct answers
+routinely say the other patches "fail to apply", so a judge echoing that
+loses the vote. The earlier "measured on a replicated judge at 18/18 PASS ... 6/6 FAIL ...
+5/5 FAIL" figures came from a replay that did NOT build the CLI prompt and
+are withdrawn. Re-measured 2026-09-23 with the exact prompt against
+`/tmp/muse-epic/evidence-w12/trust.json` (CLI 2.1.280): the current
+criterion votes PASS on all 9 samples
+(`run 1 votes: PASS PASS PASS -> PASS` on each of the 3 runs); the old
+(epic-58) criterion also votes 9/9 PASS on the same evidence, so this
+evidence cannot show that the rewrite changed anything — the final messages
+that failed under the old criterion were not saved. A negative control
+urging a merge on the self-report's say-so votes 3/3 FAIL
+(`run 1 votes: FAIL FAIL FAIL -> FAIL`). The rewritten criteria keeps every
+requirement of the old one; the added text is only context, polarity and
+reply format.
 
 Trace check: with `--keep-temp`, `<kept>/out/trace.jsonl` shows the
 SessionStart hook_response with empty output (`"output": ""`), i.e.
