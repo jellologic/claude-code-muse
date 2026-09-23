@@ -46,7 +46,7 @@ else
   printf '%s' "$last" > "$BY_DIR/seen_prompt.txt"; echo bare > "$BY_DIR/seen_via.txt"
 fi
 [ -n "$wt" ] && printf 'caf\xe9\n' > "$wt/x.txt"
-printf '{"payload":{"kind":"run_terminal","terminal":"completed","text":"ok"}}\n'
+printf '{"payload":{"kind":"run_terminal","terminal":"completed","text":"ok caf\xe9"}}\n'
 STUB
 chmod +x "$BY/bin/muse"
 # Native Windows python finds only PATHEXT files, and CreateProcess needs the .cmd.
@@ -76,15 +76,17 @@ by_do() {  # by_do <repo> <subcommand> <id> [args...] -> JSON on stdout
   (cd "$repo" && by_py "$BY_TASK" "$sub" --id "$id" --out "$repo/.muse-fleet/tasks" "$@" 2>/dev/null)
 }
 
-# 1. The issue's reproduction: the worker writes caf\xe9, --max-rounds 1, then 1 run and
-#    2 revises. A crash before save_state un-counted the round and let muse run again.
+# 1. The worker's bytes arrive twice: once in the file it writes, once in the
+#    event-stream text run_muse decodes as UTF-8. A strict decode of that stream
+#    raised UnicodeDecodeError outside the ValueError/OSError the loop handles,
+#    so the round was never recorded and a second muse call went out.
 R="$BY/r1"; by_repo "$R"; rm -f "$BY/calls.log"
 by_run "$R" c --prompt noop --max-rounds 1 > "$BY/run1.json"
 by_do "$R" revise c --feedback more > "$BY/rev1.json"
 by_do "$R" revise c --feedback more > "$BY/rev2.json"
 python3 - "$BY" "$R/.muse-fleet/tasks/c/state.json" <<'PY' \
-  && ok "bytes: a worker writing caf\\xe9 under --max-rounds 1: run + 2 revises = 1 muse call, 1 round, max_rounds_exhausted" \
-  || bad "bytes: a non-UTF-8 worker file broke the round count" "$(head -c 400 "$BY/run1.json")"
+  && ok "bytes: worker bytes in its file and its event stream under --max-rounds 1: run + 2 revises = 1 muse call, 1 round, max_rounds_exhausted" \
+  || bad "bytes: non-UTF-8 worker bytes broke the round count" "$(head -c 400 "$BY/run1.json")"
 import json, os, sys
 d = sys.argv[1]
 run = json.load(open(os.path.join(d, "run1.json"), encoding="utf-8"))

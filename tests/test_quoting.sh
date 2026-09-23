@@ -20,6 +20,8 @@ if ! declare -F ok >/dev/null 2>&1; then
   SKILL="$(native_path "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)")"
   LAB="$(native_path "$(mktemp -d "${TMPDIR:-/tmp}/muse-q.XXXXXX")")"
   if [ -z "${LAB:-}" ] || [ ! -d "$LAB" ]; then echo "no scratch dir" >&2; exit 1; fi
+  # Standalone only: an early exit must not leave the lab behind under TMPDIR.
+  trap 'rm -rf "$LAB"' EXIT
   PASS=0; FAIL=0; SKIP=0
   ok()  { PASS=$((PASS+1)); printf '  PASS  %s\n' "$1"; }
   bad() { FAIL=$((FAIL+1)); printf '  FAIL  %s\n' "$1"; [ -n "${2:-}" ] && echo "        $2"; }

@@ -23,6 +23,8 @@ if ! declare -F ok >/dev/null 2>&1; then
   # Every path below is built from LAB and the next lines rm -rf under it.
   if [ -z "$LAB" ] || [ ! -d "$LAB" ]; then echo "no scratch dir" >&2; exit 1; fi
   LAB="$(native_path "$LAB")"
+  # Standalone only: an early exit must not leave the lab behind under TMPDIR.
+  trap 'rm -rf "$LAB"' EXIT
   PASS=0; FAIL=0
   ok()  { PASS=$((PASS+1)); printf '  PASS  %s\n' "$1"; }
   bad() { FAIL=$((FAIL+1)); printf '  FAIL  %s\n' "$1"; [ -n "${2:-}" ] && echo "        $2"; }
@@ -155,13 +157,24 @@ RT_RC=$?
   || bad "roundtrip: finish wrong" "rc=$RT_RC $(cat "$RT_DIR/fin.json" "$RT_DIR/fin.err" | tail -5)"
 
 # ---- the userConfig env var reaches state.max_rounds (5: neither the default nor the flag above)
+# state.json alone cannot prove the run worked: do_round saves state before
+# returning, so a raise after the save still leaves max_rounds behind. The run's
+# own exit code and stdout status pin that the round actually completed.
 RT_REPO2="$RT_DIR/repo2"; rt_mkrepo "$RT_REPO2"
 (cd "$RT_REPO2" && env PATH="$(shell_path "$RT_DIR/bin"):$PATH" MUSE_DATA_DIR="$RT_DIR/musedata" RT_STUB_LOG="$RT_DIR/stub2.log" \
    CLAUDE_PLUGIN_OPTION_MAX_ROUNDS=5 python3 "$TASK" run --id rte --repo "$RT_REPO2" --out "$RT_DIR/out2" \
-   --worktree-root "$RT_DIR/wt2" --model stub-model --prompt x >/dev/null 2>&1)
-[ "$(rt_jget "$RT_DIR/out2/rte/state.json" 'd["max_rounds"]' 2>/dev/null)" = 5 ] \
-  && ok "roundtrip: CLAUDE_PLUGIN_OPTION_MAX_ROUNDS reaches state.max_rounds" \
-  || bad "roundtrip: env max_rounds not stored"
+   --worktree-root "$RT_DIR/wt2" --model stub-model --prompt x >"$RT_DIR/rte.json" 2>"$RT_DIR/rte.err")
+RT_RTE_RC=$?
+RT_RTE_MAX="$(rt_jget "$RT_DIR/out2/rte/state.json" 'd["max_rounds"]' 2>"$RT_DIR/rte-jget.err")"
+RT_RTE_JERR="$(cat "$RT_DIR/rte-jget.err")"
+RT_RTE_STATUS="$(rt_jget "$RT_DIR/rte.json" 'd["status"]' 2>"$RT_DIR/rte-status.err")"
+RT_RTE_SERR="$(cat "$RT_DIR/rte-status.err")"
+if [ "$RT_RTE_RC" = 0 ] && [ "$RT_RTE_STATUS" = completed ] && [ "$RT_RTE_MAX" = 5 ]; then
+  ok "roundtrip: CLAUDE_PLUGIN_OPTION_MAX_ROUNDS reaches state.max_rounds"
+else
+  bad "roundtrip: CLAUDE_PLUGIN_OPTION_MAX_ROUNDS reaches state.max_rounds" \
+    "rc=$RT_RTE_RC status=$RT_RTE_STATUS max_rounds=$RT_RTE_MAX jget_err=[$RT_RTE_JERR] status_err=[$RT_RTE_SERR] $(tail -3 "$RT_DIR/rte.err" 2>/dev/null)"
+fi
 
 # ---- fleet: the base moves while the worker runs
 RT_REPO3="$RT_DIR/repo3"; rt_mkrepo "$RT_REPO3"; RT_BASE3=$(git -C "$RT_REPO3" rev-parse main)

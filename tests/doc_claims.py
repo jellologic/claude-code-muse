@@ -13,6 +13,9 @@ Subcommands (each takes the plugin ROOT so probes can point at a mutated copy):
                 One stdout line per mismatch; exit nonzero on any.
   events ROOT   hook events named in README.md against the keys of
                 hooks/hooks.json. One line per mismatch; exit nonzero.
+                "Named" is the KNOWN_EVENTS word matches plus every bold
+                CamelCase word and every CamelCase word followed by "hook",
+                so a README naming an event no list holds is still checked.
   flags  ROOT   (shim, subcommand, flag) triples named in prose, one per
                 line, tab-separated. The caller checks each against the
                 shim's own --help, so this subcommand always exits 0.
@@ -219,7 +222,15 @@ def do_counts(root):
 def do_events(root):
     problems = []
     readme = read(root, "README.md")
-    named = [k for k in KNOWN_EVENTS if re.search(r"\b%s\b" % k, readme)]
+    known = [k for k in KNOWN_EVENTS if re.search(r"\b%s\b" % k, readme)]
+    # A hard-coded list alone never sees an event the list does not hold, so a
+    # README naming a new event in either prose form still counts as naming it:
+    # bold CamelCase (`**SessionStart**`) or CamelCase followed by "hook"
+    # ("the SessionStart hook"). Bare CamelCase words are not events -- GitHub
+    # and NotebookEdit appear in the README in neither form.
+    bold = re.findall(r"\*\*([A-Z][a-z]+(?:[A-Z][a-z]+)+)\*\*", readme)
+    hooked = re.findall(r"\b([A-Z][a-z]+(?:[A-Z][a-z]+)+) hooks?\b", readme)
+    named = sorted(set(known) | set(bold) | set(hooked))
     try:
         hooks = json.loads((root / "hooks" / "hooks.json")
                            .read_text(encoding="utf-8"))["hooks"]
