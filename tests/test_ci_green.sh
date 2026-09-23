@@ -31,7 +31,7 @@ printf '#!/bin/sh\necho "muse %s"\n' "$CG_TESTED" > "$CG/bin/muse"; chmod +x "$C
 printf '{"k":"v"}' > "$CG/cfg/auth.json"
 cg_pf() {
   PATH="$(shell_path "$CG/crlfpy"):$(shell_path "$CG/bin"):/usr/bin:/bin" MUSE_CONFIG_DIR="$CG/cfg" \
-    MUSE_DATA_DIR="$CG/data" CLAUDE_PLUGIN_ROOT="$SKILL" bash "$SKILL/hooks/preflight.sh" 2>/dev/null
+    MUSE_DATA_DIR="$CG/data" CLAUDE_PLUGIN_ROOT="$SKILL" CLAUDE_PROJECT_DIR="$CG" bash "$SKILL/hooks/preflight.sh" 2>/dev/null
 }
 CG_CR="$(PATH="$(shell_path "$CG/crlfpy"):$PATH" python3 -c 'print(1)' | od -c | tr -d ' \n')"
 CG_OUT_MISSING="$(cg_pf)"

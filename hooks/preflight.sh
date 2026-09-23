@@ -64,11 +64,21 @@ CATALOG_EOF
   fi
 fi
 
-[ ${#problems[@]} -eq 0 ] && exit 0
+if [ ${#problems[@]} -gt 0 ]; then
+  echo "muse plugin preflight found ${#problems[@]} issue(s) that would break delegation:"
+  for p in "${problems[@]}"; do
+    echo "  - $p"
+  done
+  echo "Mention this only if the user tries to delegate work to muse; it is not relevant otherwise."
+fi
 
-echo "muse plugin preflight found ${#problems[@]} issue(s) that would break delegation:"
-for p in "${problems[@]}"; do
-  echo "  - $p"
-done
-echo "Mention this only if the user tries to delegate work to muse; it is not relevant otherwise."
+# Leftover delegation worktrees have an artifact record to show for them, so
+# they are reported from SessionStart: SessionEnd output is discarded and
+# reaches nobody. Silent when python3 is missing or there is nothing to say.
+if command -v python3 >/dev/null 2>&1; then
+  WT_OUT="$(python3 "${CLAUDE_PLUGIN_ROOT:-.}/hooks/leftover_worktrees.py" 2>/dev/null)"
+  if [ -n "$WT_OUT" ]; then
+    printf '%s\n' "$WT_OUT"
+  fi
+fi
 exit 0

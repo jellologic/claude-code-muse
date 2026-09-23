@@ -45,7 +45,7 @@ PF_run() {  # PF_run <bindir-or-empty> -> sets PF_OUT, PF_RC; stdout only, it re
   else
     PF_PATH="$PF_PYDIR:/usr/bin:/bin"
   fi
-  PF_OUT="$(PATH="$PF_PATH" MUSE_CONFIG_DIR="$PF_CFG" MUSE_DATA_DIR="$PF_DATA" CLAUDE_PLUGIN_ROOT="$SKILL" bash "$SKILL/hooks/preflight.sh" 2>/dev/null)"
+  PF_OUT="$(PATH="$PF_PATH" MUSE_CONFIG_DIR="$PF_CFG" MUSE_DATA_DIR="$PF_DATA" CLAUDE_PLUGIN_ROOT="$SKILL" CLAUDE_PROJECT_DIR="$PF_BASE" bash "$SKILL/hooks/preflight.sh" 2>/dev/null)"
   PF_RC=$?
 }
 

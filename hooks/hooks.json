@@ -6,7 +6,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/preflight.sh\"",
+            "command": "bash",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/preflight.sh"
+            ],
             "timeout": 10
           }
         ]
@@ -14,22 +17,29 @@
     ],
     "SubagentStop": [
       {
-        "matcher": "muse-supervisor",
+        "matcher": "^muse:muse-supervisor$",
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/supervisor_stop.py\"",
+            "command": "python3",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/supervisor_stop.py"
+            ],
             "timeout": 10
           }
         ]
       }
     ],
-    "SessionEnd": [
+    "PostToolUse": [
       {
+        "matcher": "Agent",
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/session_end.py\"",
+            "command": "python3",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/supervisor_result.py"
+            ],
             "timeout": 10
           }
         ]
