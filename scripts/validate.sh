@@ -71,7 +71,7 @@ OFFLINE=0
 PASS=0; FAIL=0; SKIP=0
 # Deleting a check block must turn the run red: the count guard before section 4
 # compares PASS+FAIL+SKIP against this, so a removed block lowers the tally.
-EXPECTED_OFFLINE=164
+EXPECTED_OFFLINE=177
 
 ok()   { PASS=$((PASS+1)); printf '  \033[32mPASS\033[0m  %s\n' "$1"; }
 bad()  { FAIL=$((FAIL+1)); printf '  \033[31mFAIL\033[0m  %s\n' "$1"; [ -n "${2:-}" ] && echo "        $2"; }
@@ -2067,6 +2067,7 @@ sys.exit(0 if c and not any('PARTIAL' in x['value'] for x in c) else 1)" \
   && ok "a scan that covered the tree is not labelled partial" \
   || bad "the partial label fires unconditionally" "$DOC_FULL"
 
+. "$SKILL/tests/test_roundtrip.sh"
 # ------------------------------------------------------------ 4. live runs
 # The guard counts itself out: no ok here, so deleting a block lowers the tally.
 OFFLINE_SEEN=$((PASS+FAIL+SKIP))

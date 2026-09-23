@@ -635,7 +635,11 @@ def run_muse(cmd, prompt: str, repo: Path, events: Path, stderr: Path, timeout: 
         # Its own session, so a timeout can signal the whole tree. A --yolo muse run
         # spawns builds and test runners; killing only the direct child leaves those
         # writing into a worktree we are about to delete, and still spending.
-        p = subprocess.Popen([*cmd, prompt], cwd=str(repo), stdout=fo, stderr=fe,
+        # Popen uses CreateProcess on Windows, which never consults PATHEXT: a muse
+        # installed as a .cmd shim is FileNotFoundError under its bare name even though
+        # shutil.which (what preflight checks) resolves it. Resolve the same way first.
+        exe = shutil.which(cmd[0]) or cmd[0]
+        p = subprocess.Popen([exe, *cmd[1:], prompt], cwd=str(repo), stdout=fo, stderr=fe,
                              text=True, start_new_session=True)
         try:
             p.wait(timeout=timeout)
