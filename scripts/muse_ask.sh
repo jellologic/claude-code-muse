@@ -24,9 +24,10 @@
 # point at a dirty working copy. --write opts into editing (and disables the sandbox),
 # which you should only do against a worktree or a repo you are willing to have modified.
 #
-# --write scans the repo for credentials first and refuses when it finds a confirmed
-# one. --allow-secrets scans and reports but does not refuse; --no-secret-scan skips
-# the scan entirely.
+# Every run scans the repo for credentials first and refuses when it finds a
+# confirmed one, in --write and read-only mode alike: a read-only worker can still
+# read a secret and send it to the contributor tier. --allow-secrets scans and
+# reports but does not refuse; --no-secret-scan skips the scan entirely.
 #
 # --model, --repo, --timeout and --max-steps override the configured defaults for one
 # run; --refuse-on-secrets carries the configured default for the credential scan.
@@ -143,10 +144,10 @@ REPO_ABS="$(cd "$REPO" 2>/dev/null && pwd || echo "$REPO")"
 SESSION_KEY="$(printf '%s' "$REPO_ABS" | python3 -c 'import hashlib,sys;print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest()[:16])' 2>/dev/null)"
 SESSION_FILE="$DATA_DIR/last-session/$SESSION_KEY"
 
-# A --write run can edit the repo, so scan for credentials BEFORE anything is
-# recorded or spawned. The read-only path never reaches a worker that can write,
-# so it is unchanged.
-if [[ "$WRITE" -eq 1 && "$NO_SECRET_SCAN" -eq 0 ]]; then
+# Scan for credentials BEFORE anything is recorded or spawned, in --write and
+# read-only mode alike: a read-only worker still reads the repo, and reading a
+# secret sends it to the contributor tier just as writing does.
+if [[ "$NO_SECRET_SCAN" -eq 0 ]]; then
   ASK_SCAN_OUT="$(python3 -c '
 import importlib.util, sys
 spec = importlib.util.spec_from_file_location("mc", sys.argv[1])

@@ -65,7 +65,8 @@ to slow down on. After a run they are also recorded in `<out>/<id>/state.json` u
   `--allow-secrets` proceeds anyway, `--no-secret-scan` skips the check, and
   `/muse:doctor --scan` runs it on demand. Findings record the file, line and kind and
   never the matched text — copying a secret into an artifact that then gets read and
-  shared would defeat the point.
+  shared would defeat the point. `muse-ask` scans in both modes: a read-only worker
+  can still read a secret and send it to the contributor tier.
 - Nothing is sent anywhere else. There is no telemetry, no analytics, and no network call
   in this plugin outside the `muse` CLI itself.
 

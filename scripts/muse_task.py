@@ -238,7 +238,14 @@ def do_round(st: dict, tdir: Path, prompt: str, args, kind: str,
         "resumed" if resumed else ("new" if resumed is None else "NOT RESUMED")),
         file=sys.stderr)
 
+    # Whether the child was actually spawned. An ordinary exception before the
+    # spawn (an OSError opening the events file, a dead binary) spent nothing,
+    # so it must not be recorded as a round; one after the spawn spent money.
+    spawned = False
+
     def on_spawn(p):
+        nonlocal spawned
+        spawned = True
         st["round_in_flight"] = {
             "pid": p.pid,
             "pgid": p.pid if core.HAVE_PROCESS_GROUPS else None,
@@ -251,18 +258,64 @@ def do_round(st: dict, tdir: Path, prompt: str, args, kind: str,
                             rdir / "stderr.log",
                             int(st.get("timeout") or core.DEFAULT_TIMEOUT),
                             on_spawn=on_spawn)
+        # Built and recorded inside the protected region, not after it: a signal
+        # landing between run_muse's return and the append used to leave no round
+        # and a stale marker. Any first touch of res can carry the signal.
+        rnd = {
+            "n": n, "kind": kind, "status": res["status"], "reason": res["reason"],
+            "session_id": st.get("session_id"), "resumed": bool(resumed),
+            "elapsed_s": res["elapsed_s"], "model_actual": res["model_actual"],
+            # What muse itself said, so a failed round is diagnosable from the record
+            # instead of only from a log file nothing tells the supervisor to open.
+            "exit_code": res.get("exit_code"),
+            "stderr_tail": res.get("stderr_tail", "")[-800:],
+            "events": str(rdir / "events.jsonl"),
+            "stderr": str(rdir / "stderr.log"),
+            "patch_lines": 0, "files_changed": [], "patch_fingerprint": None,
+        }
+        # The round spent money, and an exception later in harvest or fingerprinting
+        # used to un-count it, letting max_rounds be bypassed. Record it before
+        # that can happen.
+        st.pop("round_in_flight", None)
+        st["rounds"].append(rnd)
+        save_state(tdir, st)
+    except Exception as e:
+        # An ordinary error, not a signal. main() already emits the single "error"
+        # object for these, so this path must not emit or stdout carries two.
+        if spawned:
+            reason = "{}: {}".format(type(e).__name__, e)[:300]
+            if len(st.get("rounds", [])) < n:
+                st["rounds"].append(
+                    {"n": n, "kind": kind, "status": "error", "reason": reason,
+                     "session_id": st.get("session_id"), "resumed": bool(resumed),
+                     "patch_lines": 0, "files_changed": [],
+                     "events": str(rdir / "events.jsonl"),
+                     "stderr": str(rdir / "stderr.log")})
+            st.pop("round_in_flight", None)
+            save_state(tdir, st)
+            core.append_event(Path(st["repo"]),
+                              {"event": "round_finished", "task": st["id"],
+                               "round": n, "max_rounds": st["max_rounds"],
+                               "status": "error"})
+        else:
+            # Nothing ran and nothing was spent: no round, just drop the marker.
+            st.pop("round_in_flight", None)
+            save_state(tdir, st)
+        raise
     except BaseException:
-        # The round spent money and touched the tree, so it must count against
+        # A termination signal, from the spawn until the record is saved. The
+        # round spent money and touched the tree, so it must count against
         # max_rounds. Stdout must still carry one JSON object.
         reason = ("supervisor received a termination signal; "
                   "the worker's process group was killed")
-        rnd = {"n": n, "kind": kind, "status": "interrupted", "reason": reason,
-               "session_id": st.get("session_id"), "resumed": bool(resumed),
-               "patch_lines": 0, "files_changed": [],
-               "events": str(rdir / "events.jsonl"),
-               "stderr": str(rdir / "stderr.log")}
+        if len(st.get("rounds", [])) < n:
+            st["rounds"].append(
+                {"n": n, "kind": kind, "status": "interrupted", "reason": reason,
+                 "session_id": st.get("session_id"), "resumed": bool(resumed),
+                 "patch_lines": 0, "files_changed": [],
+                 "events": str(rdir / "events.jsonl"),
+                 "stderr": str(rdir / "stderr.log")})
         st.pop("round_in_flight", None)
-        st["rounds"].append(rnd)
         save_state(tdir, st)
         # No harvest ran, so the count is unknown: a 0 here would read as
         # "the worker produced nothing" in the monitor. Omit the key.
@@ -274,23 +327,6 @@ def do_round(st: dict, tdir: Path, prompt: str, args, kind: str,
               "rounds_used": n,
               "rounds_left": max(0, int(st["max_rounds"]) - n)})
         raise
-
-    rnd = {
-        "n": n, "kind": kind, "status": res["status"], "reason": res["reason"],
-        "session_id": st.get("session_id"), "resumed": bool(resumed),
-        "elapsed_s": res["elapsed_s"], "model_actual": res["model_actual"],
-        # What muse itself said, so a failed round is diagnosable from the record
-        # instead of only from a log file nothing tells the supervisor to open.
-        "exit_code": res.get("exit_code"), "stderr_tail": res.get("stderr_tail", "")[-800:],
-        "events": str(rdir / "events.jsonl"),
-        "stderr": str(rdir / "stderr.log"),
-        "patch_lines": 0, "files_changed": [], "patch_fingerprint": None,
-    }
-    # The round spent money, and an exception later in harvest or fingerprinting used
-    # to un-count it, letting max_rounds be bypassed. Record it before that can happen.
-    st.pop("round_in_flight", None)
-    st["rounds"].append(rnd)
-    save_state(tdir, st)
 
     # Structured self-report, when a schema was supplied. This is a set of CLAIMS by the
     # same cheap model that did the work -- the supervisor checks it against the patch
@@ -332,6 +368,17 @@ def do_round(st: dict, tdir: Path, prompt: str, args, kind: str,
                                                  "round": n, "max_rounds": st["max_rounds"],
                                                  "status": res["status"],
                                                  "harvest_error": rnd["harvest_error"]})
+        if not isinstance(e, Exception):
+            # A signal during harvest: the round above stays recorded with its
+            # muse status, but the terminating process still owes stdout one
+            # object. An ordinary Exception needs no emit here -- main() prints
+            # the error object, and a second one would break the one-object rule.
+            emit({"id": st["id"], "round": n, "kind": kind, "status": "interrupted",
+                  "reason": ("termination signal arrived during harvest; "
+                             "patch.diff may be missing or incomplete"),
+                  "worktree": st["worktree"],
+                  "rounds_used": n,
+                  "rounds_left": max(0, int(st["max_rounds"]) - n)})
         raise
     # The event goes out here, after harvest computed the real count, so the
     # monitor never reports a round with a placeholder zero.
