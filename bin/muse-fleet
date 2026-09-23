@@ -1,0 +1,13 @@
+#!/bin/sh
+# Reached by bare name from PATH, possibly through a symlink; dirname of the link itself
+# would point at the wrong scripts/ directory, so follow the chain first.
+self=$0
+while [ -h "$self" ]; do
+  link=$(readlink "$self")
+  case $link in
+    /*) self=$link ;;
+    *) self=$(dirname "$self")/$link ;;
+  esac
+done
+here=$(cd -P "$(dirname "$self")" && pwd) || exit 1
+exec python3 "$here/../scripts/muse_fleet.py" "$@"

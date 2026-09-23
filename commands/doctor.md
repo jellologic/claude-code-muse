@@ -2,14 +2,14 @@
 description: Report whether this machine can delegate to muse, what model it would use, and what would go wrong
 argument-hint: "[--scan] [--repo <path>]"
 disable-model-invocation: true
-allowed-tools: Bash(python3:*), Read
+allowed-tools: Bash(muse-doctor:*), Read
 model: haiku
 ---
 
 # Can this machine delegate?
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/muse_doctor.py" [--repo <path>] [--scan] [--json]
+muse-doctor [--repo <path>] [--scan] [--json]
 ```
 
 Checks the muse binary and version, stored credentials (existence only, never contents),

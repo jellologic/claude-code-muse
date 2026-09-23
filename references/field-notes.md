@@ -142,6 +142,20 @@ multiplies token spend, the cost per worker token is what decides whether it is 
 A related warning circulating as "3 agents cost 10x" points the same way, though I have not
 verified its methodology.
 
+## Reaching the scripts: bin/ shims, not an MCP server
+
+The considered alternative was a plugin MCP server exposing task_run/verify/finish as
+typed tools: schema-validated args, no shell, and tools grantable by name. That shape
+would have removed a whole class of quoting and environment failures at once.
+
+Why bin/ won: the MCP server costs a long-running process and a larger rewrite. The
+shims fix the quoting and environment failures now — the old recipe stored a quoted
+interpreter-plus-script-path in a shell variable and re-expanded it at each call site,
+which broke on word-splitting and did not survive between Bash tool calls — make grants
+like Bash(muse-task:*) a real restriction, and run the same command in a workflow agent,
+a supervisor and a human terminal. The MCP server stays the route if Bash itself should
+be removed from the supervisor.
+
 ## What this changed in the skill
 
 - `--seed` / `--link` for untracked local files, plus a preflight warning naming files that

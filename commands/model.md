@@ -2,7 +2,7 @@
 description: Show which Muse Code model delegation will use, and optionally update the interactive pin
 argument-hint: "[--write]"
 disable-model-invocation: true
-allowed-tools: Bash, Read
+allowed-tools: Bash(muse-doctor:*), Bash(muse-model:*), Read, Grep
 model: haiku
 ---
 
@@ -16,13 +16,12 @@ catalog, keeps visible models whose id ends in `-contributor`, and picks the new
 edit anywhere. Show what that resolves to right now:
 
 ```bash
-python3 -c "
-import importlib.util, os
-spec = importlib.util.spec_from_file_location('c', os.path.join(os.environ['CLAUDE_PLUGIN_ROOT'], 'scripts/muse_core.py'))
-m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
-print('%s  (%s)' % m.resolve_model(m.LATEST))
-"
+muse-doctor
 ```
+
+Its `model resolution` line is what delegated runs resolve to right now (that line comes
+from `check_resolution` in `scripts/muse_doctor.py`), and its interactive pin line
+shows `settings.json`.
 
 A result of `fallback (no catalog found)` means the catalog is missing and runs will use a
 hardcoded id that goes stale — run any `muse exec` once to populate it.
@@ -32,8 +31,8 @@ A hand-written pin there is how a machine ends up a generation behind without an
 noticing. Show it, and update it if the user passed `--write`:
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/scripts/use_latest_contributor.sh"           # preview the change
-"${CLAUDE_PLUGIN_ROOT}/scripts/use_latest_contributor.sh" --write   # apply it (backs up first)
+muse-model           # preview the change
+muse-model --write   # apply it (backs up first)
 ```
 
 Without `--write` this is read-only — report the difference and let the user decide.
@@ -43,9 +42,8 @@ Without `--write` this is read-only — report the difference and let the user d
 Give both answers and say plainly whether they agree. If the user asked what a *past* run
 actually used, that is a different question with a different source:
 
-```bash
-jq -r 'select(.payload.kind=="run_model_configured") | .payload.model_id' <task-dir>/round-1/events.jsonl
-```
+Use the Grep tool to search `<task-dir>/round-1/events.jsonl` for `run_model_configured`
+and read `payload.model_id` from the matching line.
 
 Read that as the requested id echoed back, not as proof the provider served it — a run with
 a nonexistent model still reports that model there. What it catches is a `--model` flag that

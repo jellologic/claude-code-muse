@@ -5,10 +5,11 @@
 # sessions, which read settings.json. A hand-written pin there is how a machine ends up
 # a generation behind without anyone noticing -- re-run this after muse ships a new model.
 #
-#   use_latest_contributor.sh          # show what would change
-#   use_latest_contributor.sh --write  # apply it (backs up first)
+#   muse-model          # show what would change
+#   muse-model --write  # apply it (backs up first)
 
 set -euo pipefail
+case "${1:-}" in -h|--help) awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$0"; exit 0 ;; esac
 
 SETTINGS="${MUSE_SETTINGS:-$HOME/.config/muse/settings.json}"
 WRITE=0

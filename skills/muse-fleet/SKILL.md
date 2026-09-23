@@ -13,7 +13,7 @@ description: >-
   many files, for debugging, for work needing a design decision, or for parallelism that
   has nothing to do with muse — git worktrees on a human branch, Task-tool subagents, or
   background jobs.
-allowed-tools: Bash, Read, Grep, Glob, Agent, Workflow, AskUserQuestion
+allowed-tools: Bash(muse-task:*), Bash(muse-fleet:*), Bash(muse-ask:*), Bash(muse-model:*), Bash(echo:*), Bash(date:*), Bash(git status:*), Bash(git rev-parse:*), Read, Grep, Glob, Agent, Workflow, AskUserQuestion
 ---
 
 # Muse Fleet
@@ -128,11 +128,11 @@ Pick the path before doing anything else. Four exist and they are not interchang
 
 | Situation | Do |
 |---|---|
-| A question, an inventory, one small contained edit | `${CLAUDE_PLUGIN_ROOT}/scripts/muse_ask.sh` |
+| A question, an inventory, one small contained edit | `muse-ask` |
 | One task needing a check and revision rounds | Spawn the `muse-supervisor` agent with the brief |
 | 2–5 independent tasks, files already partitioned | One `muse-supervisor` agent per task, all spawned in one message |
 | A job that still needs decomposing | The workflow script in `${CLAUDE_PLUGIN_ROOT}/references/workflow.md` |
-| 20+ trivial tasks, review batched to the end | `${CLAUDE_PLUGIN_ROOT}/scripts/muse_fleet.py` |
+| 20+ trivial tasks, review batched to the end | `muse-fleet` |
 
 **Spawning `muse-supervisor` is the default for one or a few tasks.** Hand-driving
 `muse_task.py` yourself puts the same agent in both the driving and the judging seat, which
@@ -164,27 +164,24 @@ Workflow({ name: "muse-supervised-fleet",
 `${CLAUDE_PLUGIN_ROOT}/references/workflow.md` is the reasoning behind its shape; the code
 is `${CLAUDE_PLUGIN_ROOT}/workflows/muse-supervised-fleet.js`.
 
-Two args the script cannot work out for itself. `stamp`, because workflow scripts cannot
-call `Date.now()`. And `pluginRoot`, because a workflow script sees no environment and so
-cannot read `${CLAUDE_PLUGIN_ROOT}` itself — run `echo ${CLAUDE_PLUGIN_ROOT}` in Bash first
-and pass the result. The script throws on a missing `pluginRoot` rather than shelling out
-to a path that is not there.
+Two args need your help. `stamp` is required because workflow scripts cannot call
+`Date.now()`. `pluginRoot` is optional: run `echo ${CLAUDE_PLUGIN_ROOT}` in Bash first
+and pass it so the script can fall back to the absolute `bin/muse-task` when the
+plugin is not enabled in the session running the workflow.
 
 ### Driving one task by hand
 
-`${CLAUDE_PLUGIN_ROOT}/scripts/muse_task.py` is the instrument the supervisor holds, and it works on its own when
+`muse-task` is the instrument the supervisor holds, and it works on its own when
 you want one delegated task without the orchestration. Each subcommand is one turn of the
 loop; every one prints a single JSON object on stdout.
 
 ```bash
-T="${CLAUDE_PLUGIN_ROOT}/scripts/muse_task.py"
-
 # --out defaults to .muse-fleet/tasks; pass it only to override.
-python3 $T run    --id tests-auth --repo . --effort low \
-                  --prompt "Create tests/test_auth.py covering login() and logout(). Do not modify auth.py."
-python3 $T verify --id tests-auth --command "pytest tests/test_auth.py -q"
-python3 $T revise --id tests-auth --feedback-file /tmp/review.txt
-python3 $T finish --id tests-auth --verdict accept --summary "..."
+muse-task run    --id tests-auth --repo . --effort low \
+                 --prompt "Create tests/test_auth.py covering login() and logout(). Do not modify auth.py."
+muse-task verify --id tests-auth --command "pytest tests/test_auth.py -q"
+muse-task revise --id tests-auth --feedback-file /tmp/review.txt
+muse-task finish --id tests-auth --verdict accept --summary "..."
 ```
 
 `run` refuses over an id that already has a task, because re-running would overwrite its
@@ -210,15 +207,15 @@ round-<n>/          events.jsonl, stderr.log, prompt.txt, result.json per round
 
 ### Raw throughput without supervision
 
-`${CLAUDE_PLUGIN_ROOT}/scripts/muse_fleet.py` still runs the old unsupervised fan-out: N tasks, one round each,
+`muse-fleet` still runs the old unsupervised fan-out: N tasks, one round each,
 a report at the end and nothing checked in between. Reach for it when there are thirty
 trivial tasks and per-task supervision costs more than it saves — and know that you are
 buying a pile of unreviewed patches.
 
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/muse_fleet.py \
+muse-fleet \
   --tasks tasks.json --repo . --concurrency 3 \
-  --schema ${CLAUDE_PLUGIN_ROOT}/assets/result-schema.json
+  --schema "${CLAUDE_PLUGIN_ROOT}/assets/result-schema.json"
 ```
 
 **3–5 concurrent is the reported sweet spot.** Past roughly five, the limit stops being the
@@ -371,15 +368,14 @@ To pass something else, name it: `--model muse-spark-1.3`. Interactive `muse` se
 `~/.config/muse/settings.json` instead, which muse maintains itself:
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/scripts/use_latest_contributor.sh          # preview
-${CLAUDE_PLUGIN_ROOT}/scripts/use_latest_contributor.sh --write  # apply
+muse-model          # preview
+muse-model --write  # apply
 ```
 
 To see what a run was configured with:
 
-```bash
-jq -r 'select(.payload.kind=="run_model_configured") | .payload.model_id' round-1/events.jsonl
-```
+Use the Grep tool to search `round-1/events.jsonl` for `run_model_configured`
+and read `payload.model_id` from the matching line.
 
 Read that as the requested id echoed back, not as proof the provider served it — a run with
 a nonexistent model still reports that model here. It catches a `--model` flag that silently
@@ -394,12 +390,12 @@ read a slow run as a stuck one.
 ## One-off delegation without a fleet
 
 For a single bounded task — an inventory, a summary, one contained edit — even one
-supervised task is overkill. `${CLAUDE_PLUGIN_ROOT}/scripts/muse_ask.sh` is one question, one answer on stdout:
+supervised task is overkill. `muse-ask` is one question, one answer on stdout:
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/scripts/muse_ask.sh "List every file importing requests, with line numbers"
-${CLAUDE_PLUGIN_ROOT}/scripts/muse_ask.sh --effort xhigh "Why does connect() return None after a timeout?"
-${CLAUDE_PLUGIN_ROOT}/scripts/muse_ask.sh --write --effort low "Add a docstring to add() in calc.py"
+muse-ask "List every file importing requests, with line numbers"
+muse-ask --effort xhigh "Why does connect() return None after a timeout?"
+muse-ask --write --effort low "Add a docstring to add() in calc.py"
 ```
 
 Read-only by default (writes disabled, sandbox on), so it is safe against a dirty working
@@ -436,7 +432,7 @@ analysis inside a Claude pipeline).
 `run_terminal` record that decides success, worktree mechanics, structured output, safety
 flags, and the failure modes. Read it when adapting the scripts or debugging a run.
 
-`${CLAUDE_PLUGIN_ROOT}/scripts/muse_core.py` holds the worktree, seeding, exclusion and harvest logic shared by
+`scripts/muse_core.py` (in the plugin root) holds the worktree, seeding, exclusion and harvest logic shared by
 `muse_task.py` and `muse_fleet.py`, so the supervised and unsupervised paths cannot drift
 apart in what a patch contains.
 

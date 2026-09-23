@@ -20,8 +20,10 @@ export const meta = {
 // which is how we tell the two cases apart.
 const ROOT_TOKEN = '${CLAUDE_PLUGIN_ROOT}'
 const PLUGIN = args.pluginRoot || (ROOT_TOKEN.indexOf('$') === -1 ? ROOT_TOKEN : null)
-if (!PLUGIN) throw new Error('args.pluginRoot is required: this runtime does not substitute the plugin root, so pass the value of ${CLAUDE_PLUGIN_ROOT} (echo it first)')
-const TASK  = `python3 "${PLUGIN}/scripts/muse_task.py"`
+// bin/ is on an agent's PATH only while the plugin is enabled in the running
+// session; outside such a session bare muse-task exits 127, so the absolute shim
+// from pluginRoot is the documented fallback.
+const TASK  = PLUGIN ? `"${PLUGIN}/bin/muse-task"` : 'muse-task'
 // Absolute, deliberately. A relative --out is now resolved against the repository rather
 // than the cwd, which fixes the common case -- but only when every subcommand runs inside
 // that repository, and a workflow's agents make no such promise. Pass args.repo as an

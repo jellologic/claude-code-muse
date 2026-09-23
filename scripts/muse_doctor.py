@@ -177,7 +177,7 @@ def check_interactive_pin(out):
         out.append(("WARN", "interactive pin", pinned,
                     "Interactive `muse` is pinned to a non-contributor model and bills at "
                     "full rate. Delegation is unaffected. "
-                    "`use_latest_contributor.sh --write` changes it."))
+                    "`muse-model --write` changes it."))
 
 
 def check_python_git(out):

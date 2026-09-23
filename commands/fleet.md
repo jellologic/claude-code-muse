@@ -2,7 +2,7 @@
 description: Decompose a job into disjoint tasks and run the supervised muse fleet — one Opus supervisor per task, each verified before it completes
 argument-hint: '<job> — e.g. "add a pytest file for each module in src/"'
 disable-model-invocation: true
-allowed-tools: Bash, Read, Grep, Glob, Workflow, Agent, AskUserQuestion
+allowed-tools: Bash(echo:*), Bash(date:*), Bash(git status:*), Bash(git rev-parse:*), Read, Grep, Glob, Workflow, Agent, AskUserQuestion
 ---
 
 # Run the supervised fleet
@@ -35,7 +35,7 @@ something that will not merge.
 echo "${CLAUDE_PLUGIN_ROOT}"     # the workflow script cannot read its own env — pass this in
 date +%Y%m%d-%H%M                # the workflow script cannot call Date.now() either
 git status --porcelain           # must be clean; worktrees branch from a committed ref
-git status --ignored --porcelain | grep '^!!' | head -20   # what the worktrees will lack
+git status --ignored --porcelain   # lines starting with `!!` are what the worktrees will lack
 ```
 
 A dirty tree stops this: stop and offer to commit or stash. Untracked-but-needed files
