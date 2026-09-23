@@ -1,19 +1,41 @@
-# muse — delegate bulk coding work from Claude Code, with a supervisor that actually checks
+# muse — a Claude Code plugin that delegates bulk coding work to Muse Code, with a supervisor that actually checks
 
-A **Claude Code plugin** that offloads repetitive coding work to **Muse Code** workers
-running in isolated **git worktrees** — each one supervised by a Claude agent that reads
-the patch, **runs your acceptance check itself**, and sends the worker back with specific
-defects until the work is right.
+[![muse: delegate bulk coding work from Claude Code to Muse Code workers, with a supervisor that checks every patch](https://jellologic.github.io/claude-code-muse/og.png)](https://jellologic.github.io/claude-code-muse/)
+
+A **Claude Code plugin** that offloads repetitive coding work to cheap **Muse Code** workers,
+each running in its own isolated **git worktree**. Every worker is supervised by a Claude
+agent that reads the patch, **runs your acceptance check itself**, and sends the worker back
+with specific defects until the work is right. Nothing is applied to your repository unless
+you apply it.
 
 [![validate](https://github.com/jellologic/claude-code-muse/actions/workflows/validate.yml/badge.svg)](https://github.com/jellologic/claude-code-muse/actions/workflows/validate.yml)
+[![release](https://img.shields.io/github/v/release/jellologic/claude-code-muse?label=release)](https://github.com/jellologic/claude-code-muse/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-8A2BE2)](https://docs.claude.com/en/docs/claude-code/plugins)
+[![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-8A2BE2)](https://code.claude.com/docs/en/plugins)
 [![good first issues](https://img.shields.io/github/issues/jellologic/claude-code-muse/good%20first%20issue?label=good%20first%20issue)](https://github.com/jellologic/claude-code-muse/labels/good%20first%20issue)
 
 **muse types, Claude judges.** A test file per module, one migration pattern applied
-repo-wide, type hints across a package, bulk lint fixes — work that is too big to do by
-hand and too boring to spend your context window on. Push it to a cheap model, and spend
-your own budget on the part that needs judgment.
+repo-wide, type hints across a package, bulk lint fixes: work that is too big to do by hand
+and too boring to spend your context window on. Push it to a cheap model, and spend your own
+budget on the part that needs judgment.
+
+**Website:** [jellologic.github.io/claude-code-muse](https://jellologic.github.io/claude-code-muse/)
+
+## Contents
+
+- [The 30 seconds that explain it](#the-30-seconds-that-explain-it)
+- [Install](#install)
+- [When to use it, and when not to](#when-to-use-it-and-when-not-to)
+- [Why a supervisor, and not just "review it afterwards"](#why-a-supervisor-and-not-just-review-it-afterwards)
+- [Commands](#commands)
+- [Three rules that decide whether this works for you](#three-rules-that-decide-whether-this-works-for-you)
+- [It refuses to send your credentials](#it-refuses-to-send-your-credentials)
+- [Configuring it](#configuring-it)
+- [Guardrails](#guardrails)
+- [How it is verified](#how-it-is-verified)
+- [FAQ](#faq)
+- [Contributing](#contributing)
+- [Docs](#docs)
 
 ---
 
@@ -40,6 +62,45 @@ recorded. The supervisor then verified with `-rxX` that the xfail was a genuine 
 failure rather than a collection error in disguise.
 
 Nothing was applied to the repository. That is the default.
+
+## Install
+
+In Claude Code:
+
+```
+/plugin marketplace add jellologic/claude-code-muse
+/plugin install muse@claude-code-muse
+```
+
+Requires the Muse Code CLI (`muse`) on `PATH`, plus `git`, Python 3.9+ and Claude Code.
+CI exercises Python 3.9, 3.11 and 3.13 on Linux, plus a blocking Windows Git Bash leg
+(`.github/workflows/validate.yml` job "offline suite (windows)"); development is on
+macOS.
+
+**Then start a new session** (or `/clear`). Plugin commands, skills and agents register at
+session start, so `/muse:*` will not exist in the session you installed from. This is the
+first thing everyone hits.
+
+Then `muse login` once. Not sure it's set up right?
+
+```
+/muse:doctor
+```
+
+…reports the muse version, whether credentials exist, how fresh the model catalog is,
+**which model would actually be used**, your repo's git state and whether the worktree
+root is writable — with a fix on every failing line.
+
+## When to use it, and when not to
+
+| Good fit | Poor fit |
+|---|---|
+| Many independent, mechanical edits: tests per module, a migration pattern, type hints, lint fixes | One coherent change that needs to be designed as a whole |
+| Work you can check with a command (`pytest`, `tsc`, a linter, a grep) | Work with no runnable check; it can only be guessed at |
+| Tasks that partition cleanly by file | Edits that all touch the same routing table, registry or lockfile |
+| Open-source or non-sensitive code on the contributor tier | Proprietary code, unless you pin a full-rate model |
+
+`references/routing.md` has the longer version, including when plain Claude is cheaper.
 
 ## Why a supervisor, and not just "review it afterwards"
 
@@ -68,39 +129,15 @@ Two words that are not interchangeable, and the whole design rests on the gap be
 tree being harvested — so a green check from before something touched the worktree does not
 certify the patch that ships. `--accept-unverified "<reason>"` is the deliberate way past
 it, for the case where a correct patch makes a check legitimately go red; the reason is
-recorded and `/muse:status` prints it. The supervisor agent has **no `Write` or `Edit` tool** — not an oversight. A
-supervisor that can patch the worktree by hand will, and then the next round starts from a
-tree muse did not produce. That removal is a strong default, not a boundary: the supervisor
-still has `Bash`, and a shell redirect is a write. So the delta is **measured** rather than
-assumed away — `finish` fingerprints what muse produced, compares it with what it harvests,
-and reports `out_of_band_edit` with the acceptance checks that account for it. Claiming the
-toolset enforced this would be the more comfortable sentence and the false one.
+recorded and `/muse:status` prints it.
 
-## Install
-
-```
-/plugin marketplace add jellologic/claude-code-muse
-/plugin install muse@claude-code-muse
-```
-
-Requires the Muse Code CLI (`muse`) on `PATH`, plus `git`, Python 3.9+ and Claude Code.
-CI exercises Python 3.9, 3.11 and 3.13 on Linux, plus a blocking Windows Git Bash leg
-(`.github/workflows/validate.yml` job "offline suite (windows)"); development is on
-macOS.
-
-**Then start a new session** (or `/clear`). Plugin commands, skills and agents register at
-session start, so `/muse:*` will not exist in the session you installed from. This is the
-first thing everyone hits.
-
-Then `muse login` once. Not sure it's set up right?
-
-```
-/muse:doctor
-```
-
-…reports the muse version, whether credentials exist, how fresh the model catalog is,
-**which model would actually be used**, your repo's git state and whether the worktree
-root is writable — with a fix on every failing line.
+The supervisor does not write code. It has no `Write` or `Edit` tool, and because it still
+has `Bash` (where a redirect is a write), a **PreToolUse hook enforces it**: any write,
+edit or Bash command other than a muse-* shim call, read-only git, a file reader or the
+task's recorded check is denied with a reason. A supervisor that could patch the worktree by hand
+would, and then the next round would start from a tree muse did not produce. As a second
+line, `finish` fingerprints what muse produced, compares it with what it harvests, and
+reports any `out_of_band_edit`.
 
 ## Commands
 
@@ -189,10 +226,13 @@ a success it never verified.
 
 ## It refuses to send your credentials
 
-Before spawning a worker, `run` scans the worktree — after seeding, so it sees the `.env`
-you asked it to copy — and **refuses** on a structurally unmistakable credential: a PEM
-private-key block, an AWS key id, a GitHub/Slack/Stripe/Anthropic-format token.
-Contributor-tier content may be used for training, and that is not undoable.
+Before a worker starts, the plugin scans **every file that worker could read**: tracked,
+untracked and gitignored files, seeded files like the `.env` you asked it to copy, and
+followed symlinks. It **refuses** on a structurally unmistakable credential: a PEM
+private-key block, an AWS key id, or a GitHub, Slack, Stripe, OpenAI or Anthropic-format
+token. `muse-task`, `muse-fleet` and `muse-ask` all scan, including read-only `muse-ask`,
+because a read-only worker can still read a secret and send it to the contributor tier.
+Contributor-tier content may be used for product improvement, and that is not undoable.
 
 Credential-shaped assignments warn rather than block, because blocking those would make the
 plugin unusable on any repo with test fixtures. Findings record file, line and kind — never
@@ -200,55 +240,6 @@ the matched text. `/muse:doctor --scan` runs the same check on demand.
 
 See [SECURITY.md](SECURITY.md) for the full trust model, including the sharpest edge: your
 acceptance check runs on the **host**, with your privileges.
-
-## How it is verified
-
-This project's stated rule is *trust the measured result over what a change claims about
-itself*, and it is applied to itself:
-
-- **A free offline suite** — `bash scripts/validate.sh --offline` spawns no muse, needs no
-  credentials, and runs in seconds. CI runs it on every pull request across three Python
-  versions, plus a blocking Windows Git Bash leg (`.github/workflows/validate.yml` job
-  "offline suite (windows)").
-- **A paid live suite** — the full `bash scripts/validate.sh` drives real muse runs through
-  the fleet, the supervised loop, seeding, re-run safety and session resume.
-- **Every guard is negative-controlled.** A check that inspects nothing passes exactly like
-  a check that found nothing, so each one is broken on purpose and confirmed to go red.
-- **End-to-end, not just unit.** `/muse:delegate` and `/muse:fleet` are exercised as real
-  commands in fresh sessions, and the resulting patches are applied and tested independently.
-
-That process has caught things reading never would: a `cleanup --artifacts` path that could
-have deleted a home directory, a harvest that overwrote good patches with empty files on a
-git failure, a `--timeout` that killed a shell while the real worker ran on unbounded, and a
-documented safety control that did not exist.
-
-## Contributing
-
-**Issues and pull requests are welcome, including from AI agents.**
-
-- 🤖 **If you are an AI coding agent, start with [AGENTS.md](AGENTS.md)** — how to reach a
-  verified state in 60 seconds, where to find work, and the five rules that decide whether a
-  PR gets merged.
-- 👤 Humans: [CONTRIBUTING.md](CONTRIBUTING.md) covers the dev loop and house rules.
-- 🔎 Looking for something to do? Try
-  [`good first issue`](https://github.com/jellologic/claude-code-muse/labels/good%20first%20issue),
-  [`help wanted`](https://github.com/jellologic/claude-code-muse/labels/help%20wanted), or
-  [`agent-friendly`](https://github.com/jellologic/claude-code-muse/labels/agent-friendly)
-  — issues self-contained enough to finish from the issue text plus this repo, each with a
-  runnable acceptance check already named.
-
-Two contributions that are always valuable and need no permission:
-
-1. **Make a guard fail.** Every check in `scripts/validate.sh` claims to catch something.
-   Break the thing it watches. If it stays green, that is a real bug and a great issue.
-2. **Find a doc that lies.** Any statement that does not match the code is a defect here.
-   Two have already been found this way, both in this repo's own documentation.
-
-```bash
-git clone https://github.com/jellologic/claude-code-muse.git
-cd claude-code-muse
-bash scripts/validate.sh --offline     # free, seconds, no credentials needed
-```
 
 ## Configuring it
 
@@ -292,20 +283,120 @@ Never point a fleet at a dirty main working copy, keep worktrees outside the rep
 For proprietary or client-confidential code, pass `--model muse-spark-1.3` and pay full
 rate, or do not delegate it.
 
+## How it is verified
+
+This project's stated rule is *trust the measured result over what a change claims about
+itself*, and it is applied to itself:
+
+- **A free offline suite** — `bash scripts/validate.sh --offline` spawns no muse, needs no
+  credentials, and runs in about a minute. CI runs it on every pull request across three
+  Python versions, plus a blocking Windows Git Bash leg (`.github/workflows/validate.yml`
+  job "offline suite (windows)"). The expected check count is held in the script, so a
+  check that silently stops running fails the build.
+- **A mutation harness** — `bash scripts/mutate.sh` plants every bug this project has ever
+  fixed, one at a time, and fails if the suite stays green for any of them.
+- **Real evals** — `evals/<case>/case.yaml` runs with `claude plugin eval`: cases where the
+  skill must fire and cases where it must **not**, graded on behaviour as well as
+  triggering. `evals/README.md` records the measured scores and vote splits.
+- **Every guard is negative-controlled.** A check that inspects nothing passes exactly like
+  a check that found nothing, so each one is broken on purpose and confirmed to go red.
+- **End-to-end, not just unit.** `/muse:delegate` and `/muse:fleet` are exercised as real
+  commands in fresh `claude -p` sessions, and the resulting patches are applied and tested
+  independently.
+
+That process has caught things reading never would: a `cleanup --artifacts` path that could
+have deleted a home directory, a harvest that dropped tracked build files and then certified
+an empty patch, a hook that had never fired because its matcher could not match, and plugin
+options that no script ever received.
+
+## FAQ
+
+### How do I delegate coding tasks from Claude Code to a cheaper model?
+
+Install this plugin, then run `/muse:delegate <task>` with the exact files and a runnable
+check. A Claude supervisor hands the typing to a Muse Code worker in its own git worktree,
+runs your check itself, and returns a verdict and a patch path. For many independent tasks,
+`/muse:fleet <job>` plans them and runs one supervisor per task.
+
+### What is Muse Code?
+
+Muse Code is a coding-agent CLI (`muse`) backed by Meta's Muse Code API, with
+contributor-tier models that cost a fraction of full-rate models. This plugin drives it headlessly and treats its output as untrusted
+until a check proves otherwise. `references/muse-cli.md` records the CLI surface this plugin
+was verified against.
+
+### How is this different from Claude Code subagents?
+
+A Claude Code subagent runs on a Claude model inside your session. Here the *typing* moves
+to a cheaper external model in an isolated worktree, and a Claude subagent does only the
+judging: it reads the patch, runs the check, and re-prompts. The expensive model spends its
+tokens on review, not on generating boilerplate.
+
+### Does it apply patches to my repository automatically?
+
+No. Every command stops at a verdict and a patch path. An accepted patch is still a patch you
+have not read, so applying it is your call.
+
+### Does it send my code or my secrets anywhere?
+
+Your code goes to Muse Code, which is the point of delegating. Before any worker starts, a
+credential scan refuses to send a structurally unmistakable secret. The plugin itself has no
+telemetry and makes no other network calls. For proprietary code, pin a full-rate model or
+do not delegate it.
+
+### What happens if the worker gets it wrong?
+
+The supervisor sends it back with the specific defects, up to a round cap (3 by default,
+configurable). If it still is not right, the verdict is `revise` or `reject`, never a
+silent `accept`.
+
+### Does it work on Windows?
+
+The offline test suite runs on a blocking Windows Git Bash CI leg on every pull request.
+Day-to-day development and live delegation are exercised on macOS and Linux.
+
+## Contributing
+
+**Issues and pull requests are welcome, including from AI agents.**
+
+- 🤖 **If you are an AI coding agent, start with [AGENTS.md](AGENTS.md)** — how to reach a
+  verified state in 60 seconds, where to find work, and the five rules that decide whether a
+  PR gets merged.
+- 👤 Humans: [CONTRIBUTING.md](CONTRIBUTING.md) covers the dev loop and house rules.
+- 🔎 Looking for something to do? Try
+  [`good first issue`](https://github.com/jellologic/claude-code-muse/labels/good%20first%20issue),
+  [`help wanted`](https://github.com/jellologic/claude-code-muse/labels/help%20wanted), or
+  [`agent-friendly`](https://github.com/jellologic/claude-code-muse/labels/agent-friendly)
+  — issues self-contained enough to finish from the issue text plus this repo, each with a
+  runnable acceptance check already named.
+
+Two contributions that are always valuable and need no permission:
+
+1. **Make a guard fail.** Every check in `scripts/validate.sh` claims to catch something.
+   Break the thing it watches. If it stays green, that is a real bug and a great issue.
+2. **Find a doc that lies.** Any statement that does not match the code is a defect here.
+   Two have already been found this way, both in this repo's own documentation.
+
+```bash
+git clone https://github.com/jellologic/claude-code-muse.git
+cd claude-code-muse
+bash scripts/validate.sh --offline     # free, seconds, no credentials needed
+```
+
 ## Docs
 
 | | |
 |---|---|
 | [AGENTS.md](AGENTS.md) | For AI agents: how to contribute here |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | Dev loop, house rules, the live suite |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Dev loop, house rules, the live suite, releasing |
 | [SECURITY.md](SECURITY.md) | Trust model, `--yolo`, host-side checks, credentials |
 | [CHANGELOG.md](CHANGELOG.md) | What changed |
 | `references/workflow.md` | Why the fleet workflow is shaped that way, and embedding muse in your own |
 | `workflows/muse-supervised-fleet.js` | The registered workflow itself — `Workflow({ name: "muse-supervised-fleet" })` |
 | `references/muse-cli.md` | The verified `muse` CLI surface and event schema |
 | `references/routing.md` | When to use muse and when to use Claude |
-| `references/field-notes.md` | What other teams learned running agent fleets |
-| `evals/evals.json` | Skill-triggering cases: five that must fire, four that must **not** |
+| `references/field-notes.md` | Platform facts measured along the way, and what other teams learned running agent fleets |
+| `evals/README.md` | The eval cases, how to run them, and measured scores |
 
 ## License
 

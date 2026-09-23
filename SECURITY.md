@@ -59,8 +59,7 @@ to slow down on. After a run they are also recorded in `<out>/<id>/state.json` u
   make it for you.
 - **It does make one part of it mechanical.** Before spawning a worker, `muse-task run`
   scans the worktree — after seeding, so it sees the `.env` you asked it to copy — and
-  so does `muse-fleet` for every task worktree and `muse-ask --write` (read-only ask never
-  reaches a worker, so it does not scan). Each scan covers every file the worker could
+  so does `muse-fleet` for every task worktree and `muse-ask`, read-only as well as `muse-ask --write`. Each scan covers every file the worker could
   read — tracked, untracked and gitignored files, including seeded files and followed
   symlinks, with only .git pruned — and **refuses** if it finds a structurally
   unmistakable credential: a PEM private-key block, an AWS key id,
