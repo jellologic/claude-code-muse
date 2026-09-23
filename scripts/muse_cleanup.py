@@ -14,6 +14,9 @@ its work exists. --all overrides that once you have decided the work is disposab
     muse_cleanup.py --yes                # remove finished tasks' worktrees and branches
     muse_cleanup.py --yes --artifacts    # also delete .muse-fleet/
     muse_cleanup.py --yes --all          # include tasks with no verdict
+    muse_cleanup.py --yes --discard-unharvested  # also remove worktrees whose patch
+                                         # was never harvested (that work exists
+                                         # only in the worktree and will be lost)
 """
 
 from __future__ import annotations
@@ -99,23 +102,66 @@ def artifact_index(root: Path):
 
 # A task directory sits at most two levels below the artifact root: <out>/<id>/ for
 # muse_task, <out>/<stamp>/<id>/ for a fleet. Anything deeper is not this root's task.
+# Only state.json counts as a marker, and only when it names the repository being
+# cleaned: task.json carries no repo/branch/worktree keys, so a stray one proved
+# nothing about whose artifacts these are.
 MARKER_GLOBS = (
-    "state.json", "task.json",
-    "*/state.json", "*/task.json",
-    "*/*/state.json", "*/*/task.json",
+    "state.json",
+    "*/state.json",
+    "*/*/state.json",
 )
 
 
-def looks_like_artifact_root(root: Path) -> bool:
-    """Does this directory actually hold delegated-task artifacts?
+def looks_like_artifact_root(root: Path, repo: Path) -> bool:
+    """Does this directory hold THIS repo's delegated-task artifacts?
 
     Bounded on purpose. An unbounded os.walk answered "yes" for $HOME -- it descends
     until it meets any stray state.json anywhere beneath, which made
-    `--yes --artifacts --out ~` a whole-home-directory rmtree.
+    `--yes --artifacts --out ~` a whole-home-directory rmtree. And an unscoped glob
+    answered "yes" for a directory whose state.json names some other repo, which made
+    `--out` a shared parent delete a neighbour's checkout.
     """
     if not root.is_dir():
         return False
-    return any(next(root.glob(pat), None) is not None for pat in MARKER_GLOBS)
+    rrepo = repo.resolve()
+    try:
+        wts = list_worktrees(repo)
+    except Exception:
+        wts = []
+    wt_paths = set()
+    for w in wts:
+        try:
+            wt_paths.add(Path(w["path"]).resolve())
+        except Exception:
+            pass
+    for pat in MARKER_GLOBS:
+        for cand in root.glob(pat):
+            try:
+                st = json.loads(cand.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if not isinstance(st, dict):
+                continue
+            try:
+                if st.get("repo") and Path(st["repo"]).resolve() == rrepo:
+                    return True
+            except Exception:
+                pass
+            br = st.get("branch")
+            if br:
+                r = subprocess.run(
+                    ["git", "-C", str(repo), "rev-parse", "--verify", "--quiet",
+                     "refs/heads/{}".format(br)],
+                    capture_output=True, text=True)
+                if r.returncode == 0:
+                    return True
+            if st.get("worktree"):
+                try:
+                    if Path(st["worktree"]).resolve() in wt_paths:
+                        return True
+                except Exception:
+                    pass
+    return False
 
 
 def refuse_dangerous_root(root: Path, repo: Path):
@@ -138,6 +184,13 @@ def refuse_dangerous_root(root: Path, repo: Path):
         return "it contains .git, so it is a repository root"
     if rp == cwd or rp in cwd.parents:
         return "it is the current directory or an ancestor of it"
+    if rp in repo.resolve().parents:
+        return "it is an ancestor of the repository, so removing it would delete the repository"
+    # A directory holding any nested repo is not an artifact root: deleting it would
+    # delete that repository's history along with the patches.
+    for dirpath, dirnames, filenames in os.walk(rp, followlinks=False):
+        if ".git" in dirnames or ".git" in filenames:
+            return "it contains a git repository beneath it, so it is not an artifact root"
     return None
 
 
@@ -151,8 +204,8 @@ def remove_artifact_root(out: str, repo: Path) -> bool:
         print("REFUSING to delete {}: {}. Point --out at the artifact directory itself."
               .format(root, danger))
         return False
-    if not looks_like_artifact_root(root):
-        print("refusing to delete {}: no state.json or task.json within two levels, so "
+    if not looks_like_artifact_root(root, repo):
+        print("refusing to delete {}: no state.json naming this repository within two levels, so "
               "this does not look like a muse artifact root".format(root))
         return False
     # No ignore_errors: a partial delete must be visible, not swallowed.
@@ -170,6 +223,9 @@ def main() -> int:
     ap.add_argument("--yes", action="store_true", help="actually remove (default is a dry run)")
     ap.add_argument("--all", action="store_true",
                     help="include tasks that never reached a verdict")
+    ap.add_argument("--discard-unharvested", action="store_true",
+                    help="also remove worktrees whose patch was never harvested "
+                         "(their work exists only in the worktree and will be lost)")
     ap.add_argument("--artifacts", action="store_true",
                     help="also delete the artifact root after removing worktrees")
     args = ap.parse_args()
@@ -181,19 +237,42 @@ def main() -> int:
     prefixes = tuple((args.prefix or ["muse", "fleet"]))
     idx = artifact_index(Path(args.out))
 
-    targets, skipped = [], []
+    targets, skipped, norecord, unharvested = [], [], [], []
     for w in list_worktrees(repo):
         br = w["branch"] or ""
         if not br.startswith(tuple(p + "/" for p in prefixes)):
             continue
         rec = idx.get(br)
         # No artifact record at all is itself a reason to be careful: nothing here
-        # proves the patch was ever harvested out of that tree.
-        unfinished = rec is None or not rec["finished"]
+        # proves the patch was ever harvested out of that tree, and no flag overrides
+        # that — a human branch on a matching prefix is not ours to reap.
+        if rec is None:
+            norecord.append((w, rec))
+            continue
+        # A record with no harvested patch means the work exists only in the worktree;
+        # only an explicit --discard-unharvested admits that loss.
+        if not rec["has_patch"] and not args.discard_unharvested:
+            unharvested.append((w, rec))
+            continue
+        unfinished = not rec["finished"]
         if unfinished and not args.all:
             skipped.append((w, rec))
             continue
         targets.append((w, rec))
+
+    if norecord:
+        print("leaving {} worktree(s) with no artifact record under {} -- not created by "
+              "a run this cleanup can see, never removed:".format(len(norecord), args.out))
+        for w, _rec in norecord:
+            print("  {}  {}".format(w["branch"], w["path"]))
+        print("")
+
+    if unharvested:
+        print("leaving {} worktree(s) with no harvested patch — their work exists only "
+              "in the worktree:".format(len(unharvested)))
+        for w, _rec in unharvested:
+            print("  {}  {}".format(w["branch"], w["path"]))
+        print("  pass --discard-unharvested to remove these; their work exists only in the worktree\n")
 
     if skipped:
         print("skipping {} unfinished task(s) — their work exists only in the worktree:"
@@ -224,10 +303,26 @@ def main() -> int:
 
     core = load_core()
     removed = 0
-    for w, _rec in targets:
-        core.drop_worktree(repo, Path(w["path"]), w["branch"])
+    for w, rec in targets:
+        # A worktree whose patch was never harvested holds unmerged work by
+        # definition; -D would discard commits, so delete the branch with -d and
+        # keep it when git refuses.
+        has_patch = bool(rec) and bool(rec["has_patch"])
+        if has_patch:
+            core.drop_worktree(repo, Path(w["path"]), w["branch"])
+        else:
+            core.drop_worktree(repo, Path(w["path"]), w["branch"], force_branch=False)
         removed += 1
-        print("removed {}".format(w["branch"]))
+        print("removed {}".format(w["path"]))
+        br = w["branch"]
+        r = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "--verify", "--quiet",
+             "refs/heads/{}".format(br)],
+            capture_output=True, text=True)
+        if r.returncode == 0:
+            print("kept branch {}: it has commits not merged into HEAD".format(br))
+        else:
+            print("removed {}".format(br))
 
     # Prune the empty parent the drivers create next to the repo, but only if it is
     # empty: a sibling run's worktrees may still live there.

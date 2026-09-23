@@ -1,6 +1,6 @@
 ---
 description: Reap the worktrees, branches and artifacts left behind by delegated muse runs
-argument-hint: "[--yes] [--all] [--artifacts]"
+argument-hint: "[--yes] [--all] [--artifacts] [--discard-unharvested]"
 disable-model-invocation: true
 allowed-tools: Bash(python3:*), Read
 model: haiku
@@ -24,6 +24,7 @@ reached a verdict. Relay both. Then, only with the user's say-so:
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/muse_cleanup.py" --yes                 # finished tasks
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/muse_cleanup.py" --yes --all           # unfinished too
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/muse_cleanup.py" --yes --artifacts     # and the patches
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/muse_cleanup.py" --yes --discard-unharvested  # also reap worktrees whose patch was never harvested (that work exists only in the worktree)
 ```
 
 ## What to check before removing anything
