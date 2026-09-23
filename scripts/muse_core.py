@@ -16,6 +16,7 @@ CLI did", which is exactly the class of bug nobody debugs quickly.
 
 from __future__ import annotations
 
+import fnmatch
 import glob
 import hashlib
 import json
@@ -722,36 +723,94 @@ def run_muse(cmd, prompt: str, repo: Path, events: Path, stderr: Path, timeout: 
     return out
 
 
-def _diff_spec(excludes):
-    """The pathspec harvest diffs through. Shared so a fingerprint measures exactly the
-    bytes that end up in patch.diff and not one byte more."""
-    return ["--"] + [":(exclude,glob){}".format(p) for p in excludes] \
-                  + [":(exclude,glob)**/{}".format(p) for p in excludes]
+def _excluded(path, excludes) -> bool:
+    parts = path.split("/")
+    prefixes = ["/".join(parts[:i]) for i in range(1, len(parts) + 1)]
+    for raw in excludes or []:
+        pat = raw.strip("/")
+        if not pat:
+            continue
+        if "/" not in pat:
+            for component in parts:
+                if fnmatch.fnmatchcase(component, pat):
+                    return True
+        else:
+            cands = {pat}
+            s = pat
+            while s.startswith("**/"):
+                s = s[3:]
+                cands.add(s)
+            expanded = set(cands)
+            for cand in list(cands):
+                t = cand
+                while t.endswith("/**"):
+                    t = t[:-3]
+                    expanded.add(t)
+            for prefix in prefixes:
+                for cand in expanded:
+                    if cand and fnmatch.fnmatchcase(prefix, cand):
+                        return True
+    return False
 
 
-def stage_all(wt: Path, spec):
-    """Stage the whole worktree. Returns None on success, or an error string.
+def _split_nul(out: bytes):
+    return [n.decode("utf-8", "surrogateescape") for n in out.split(b"\0") if n]
 
-    `git add -A -- :(exclude,glob)X` exits 1 when a path git ALREADY ignores matches one
-    of those excludes, and DEFAULT_EXCLUDES is a list of precisely the things a real repo
-    gitignores -- __pycache__, node_modules, .venv, dist, build. So on any repo with a
-    .gitignore, the first time a worker generated a __pycache__, every harvest from that
-    point on reported "git add failed" and patch.diff stopped being updated. It never
-    showed up here because the suite's fixture repos have no .gitignore.
 
-    Retrying without the pathspec is correct, not a workaround: git skips ignored files
-    on its own, and the diff applies the same excludes afterwards. The pathspec on the
-    first attempt is only there to avoid staging a huge unignored node_modules, and that
-    case is exactly the one that does not hit this error."""
-    add = subprocess.run(["git", "-C", str(wt), "add", "-A", *spec],
-                         capture_output=True, text=True)
-    if add.returncode == 0:
-        return None
-    retry = subprocess.run(["git", "-C", str(wt), "add", "-A"],
-                           capture_output=True, text=True)
-    if retry.returncode == 0:
-        return None
-    return (add.stderr or retry.stderr).strip()[:300] or "git add exited {}".format(add.returncode)
+# Tracked files bypass excludes on purpose: an excluded tracked fix once produced an
+# empty certified patch (issue #35), so excludes apply to untracked-at-base files only.
+# Step 3 un-stages newly-added-but-excluded paths to cover junk the worker staged itself.
+def stage_all(wt: Path, base: str, excludes):
+    def _err(proc, cmd):
+        msg = proc.stderr.decode("utf-8", "replace").strip()[:300]
+        return msg or "{} exited {}".format(cmd, proc.returncode)
+
+    add_u = subprocess.run(
+        ["git", "-C", str(wt), "--literal-pathspecs", "add", "-u"],
+        capture_output=True)
+    if add_u.returncode != 0:
+        return _err(add_u, "git add -u")
+    ls = subprocess.run(
+        ["git", "-C", str(wt), "--literal-pathspecs", "ls-files", "-z",
+         "--others", "--exclude-standard"],
+        capture_output=True)
+    if ls.returncode != 0:
+        return _err(ls, "git ls-files")
+    fresh = [n for n in _split_nul(ls.stdout) if not _excluded(n, excludes)]
+    for i in range(0, len(fresh), 200):
+        chunk = [n.encode("utf-8", "surrogateescape") for n in fresh[i:i + 200]]
+        if not chunk:
+            continue
+        add = subprocess.run(
+            ["git", "-C", str(wt), "--literal-pathspecs", "add", "--", *chunk],
+            capture_output=True)
+        if add.returncode != 0:
+            return _err(add, "git add")
+    added = subprocess.run(
+        ["git", "-C", str(wt), "--literal-pathspecs", "diff", "--cached",
+         "--name-only", "-z", "--no-renames", "--diff-filter=A", base],
+        capture_output=True)
+    if added.returncode != 0:
+        return _err(added, "git diff --cached --name-only")
+    junk = [n for n in _split_nul(added.stdout) if _excluded(n, excludes)]
+    for i in range(0, len(junk), 200):
+        chunk = [n.encode("utf-8", "surrogateescape") for n in junk[i:i + 200]]
+        if not chunk:
+            continue
+        rm = subprocess.run(
+            ["git", "-C", str(wt), "--literal-pathspecs", "rm", "--cached", "-q",
+             "--", *chunk],
+            capture_output=True)
+        if rm.returncode != 0:
+            return _err(rm, "git rm --cached")
+    return None
+
+
+def _cached_diff(wt: Path, base: str, *extra):
+    return subprocess.run(
+        ["git", "-C", str(wt), "diff", "--cached", "--no-ext-diff", "--no-textconv",
+         "--binary", "--full-index", *extra, base],
+        capture_output=True)
 
 
 def patch_fingerprint(wt: Path, base: str, excludes):
@@ -763,14 +822,12 @@ def patch_fingerprint(wt: Path, base: str, excludes):
     reaches patch.diff -- and every such run would come back refused. The deliverable is
     the diff; certify the diff."""
     try:
-        spec = _diff_spec(excludes)
-        if stage_all(wt, spec) is not None:
+        if stage_all(wt, base, excludes) is not None:
             return None
-        diff = subprocess.run(["git", "-C", str(wt), "diff", "--cached", base, *spec],
-                              capture_output=True, text=True)
+        diff = _cached_diff(wt, base)
         if diff.returncode != 0:
             return None
-        return hashlib.sha256(diff.stdout.encode("utf-8", "replace")).hexdigest()
+        return hashlib.sha256(diff.stdout).hexdigest()
     except OSError:
         return None
 
@@ -781,7 +838,6 @@ def harvest(wt: Path, base: str, excludes, patch_path: Path):
     Staging first is essential: muse leaves the worktree dirty and never commits, and a
     plain `git diff` silently omits newly created files -- a whole new test suite can
     read as "no changes"."""
-    spec = _diff_spec(excludes)
     rec = {"patch_lines": 0, "files_changed": [], "harvest_error": None}
     try:
         # git's exit status matters here, and ignoring it is silent data loss: a missing
@@ -789,23 +845,21 @@ def harvest(wt: Path, base: str, excludes, patch_path: Path):
         # stdout, which would overwrite a good patch.diff with an empty file and report
         # a clean zero-line result. The supervisor then reads a failure as "the worker
         # decided nothing needed doing".
-        staging_error = stage_all(wt, spec)
+        staging_error = stage_all(wt, base, excludes)
         if staging_error is not None:
             rec["harvest_error"] = "git add failed: {}".format(staging_error)
             return rec
-        diff = subprocess.run(["git", "-C", str(wt), "diff", "--cached", base, *spec],
-                              capture_output=True, text=True)
+        diff = _cached_diff(wt, base)
         if diff.returncode != 0:
-            rec["harvest_error"] = "git diff failed: {}".format(diff.stderr.strip()[:300])
+            rec["harvest_error"] = "git diff failed: {}".format(
+                diff.stderr.decode("utf-8", "replace").strip()[:300])
             return rec
         # Only now is it safe to replace whatever patch.diff already held.
         patch_path.parent.mkdir(parents=True, exist_ok=True)
-        patch_path.write_text(diff.stdout, encoding="utf-8")
-        rec["patch_lines"] = diff.stdout.count("\n")
-        names = subprocess.run(
-            ["git", "-C", str(wt), "diff", "--cached", base, "--name-only", *spec],
-            capture_output=True, text=True)
-        rec["files_changed"] = names.stdout.split() if names.returncode == 0 else []
+        patch_path.write_bytes(diff.stdout)
+        rec["patch_lines"] = diff.stdout.count(b"\n")
+        names = _cached_diff(wt, base, "--name-only", "-z", "--no-renames")
+        rec["files_changed"] = _split_nul(names.stdout) if names.returncode == 0 else []
     except Exception as e:
         rec["harvest_error"] = str(e)
     return rec

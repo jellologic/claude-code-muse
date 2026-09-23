@@ -73,7 +73,7 @@ PASS=0; FAIL=0; SKIP=0
 # compares PASS+FAIL against this, so a removed block lowers the tally. Skips do
 # not count -- a SKIP is a check that did not run, and counting it lets a machine
 # without node stay green with fewer executed checks.
-EXPECTED_OFFLINE=194
+EXPECTED_OFFLINE=199
 
 ok()   { PASS=$((PASS+1)); printf '  \033[32mPASS\033[0m  %s\n' "$1"; }
 bad()  { FAIL=$((FAIL+1)); printf '  \033[31mFAIL\033[0m  %s\n' "$1"; [ -n "${2:-}" ] && echo "        $2"; }
@@ -1154,6 +1154,7 @@ if problems:
     for p in problems: print("        " + p)
     sys.exit(1)
 PY
+. "$SKILL/tests/test_harvest.sh"
 
 # ------------------------------------------- 3b. status + cleanup (no muse spawned)
 head_ "3b. Status and cleanup"
