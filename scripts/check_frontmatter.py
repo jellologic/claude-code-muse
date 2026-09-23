@@ -90,6 +90,42 @@ def _unquoted(text):
     return text
 
 
+def _strip_comment(text):
+    # YAML treats ` #` outside quotes as a comment start, so `maxTurns: 60 # cap`
+    # is the integer 60, not a type error. A `#` inside quotes, or with no space
+    # before it (`a#b`), stays part of the value.
+    in_single = False
+    in_double = False
+    i = 0
+    n = len(text)
+    while i < n:
+        c = text[i]
+        if in_single:
+            if c == "'":
+                if i + 1 < n and text[i + 1] == "'":
+                    i += 2  # doubled '' is an escaped quote, still inside
+                    continue
+                in_single = False
+            i += 1
+            continue
+        if in_double:
+            if c == "\\":
+                i += 2  # backslash escapes the next character
+                continue
+            if c == '"':
+                in_double = False
+            i += 1
+            continue
+        if c == "'":
+            in_single = True
+        elif c == '"':
+            in_double = True
+        elif c == "#" and (i == 0 or text[i - 1] in (" ", "\t")):
+            return text[:i].rstrip()
+        i += 1
+    return text
+
+
 def _scalar(text):
     text = text.strip()
     if len(text) >= 2 and text[0] == text[-1] and text[0] in ("'", '"'):
@@ -142,7 +178,7 @@ def parse_frontmatter(text):
             # Keep the first occurrence so a doubled key cannot smuggle a
             # second value past the type checks below; still advance below.
         seen.add(key)
-        s = rest.strip()
+        s = _strip_comment(rest.strip())
         if _BLOCK_RE.match(s):
             # `|`, `|-`, `>`, `>-`, with an optional `+`: the value is the
             # following indented lines, e.g. the multi-line description.
@@ -163,7 +199,8 @@ def parse_frontmatter(text):
             content = [b for b in buf if b.strip() != ""]
             if key not in values:
                 if content and all(_LIST_ITEM_RE.match(b) for b in content):
-                    values[key] = [_unquoted(_LIST_ITEM_RE.sub("", b)) for b in content]
+                    values[key] = [_unquoted(_strip_comment(_LIST_ITEM_RE.sub("", b)))
+                                   for b in content]
                 elif content:
                     values[key] = "\n".join(buf)
                 else:
@@ -259,7 +296,7 @@ _GOOD = {
         "  </example>",
         "model: opus",
         "effort: high",
-        "maxTurns: 60",
+        "maxTurns: 60 # cap",
         "color: magenta",
         'tools: ["Bash", "Read", "Grep", "Glob"]',
     ),
@@ -279,6 +316,7 @@ _BAD = [
     ("command", _fm("description: probe", "disable-model-invocaton: true"),
      "probe", "disable-model-invocaton"),
     ("agent", _fm("description: probe", "maxTurns: sixty"), "probe", "maxTurns"),
+    ("agent", _fm("description: probe", "maxTurns: sixty # cap"), "probe", "maxTurns"),
     ("agent", _fm("description: probe", "permissionMode: acceptEdits"),
      "probe", "permissionMode"),
     ("agent", _fm("description: probe", "hooks:", "  onEvent: x"), "probe", "hooks"),

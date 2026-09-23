@@ -9,9 +9,6 @@ on:
 permissions:
   contents: read
 
-env:
-  MIN_CLAUDE_VERSION: "2.1.280"
-
 jobs:
   offline:
     # The scripts use nothing newer than 3.7 (deferred annotations everywhere, and
@@ -88,9 +85,14 @@ jobs:
       # Behaviour this repo depends on (hyphen-exact matchers, ${user_config}
       # rejection in shell-form hooks since 2.1.207) differs between CLI versions,
       # and an unpinned install got 2.1.197 in CI while local was 2.1.280, so the
-      # install below is pinned to the version in env above.
+      # install below is pinned to the floor in scripts/muse_core.py -- the one
+      # place the value lives.
       - name: Install the Claude Code CLI
-        run: npm install -g "@anthropic-ai/claude-code@${MIN_CLAUDE_VERSION}"
+        run: |
+          set -euo pipefail
+          v="$(python3 scripts/muse_doctor.py --min-claude-version)"
+          case "$v" in [0-9]*.[0-9]*.[0-9]*) ;; *) echo "::error::bad MIN_CLAUDE_VERSION '$v'"; exit 1 ;; esac
+          npm install -g "@anthropic-ai/claude-code@${v}"
 
       # Both manifests, by path. Validating the PLUGIN manifest also walks every
       # command, agent and skill -- measured; that walk rejects component

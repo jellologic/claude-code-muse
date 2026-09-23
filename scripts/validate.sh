@@ -70,8 +70,10 @@ OFFLINE=0
 [[ "${1:-}" == "--offline" ]] && OFFLINE=1
 PASS=0; FAIL=0; SKIP=0
 # Deleting a check block must turn the run red: the count guard before section 4
-# compares PASS+FAIL+SKIP against this, so a removed block lowers the tally.
-EXPECTED_OFFLINE=177
+# compares PASS+FAIL against this, so a removed block lowers the tally. Skips do
+# not count -- a SKIP is a check that did not run, and counting it lets a machine
+# without node stay green with fewer executed checks.
+EXPECTED_OFFLINE=194
 
 ok()   { PASS=$((PASS+1)); printf '  \033[32mPASS\033[0m  %s\n' "$1"; }
 bad()  { FAIL=$((FAIL+1)); printf '  \033[31mFAIL\033[0m  %s\n' "$1"; [ -n "${2:-}" ] && echo "        $2"; }
@@ -82,6 +84,12 @@ skip() {  # skip <number-of-checks-it-replaces> <message>
   else
     SKIP=$((SKIP+n)); printf '  \033[33mSKIP\033[0m  %s\n' "$*"
   fi
+}
+offline_count_guard() {
+  # PASS+FAIL only: a SKIP is a check that did not run, so a block that stops
+  # running and skips instead must still turn the run red.
+  seen=$((PASS+FAIL))
+  if [ "$seen" -lt "$EXPECTED_OFFLINE" ]; then bad "offline suite ran $seen checks (PASS+FAIL; $SKIP skipped do not count), EXPECTED_OFFLINE=$EXPECTED_OFFLINE" "a check block was deleted, stopped running, or skipped; restore it or lower EXPECTED_OFFLINE in the same change"; fi
 }
 head_() { printf '\n\033[1m%s\033[0m\n' "$1"; }
 
@@ -423,6 +431,7 @@ if problems:
 PY
 
 . "$(dirname "${BASH_SOURCE[0]}")/../tests/test_frontmatter.sh"
+. "$SKILL/tests/test_count_guard.sh"
 # The workflow script in references/workflow.md is the skill's primary path and is copied
 # out verbatim to be run. Nothing else would notice a typo in it until someone spent real
 # money discovering it mid-run.
@@ -1039,35 +1048,10 @@ sys.exit(0 if d.get('status')=='refused' and 'already exists' in (d.get('reason'
 # Both drivers need entropy in the stamp, and greping either source for `token_hex` is a
 # guard that cannot fail -- the import and the constant can both survive while the stamp
 # expression stops using them. Parse instead, and look at the expression actually
-# assigned to `stamp`.
-python3 - <<'PY' && ok "both drivers put entropy in the stamp expression itself" || bad "a stamp collision is still possible"
-import ast, os, sys
-problems = []
-for name in ("muse_task.py", "muse_fleet.py"):
-    src = open(os.path.join(os.environ["PLUGIN_ROOT"], "scripts", name)).read()
-    exprs = [ast.dump(n.value) for n in ast.walk(ast.parse(src))
-             if isinstance(n, ast.Assign)
-             and any(isinstance(t, ast.Name) and t.id == "stamp" for t in n.targets)]
-    if not exprs:
-        problems.append("%s: nothing is assigned to `stamp`" % name)
-        continue
-    if any("token_hex" in e for e in exprs):
-        continue
-    # A stamp built by a named constructor carries its entropy there; follow the call
-    # rather than demanding the expression spell it out, or extracting the helper
-    # turns this guard red for a correct reason.
-    tree = ast.parse(src)
-    helpers = [n for n in ast.walk(tree)
-               if isinstance(n, ast.FunctionDef) and n.name == "new_stamp"]
-    if (any("new_stamp" in e for e in exprs) and helpers
-            and any("token_hex" in ast.dump(h) for h in helpers)):
-        continue
-    problems.append("%s: the stamp expression has no entropy, so two runs in the "
-                    "same second compute the same worktree path" % name)
-if problems:
-    for p in problems: print("        " + p)
-    sys.exit(1)
-PY
+# assigned to `stamp`. String matching on ast.dump passes on a docstring, so the
+# check lives in tests/stamp_entropy_check.py and looks for a real call.
+python3 "$SKILL/tests/stamp_entropy_check.py" "$SKILL" && ok "both drivers put entropy in the stamp expression itself" || bad "a stamp collision is still possible"
+. "$SKILL/tests/test_stamp_guard.sh"
 
 # harvest used to diff against the ref NAME. A branch that moves mid-task then pulls
 # other people's commits into this task's patch -- and `git apply --3way`, the command
@@ -1938,6 +1922,7 @@ head_ "3d. Doctor and credential scan"
 DOC="$SKILL/scripts/muse_doctor.py"
 DLAB="$LAB/v_doctor"; mkdir -p "$DLAB/empty"
 make_muse_stub "$DLAB/stubbin"
+. "$SKILL/tests/test_doctor_claude_version.sh"
 
 # The doctor is the tool you reach for when things are ALREADY broken, so the property
 # that matters is that it never dies on the way to telling you. It must survive a hostile
@@ -2070,8 +2055,7 @@ sys.exit(0 if c and not any('PARTIAL' in x['value'] for x in c) else 1)" \
 . "$SKILL/tests/test_roundtrip.sh"
 # ------------------------------------------------------------ 4. live runs
 # The guard counts itself out: no ok here, so deleting a block lowers the tally.
-OFFLINE_SEEN=$((PASS+FAIL+SKIP))
-if [ "$OFFLINE_SEEN" -lt "$EXPECTED_OFFLINE" ]; then bad "offline suite ran $OFFLINE_SEEN checks, EXPECTED_OFFLINE=$EXPECTED_OFFLINE" "a check block was deleted or stopped running; restore it or lower EXPECTED_OFFLINE in the same change"; fi
+offline_count_guard
 if [ "$OFFLINE" = "1" ]; then
   printf '\n\033[33mSKIP\033[0m  sections 4+ (live muse runs) — --offline\n'
   printf '\n\033[1mRESULT: %d passed, %d failed, %d skipped (offline subset, expected >= %d)\033[0m\n' "$PASS" "$FAIL" "$SKIP" "$EXPECTED_OFFLINE"
@@ -2122,10 +2106,23 @@ for t in r["tasks"]:
         print("        asked",r["model"],"got",t["model_actual"]); sys.exit(1)
 PY
 
+# A glob that matches nothing leaves the loop body unrun and the grep with no
+# files, so with no patches at all the old `ok` fired vacuously. Count first.
+PATCH_COUNT=0; PATCH_JUNK=""
 for f in "$D"/*/patch.diff; do
-  grep -qE '(^|/)\.venv/|node_modules/|__pycache__/' "$f" && { bad "build junk leaked into $(basename $(dirname $f))"; break; }
+  [ -s "$f" ] || continue
+  PATCH_COUNT=$((PATCH_COUNT+1))
+  if grep -qE '(^|/)\.venv/|node_modules/|__pycache__/' "$f"; then
+    PATCH_JUNK="$(basename "$(dirname "$f")")"
+  fi
 done
-grep -rqE '(^|/)\.venv/' "$D"/*/patch.diff 2>/dev/null || ok "no build artifacts in any patch"
+if [ "$PATCH_COUNT" -eq 0 ]; then
+  bad "no non-empty patch.diff to inspect for build artifacts" "the live fleet produced no patch, so the absence check would pass vacuously"
+elif [ -n "$PATCH_JUNK" ]; then
+  bad "build junk leaked into $PATCH_JUNK"
+else
+  ok "no build artifacts in any patch"
+fi
 
 cd "$LAB/v_live"
 APPLY_OK=1
