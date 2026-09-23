@@ -52,7 +52,11 @@ claude plugin details muse
 
 That last step matters more than it looks. `claude plugin details` prints a component
 inventory, and **a zero count is how a mis-shaped config announces itself** — there is no
-error, no warning, just a component that silently is not there.
+error, no warning, just a component that silently is not there. On Claude Code 2.1.280,
+`plugin details` shows neither monitors nor plugin settings, so a zero there proves
+nothing for those two. The proof that they load is `tests/claude_validate_monitors.sh`
+(strict-validates the inlined monitors array, with a negative control) plus the `caps:`
+checks in `tests/test_caps.sh`.
 
 For local development, add the marketplace from the **directory**, not from GitHub, so you
 can iterate without pushing:
@@ -154,6 +158,23 @@ CI only runs `--offline`, because CI has no muse credentials and should not have
 
 Style: no trailing whitespace, keep the existing voice in docs, and prefer a sentence that
 explains a failure mode over a sentence that describes a feature.
+
+## Releasing
+
+Bump the version in both `.claude-plugin/plugin.json` and
+`.claude-plugin/marketplace.json` in the release PR, then prove the tree still holds
+together and the tag preconditions hold before creating anything:
+
+```bash
+bash scripts/validate.sh --offline
+bash scripts/release.sh --dry-run
+bash scripts/release.sh --push
+```
+
+`claude plugin tag` checks that plugin.json and the enclosing marketplace entry agree
+on the version, and refuses a dirty tree or an existing tag — those refusals are the
+reason to use it instead of `git tag` directly, so never force past them. A successful
+tag is named `muse--v<version>`.
 
 ## Reporting bugs
 

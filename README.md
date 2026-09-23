@@ -275,6 +275,13 @@ set-but-invalid value rather than falling back.
 `default_effort` now carries `options` in `.claude-plugin/plugin.json`, and
 `/muse:doctor` reports each value with its source.
 
+The `muse-events` monitor reads its own config at `${CLAUDE_PLUGIN_DATA}/monitor.json`
+(monitors/monitors.json passes it as --config): a JSON object with `enabled` (bool,
+default true; false makes the monitor exit without notifying) and `events` (the event
+kinds to deliver: `round_started`, `round_finished`, `verify`, `verdict`; default all).
+A missing, unparsable or misshapen file falls back to the defaults, with one stderr
+line — monitors receive no user_config, so this file is the only knob.
+
 ## Guardrails
 
 Workers run with `--yolo`, which disables approval prompts and the sandbox. That is

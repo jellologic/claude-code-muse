@@ -29,6 +29,7 @@
   "displayName": "Muse Code delegation",
   "defaultEnabled": true,
   "workflows": "./workflows",
+  "experimental": {"monitors": "./monitors/monitors.json"},
   "userConfig": {
     "default_effort": {
       "type": "string",

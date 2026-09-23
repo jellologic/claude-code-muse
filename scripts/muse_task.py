@@ -221,6 +221,11 @@ def do_round(st: dict, tdir: Path, prompt: str, args, kind: str,
     rdir = tdir / "round-{}".format(n)
     rdir.mkdir(parents=True, exist_ok=True)
     (rdir / "prompt.txt").write_bytes(prompt.encode("utf-8", "surrogateescape"))
+    # The event discriminator is "event": "kind" already means the round kind
+    # (initial/revise) on round_started, so it cannot also name the event type.
+    core.append_event(Path(st["repo"]), {"event": "round_started", "task": st["id"],
+                                         "round": n, "max_rounds": st["max_rounds"],
+                                         "kind": kind})
 
     cmd = core.muse_cmd(
         st["model"], st.get("effort", core.DEFAULT_EFFORT), wt,
@@ -259,6 +264,11 @@ def do_round(st: dict, tdir: Path, prompt: str, args, kind: str,
         st.pop("round_in_flight", None)
         st["rounds"].append(rnd)
         save_state(tdir, st)
+        # No harvest ran, so the count is unknown: a 0 here would read as
+        # "the worker produced nothing" in the monitor. Omit the key.
+        core.append_event(Path(st["repo"]), {"event": "round_finished", "task": st["id"],
+                                             "round": n, "max_rounds": st["max_rounds"],
+                                             "status": "interrupted"})
         emit({"id": st["id"], "round": n, "kind": kind, "status": "interrupted",
               "reason": reason, "worktree": st["worktree"],
               "rounds_used": n,
@@ -285,28 +295,52 @@ def do_round(st: dict, tdir: Path, prompt: str, args, kind: str,
     # Structured self-report, when a schema was supplied. This is a set of CLAIMS by the
     # same cheap model that did the work -- the supervisor checks it against the patch
     # and against `verify`, it is never evidence on its own.
-    result = None
-    if st.get("schema") and (res["text"] or "").strip():
-        parsed = core.parse_answers(res["text"])
-        if isinstance(parsed, dict):
-            result = parsed
-            (rdir / "result.json").write_text(json.dumps(parsed, indent=2), encoding="utf-8")
-    if result is None and res["text"]:
-        rnd["text"] = res["text"][:2000]
-
-    h = core.harvest(wt, harvest_base(st), st["excludes"], tdir / "patch.diff")
     try:
-        fp = core.patch_fingerprint(wt, harvest_base(st), st["excludes"])
-    except Exception as e:
-        fp = None
-        rnd["fingerprint_error"] = "{}: {}".format(type(e).__name__, e)[:300]
-    rnd.update({"patch_lines": h["patch_lines"], "files_changed": h["files_changed"],
-                # The deliverable as muse left it. finish compares against this to tell
-                # muse's work apart from anything written into the worktree afterwards.
-                "patch_fingerprint": fp})
+        result = None
+        if st.get("schema") and (res["text"] or "").strip():
+            parsed = core.parse_answers(res["text"])
+            if isinstance(parsed, dict):
+                result = parsed
+                (rdir / "result.json").write_text(json.dumps(parsed, indent=2), encoding="utf-8")
+        if result is None and res["text"]:
+            rnd["text"] = res["text"][:2000]
+
+        h = core.harvest(wt, harvest_base(st), st["excludes"], tdir / "patch.diff")
+        try:
+            fp = core.patch_fingerprint(wt, harvest_base(st), st["excludes"])
+        except Exception as e:
+            fp = None
+            rnd["fingerprint_error"] = "{}: {}".format(type(e).__name__, e)[:300]
+        rnd.update({"patch_lines": h["patch_lines"], "files_changed": h["files_changed"],
+                    # The deliverable as muse left it. finish compares against this to tell
+                    # muse's work apart from anything written into the worktree afterwards.
+                    "patch_fingerprint": fp})
+        if h["harvest_error"]:
+            rnd["harvest_error"] = h["harvest_error"]
+        save_state(tdir, st)
+    except BaseException as e:
+        # Harvest never finished, so the count is unknown: report the failure
+        # instead of a zero that reads as "the worker produced nothing".
+        # The round itself is already recorded above; this only completes its
+        # event. save_state is inside the try/finally so the event still goes
+        # out exactly once when persisting the error itself fails.
+        rnd["harvest_error"] = "{}: {}".format(type(e).__name__, e)
+        try:
+            save_state(tdir, st)
+        finally:
+            core.append_event(Path(st["repo"]), {"event": "round_finished", "task": st["id"],
+                                                 "round": n, "max_rounds": st["max_rounds"],
+                                                 "status": res["status"],
+                                                 "harvest_error": rnd["harvest_error"]})
+        raise
+    # The event goes out here, after harvest computed the real count, so the
+    # monitor never reports a round with a placeholder zero.
+    fin_ev = {"event": "round_finished", "task": st["id"],
+              "round": n, "max_rounds": st["max_rounds"],
+              "status": res["status"], "patch_lines": h["patch_lines"]}
     if h["harvest_error"]:
-        rnd["harvest_error"] = h["harvest_error"]
-    save_state(tdir, st)
+        fin_ev["harvest_error"] = h["harvest_error"]
+    core.append_event(Path(st["repo"]), fin_ev)
 
     out = {
         "id": st["id"], "round": n, "kind": kind,
@@ -753,6 +787,12 @@ def cmd_verify(args) -> int:
         rec["check_mutated_patch"] = True
     st.setdefault("verifications", []).append(rec)
     save_state(tdir, st)
+    core.append_event(Path(st["repo"]), {"event": "verify", "task": st["id"],
+                                         "round": rec["after_round"],
+                                         "max_rounds": st["max_rounds"],
+                                         "passed": rec["passed"],
+                                         "exit_code": rec.get("exit_code"),
+                                         "timed_out": bool(rec.get("timed_out"))})
 
     emit({"id": st["id"], "status": "verified", **rec,
           "next": "passed → `finish --verdict accept`; failed → `revise --feedback ...` "
@@ -877,6 +917,11 @@ def cmd_finish(args) -> int:
         "accepted_unverified": args.accept_unverified or None,
     })
     save_state(tdir, st)
+    core.append_event(Path(st["repo"]), {"event": "verdict", "task": st["id"],
+                                         "max_rounds": st["max_rounds"],
+                                         "verdict": args.verdict,
+                                         "rounds_used": len(st["rounds"]),
+                                         "verified": bool(verified)})
 
     out = {
         "id": st["id"], "verdict": args.verdict, "summary": args.summary,
