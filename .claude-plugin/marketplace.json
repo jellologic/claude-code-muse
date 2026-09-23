@@ -15,7 +15,7 @@
         "url": "https://github.com/jellologic"
       },
       "description": "Offload bulk coding work to Muse Code in isolated git worktrees, each supervised by an Opus agent that verifies and re-prompts until the patch is right.",
-      "version": "1.3.0",
+      "version": "1.4.0",
       "category": "development",
       "keywords": [
         "claude-code",
