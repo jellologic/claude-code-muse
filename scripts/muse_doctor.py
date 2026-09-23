@@ -47,7 +47,9 @@ def load_core():
 
 def run(cmd, timeout=10):
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        # CreateProcess ignores PATHEXT: a .cmd shim is WinError 2 under its bare name.
+        exe = shutil.which(cmd[0]) or cmd[0]
+        r = subprocess.run([exe, *cmd[1:]], capture_output=True, text=True, timeout=timeout)
         return r.returncode, (r.stdout or r.stderr).strip()
     except (OSError, subprocess.SubprocessError) as e:
         return 1, str(e)

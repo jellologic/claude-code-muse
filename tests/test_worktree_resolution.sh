@@ -10,13 +10,17 @@ if ! declare -F ok >/dev/null 2>&1; then
   bad() { FAIL=$((FAIL+1)); printf '  \033[31mFAIL\033[0m  %s\n' "$1"; [ -n "${2:-}" ] && echo "        $2"; }
   SKILL="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
   LAB="$(mktemp -d "${TMPDIR:-/tmp}/musetest.XXXXXX")"
+  shell_path() { if command -v cygpath >/dev/null 2>&1; then cygpath -u "$1"; else printf '%s' "$1"; fi; }
 fi
+. "$(dirname "${BASH_SOURCE[0]}")/lib_stub.sh"
 WR="$LAB/v_wtres"; rm -rf "$WR"; mkdir -p "$WR/bin" "$WR/data" "$WR/cfg"
 # Own stub, prepended explicitly: if a real muse is installed, validate.sh does not stub
 # it, and a run here would spend tokens.
-printf '#!/bin/sh\nexit 0\n' > "$WR/bin/muse"; chmod +x "$WR/bin/muse"
+printf '#!/bin/sh\nexit 0\n' > "$WR/bin/muse"; chmod +x "$WR/bin/muse"; win_cmd_shim "$WR/bin/muse"
 printf '{"k":1}' > "$WR/cfg/auth.json"
-WR_PATH="$WR/bin:$PATH"
+WR_PATH="$(shell_path "$WR/bin"):$PATH"
+# preflight needs python3 for its catalog check; on Windows it is not under /usr/bin.
+WR_PFPATH="$(shell_path "$WR/bin"):$(dirname "$(command -v python3)"):/usr/bin:/bin"
 wr_repo() { mkdir -p "$1"; git init -q -b main "$1"; printf 'x\n' > "$1/a.txt"; git -C "$1" add -A; git -C "$1" -c user.email=t@l -c user.name=t commit -qm init; }
 wr_task() { ( cd "$1" && shift && env PATH="$WR_PATH" MUSE_DATA_DIR="$WR/data" MUSE_CATALOG_GLOB="$WR/nocat/*.json" python3 "$SKILL/scripts/muse_task.py" "$@" 2>/dev/null ); }
 wr_field() { python3 -c 'import json,sys
@@ -57,9 +61,9 @@ mkdir -p "$WR/full/model-catalog" "$WR/empty/model-catalog"
 printf '{"rows":[{"model_id":"wr-fixture-contributor","visibility":"visible","release_date":"2099-01-01"}]}' > "$WR/full/model-catalog/c.json"
 wr_pf() {  # wr_pf <data dir> [catalog glob]
   if [ -n "${2:-}" ]; then
-    env PATH="$WR/bin:/usr/bin:/bin" MUSE_CATALOG_GLOB="$2" MUSE_CONFIG_DIR="$WR/cfg" MUSE_DATA_DIR="$1" CLAUDE_PLUGIN_ROOT="$SKILL" bash "$SKILL/hooks/preflight.sh" 2>/dev/null
+    env PATH="$WR_PFPATH" MUSE_CATALOG_GLOB="$2" MUSE_CONFIG_DIR="$WR/cfg" MUSE_DATA_DIR="$1" CLAUDE_PLUGIN_ROOT="$SKILL" bash "$SKILL/hooks/preflight.sh" 2>/dev/null
   else
-    env -u MUSE_CATALOG_GLOB PATH="$WR/bin:/usr/bin:/bin" MUSE_CONFIG_DIR="$WR/cfg" MUSE_DATA_DIR="$1" CLAUDE_PLUGIN_ROOT="$SKILL" bash "$SKILL/hooks/preflight.sh" 2>/dev/null
+    env -u MUSE_CATALOG_GLOB PATH="$WR_PFPATH" MUSE_CONFIG_DIR="$WR/cfg" MUSE_DATA_DIR="$1" CLAUDE_PLUGIN_ROOT="$SKILL" bash "$SKILL/hooks/preflight.sh" 2>/dev/null
   fi
 }
 wr_doc() {  # wr_doc <data dir> [catalog glob] -> severity of the "model catalog" check

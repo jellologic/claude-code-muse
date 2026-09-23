@@ -347,15 +347,20 @@ def main() -> int:
     ex = cf.ThreadPoolExecutor(max_workers=args.concurrency)
     try:
         futs = {ex.submit(run_task, t, repo, out, args): t["id"] for t in tasks}
-        for fut in cf.as_completed(futs):
-            tid = futs[fut]
-            try:
-                rec = fut.result()
-            except Exception as e:  # a crashed worker must not sink the fleet
-                rec = {"id": tid, "status": "crashed", "reason": str(e)}
-            results.append(rec)
-            print(f"  [{rec['status']:>9}] {tid}  {rec.get('elapsed_s','?')}s  "
-                  f"{rec.get('patch_lines',0)} patch lines", file=sys.stderr)
+        pending = set(futs)
+        while pending:
+            # Sliced for the same reason as run_muse: a blocking as_completed never
+            # lets a Windows signal handler run until some task finishes by itself.
+            done, pending = cf.wait(pending, timeout=0.5, return_when=cf.FIRST_COMPLETED)
+            for fut in done:
+                tid = futs[fut]
+                try:
+                    rec = fut.result()
+                except Exception as e:  # a crashed worker must not sink the fleet
+                    rec = {"id": tid, "status": "crashed", "reason": str(e)}
+                results.append(rec)
+                print(f"  [{rec['status']:>9}] {tid}  {rec.get('elapsed_s','?')}s  "
+                      f"{rec.get('patch_lines',0)} patch lines", file=sys.stderr)
     except KeyboardInterrupt:
         interrupted = True
         print("\ninterrupted — cancelling queued tasks; already-started ones finish. "

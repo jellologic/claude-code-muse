@@ -44,7 +44,7 @@ else
   #    The glob lives in muse_core, the single source -- asking it keeps this check and
   #    `doctor` pointed at the same files when MUSE_DATA_DIR moves them.
   if command -v python3 >/dev/null 2>&1; then
-    CATALOG_OUT=$(python3 -c "import glob, importlib.util, os, sys; spec = importlib.util.spec_from_file_location(\"muse_core\", sys.argv[1]); mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod); print(os.path.expanduser(mod.CATALOG_GLOB)); [print(f) for f in glob.glob(os.path.expanduser(mod.CATALOG_GLOB))]" "${CLAUDE_PLUGIN_ROOT:-.}/scripts/muse_core.py" 2>/dev/null)
+    CATALOG_OUT=$(python3 -c "import glob, importlib.util, os, sys; spec = importlib.util.spec_from_file_location(\"muse_core\", sys.argv[1]); mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod); print(os.path.expanduser(mod.CATALOG_GLOB)); [print(f) for f in glob.glob(os.path.expanduser(mod.CATALOG_GLOB))]" "${CLAUDE_PLUGIN_ROOT:-.}/scripts/muse_core.py" 2>/dev/null | tr -d '\r')
     if [ -n "$CATALOG_OUT" ]; then
       CATALOG_GLOB_RESOLVED=$(printf '%s\n' "$CATALOG_OUT" | sed -n '1p')
       CATALOG_FILES=$(printf '%s\n' "$CATALOG_OUT" | tail -n +2)

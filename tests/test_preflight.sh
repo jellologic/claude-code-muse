@@ -37,10 +37,13 @@ PF_reset() {
 }
 PF_run() {  # PF_run <bindir-or-empty> -> sets PF_OUT, PF_RC; stdout only, it reaches Claude
   PF_BINDIR="$1"
+  # python3's own dir: on Windows it is not under /usr/bin, and without it the catalog
+  # check is skipped silently, so "reported" and "silent" both measured nothing.
+  PF_PYDIR="$(dirname "$(command -v python3)")"
   if [ -n "$PF_BINDIR" ]; then
-    PF_PATH="$(shell_path "$PF_BINDIR"):/usr/bin:/bin"
+    PF_PATH="$(shell_path "$PF_BINDIR"):$PF_PYDIR:/usr/bin:/bin"
   else
-    PF_PATH="/usr/bin:/bin"
+    PF_PATH="$PF_PYDIR:/usr/bin:/bin"
   fi
   PF_OUT="$(PATH="$PF_PATH" MUSE_CONFIG_DIR="$PF_CFG" MUSE_DATA_DIR="$PF_DATA" CLAUDE_PLUGIN_ROOT="$SKILL" bash "$SKILL/hooks/preflight.sh" 2>/dev/null)"
   PF_RC=$?
@@ -80,7 +83,7 @@ fi
 
 PF_reset
 rm -f "$PF_CFG/auth.json"
-PF_HOST_MUSE="$(PATH=/usr/bin:/bin bash -c 'command -v muse' 2>/dev/null)"
+PF_HOST_MUSE="$(PATH="$(dirname "$(command -v python3)"):/usr/bin:/bin" bash -c 'command -v muse' 2>/dev/null)"
 if [ -n "$PF_HOST_MUSE" ]; then
   bad "preflight: muse absent from PATH" "host provides muse at $PF_HOST_MUSE, so the absent-binary case cannot be simulated"
 else

@@ -99,12 +99,27 @@ def emit(obj: dict) -> None:
     print(json.dumps(obj, indent=2))
 
 
+def _nt_pid_alive(pid: int) -> bool:
+    import ctypes
+    k = ctypes.windll.kernel32
+    h = k.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not h:
+        return False
+    code = ctypes.c_ulong()
+    try:
+        return bool(k.GetExitCodeProcess(h, ctypes.byref(code))) and code.value == 259
+    finally:
+        k.CloseHandle(h)
+
+
 def marker_live(m) -> bool:
     """Whether a round_in_flight marker names a worker that is still running."""
     if not isinstance(m, dict) or not isinstance(m.get("pid"), int):
         return False
-    if not core.HAVE_PROCESS_GROUPS:
+    if os.name == "nt":
         # No signal-0 probe there, and os.kill on Windows TERMINATES the process.
+        return _nt_pid_alive(m["pid"])
+    if not core.HAVE_PROCESS_GROUPS:
         return False
     try:
         os.kill(m["pid"], 0)

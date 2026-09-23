@@ -775,6 +775,18 @@ _LIVE = []
 _SHUTDOWN = threading.Event()
 
 
+def _taskkill_tree(pid) -> bool:
+    """Kill a Windows process and every descendant. There are no process groups there,
+    and TerminateProcess (p.kill) reaches only the direct child -- a .cmd shim's shell
+    and whatever it started keep running and writing into the worktree."""
+    try:
+        return subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
+                              capture_output=True, text=True,
+                              encoding="utf-8", errors="replace").returncode == 0
+    except OSError:
+        return False
+
+
 def _signal_group(p) -> None:
     """SIGKILL the child's process group without waiting.
 
@@ -788,6 +800,8 @@ def _signal_group(p) -> None:
             os.killpg(p.pid, signal.SIGKILL)
         except OSError:
             pass
+    elif os.name == "nt" and _taskkill_tree(p.pid):
+        return
     else:
         try:
             p.kill()
@@ -823,7 +837,8 @@ def muse_version():
     Parsed out rather than compared whole: the line carries more than the number, and
     the number is the only part with a stable meaning."""
     try:
-        r = subprocess.run(["muse", "--version"], capture_output=True, text=True,
+        r = subprocess.run([shutil.which("muse") or "muse", "--version"],
+                           capture_output=True, text=True,
                            encoding="utf-8", errors="replace", timeout=10)
     except (OSError, subprocess.SubprocessError):
         return None
@@ -871,13 +886,7 @@ def kill_process_tree(p) -> None:
         # walking parent ids, so killing the shell first orphans them beyond its reach.
         # This is the difference between a hung build dying with its timeout and one that
         # keeps writing into a worktree `finish --cleanup` is about to force-remove.
-        try:
-            killed_group = subprocess.run(
-                ["taskkill", "/F", "/T", "/PID", str(p.pid)],
-                capture_output=True, text=True,
-                encoding="utf-8", errors="replace").returncode == 0
-        except OSError:
-            pass
+        killed_group = _taskkill_tree(p.pid)
     if not killed_group:
         try:
             p.kill()
@@ -952,7 +961,18 @@ def run_muse(cmd, prompt: str, cwd: Path, events: Path, stderr: Path, timeout: i
             try:
                 if on_spawn:
                     on_spawn(p)
-                p.wait(timeout=timeout)
+                # Sliced: on Windows one long wait is uninterruptible, so a termination
+                # signal would not run its handler until the worker finished by itself.
+                deadline = _time.time() + timeout
+                while True:
+                    left = deadline - _time.time()
+                    if left <= 0:
+                        raise subprocess.TimeoutExpired(cmd, timeout)
+                    try:
+                        p.wait(timeout=min(left, 0.5))
+                        break
+                    except subprocess.TimeoutExpired:
+                        continue
                 out["exit_code"] = p.returncode
             except subprocess.TimeoutExpired:
                 kill_process_tree(p)

@@ -37,6 +37,25 @@ sleep "${SG_STUB_SLEEP:-4}"
 printf '{"payload":{"kind":"run_terminal","terminal":"completed","text":"ok"}}\n'
 STUB
 chmod +x "$SG_BIN/muse"
+. "$(dirname "${BASH_SOURCE[0]}")/lib_stub.sh"
+win_cmd_shim "$SG_BIN/muse"
+# sg_bg <script.py> [args...]: start a driver in the background; sg_term signals it.
+# POSIX gets a real external SIGTERM. Windows cannot deliver one to a native process
+# (see tests/sig_driver.py), so there the script runs under a driver that raises
+# SIGTERM inside it -- the product's handler and its taskkill /T branch still run.
+SG_TRIG="$SG_BASE/term.trigger"
+sg_bg() {
+  rm -f "$SG_TRIG"
+  if is_windows; then
+    python3 "$SKILL/tests/sig_driver.py" "$SG_TRIG" "$@" &
+  else
+    python3 "$@" &
+  fi
+  SG_BGPID=$!
+}
+sg_term() {
+  if is_windows; then : > "$SG_TRIG"; else kill -TERM "$1" 2>/dev/null; fi
+}
 git init -q -b main "$SG_REPO"
 printf 'x = 1\n' > "$SG_REPO/a.py"
 git -C "$SG_REPO" add -A
@@ -72,10 +91,10 @@ else
 fi
 
 : > "$SG_LOG"
-SG_STUB_SLEEP=4 PATH="$SG_PATH" MUSE_DATA_DIR="$SG_BASE/data" python3 "$SKILL/scripts/muse_task.py" run \
+SG_STUB_SLEEP=4 PATH="$SG_PATH" MUSE_DATA_DIR="$SG_BASE/data" sg_bg "$SKILL/scripts/muse_task.py" run \
   --id sig --out "$SG_OUT" --repo "$SG_REPO" --worktree-root "$SG_WT" --model stub-model \
-  --no-secret-scan --prompt p >"$SG_BASE/run.out" 2>"$SG_BASE/run.err" &
-SG_RUNPID=$!
+  --no-secret-scan --prompt p >"$SG_BASE/run.out" 2>"$SG_BASE/run.err"
+SG_RUNPID=$SG_BGPID
 SG_i=0
 while [ "$SG_i" -lt 50 ] && ! [ -s "$SG_LOG" ]; do sleep 0.1; SG_i=$((SG_i+1)); done
 SG_i=0
@@ -95,7 +114,7 @@ else
 fi
 
 SG_WTP="$(sg_state_wt sig)"
-kill -TERM "$SG_RUNPID" 2>/dev/null
+sg_term "$SG_RUNPID"
 wait "$SG_RUNPID" 2>/dev/null
 sleep 5
 if [ -n "$SG_WTP" ] && ! sg_alive && ! [ -e "$SG_WTP/late.txt" ]; then
@@ -118,7 +137,8 @@ else
 fi
 
 # A marker whose pid is dead is stale: revise clears it and runs.
-SG_DEAD="$(sh -c 'echo $$')"
+# A native pid: on Windows an MSYS $$ is not a Windows pid, so it proves nothing there.
+SG_DEAD="$(python3 -c 'import os; print(os.getpid())')"
 python3 - "$SG_OUT/sig/state.json" "$SG_DEAD" <<'PY'
 import json, sys
 p, pid = sys.argv[1], int(sys.argv[2])
@@ -163,14 +183,14 @@ pkill -f "$SG_BIN/muse" 2>/dev/null
 : > "$SG_LOG"
 SG_FOUT="$SG_BASE/fleet-out"; SG_FWT="$SG_BASE/fleet-wt"
 printf '[{"id":"f1","prompt":"p"}]' > "$SG_BASE/tasks.json"
-SG_STUB_SLEEP=4 PATH="$SG_PATH" MUSE_DATA_DIR="$SG_BASE/data" python3 "$SKILL/scripts/muse_fleet.py" \
+SG_STUB_SLEEP=4 PATH="$SG_PATH" MUSE_DATA_DIR="$SG_BASE/data" sg_bg "$SKILL/scripts/muse_fleet.py" \
   --tasks "$SG_BASE/tasks.json" --repo "$SG_REPO" --out "$SG_FOUT" --worktree-root "$SG_FWT" \
-  --model stub-model >/dev/null 2>"$SG_BASE/fleet.err" &
-SG_FPID=$!
+  --model stub-model >/dev/null 2>"$SG_BASE/fleet.err"
+SG_FPID=$SG_BGPID
 SG_i=0
 while [ "$SG_i" -lt 50 ] && ! [ -s "$SG_LOG" ]; do sleep 0.1; SG_i=$((SG_i+1)); done
 if [ -s "$SG_LOG" ] && sg_alive; then
-  kill -TERM "$SG_FPID" 2>/dev/null
+  sg_term "$SG_FPID"
   wait "$SG_FPID" 2>/dev/null
   sleep 5
   SG_FLATE="$(find "$SG_FWT" -name late.txt 2>/dev/null | head -1)"
