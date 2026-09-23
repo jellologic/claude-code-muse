@@ -30,7 +30,7 @@ cat > "$BY/bin/muse" <<'STUB'
 wt=""; pf=""; prev=""; after=0; have=0; inline=""
 for a in "$@"; do
   if [ "$after" = 1 ] && [ "$have" = 0 ]; then inline="$a"; have=1; fi
-  [ "$prev" = "--worktree-existing" ] && wt="$a"
+  [ "$prev" = "--workspace" ] && wt="$a"
   [ "$prev" = "--prompt-file" ] && pf="$a"
   [ "$a" = "--" ] && [ "$after" = 0 ] && after=1
   prev="$a"

@@ -566,7 +566,7 @@ def muse_cmd(model, effort, wt: Path, schema=None, max_steps=0, inherit_skills=F
         "muse", "exec", "--json",
         "--model", model,
         "--reasoning-effort", effort,
-        "--worktree", "existing", "--worktree-existing", str(wt),
+        "--worktree", "off", "--workspace", str(wt),
         "--user-input-auto-resolve",   # never block on an interactive prompt
         "--yolo",                      # safe *because* the blast radius is this worktree
     ]
@@ -600,9 +600,12 @@ CERTAIN_PATTERNS = [
     ("GitHub token", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{30,}\b")),
     ("Slack token", re.compile(r"\bxox[baprs]-[0-9A-Za-z-]{10,}\b")),
     ("Google API key", re.compile(r"\bAIza[0-9A-Za-z_\-]{35}\b")),
-    ("Stripe live key", re.compile(r"\bsk_live_[0-9a-zA-Z]{20,}\b")),
+    ("Stripe live key", re.compile(r"\b[rs]k_live_[0-9a-zA-Z]{20,}\b")),
     ("Anthropic API key", re.compile(r"\bsk-ant-[A-Za-z0-9_\-]{20,}")),
-    ("OpenAI-style API key", re.compile(r"\bsk-[A-Za-z0-9]{32,}\b")),
+    ("OpenAI-style API key", re.compile(r"\bsk-(?!ant-)[A-Za-z0-9_\-]{32,}")),
+    ("GitHub fine-grained token", re.compile(r"\bgithub_pat_[A-Za-z0-9_]{22,}")),
+    ("PGP private key block", re.compile(r"-----BEGIN PGP PRIVATE KEY BLOCK-{5}")),
+    ("AWS secret access key", re.compile(r"(?i)\baws_secret_access_key\b\s*[:=]\s*['\"]?[A-Za-z0-9/+]{40}(?![A-Za-z0-9/+])")),
 ]
 
 POSSIBLE_PATTERNS = [
@@ -611,7 +614,6 @@ POSSIBLE_PATTERNS = [
         r"\s*[:=]\s*['\"][^'\"\s]{12,}['\"]")),
 ]
 
-SCAN_SKIP_DIRS = set(DEFAULT_EXCLUDES) | {".git"}
 SCAN_MAX_BYTES = 1_000_000     # a file larger than this is not hand-written config
 # Bound the walk -- a fan-out runs this per task -- but 5000 was too low to be honest
 # about: `scanned` counts successfully decoded TEXT files, so it is a count of source
@@ -621,7 +623,63 @@ SCAN_MAX_BYTES = 1_000_000     # a file larger than this is not hand-written con
 SCAN_MAX_FILES = int(os.environ.get("MUSE_SCAN_MAX_FILES", "20000"))
 
 
-def scan_secrets(root: Path, max_files: int = SCAN_MAX_FILES):
+def worker_files(root) -> list:
+    """Everything a process whose cwd is `root` can read.
+
+    Driven by git, not by a walk with a skip list: the harvest skip list answers
+    "what goes into the patch", a different question from "what can the worker
+    read". Gitignored files are included on purpose -- a --yolo worker reads
+    those too. Falls back to the whole directory when git cannot answer.
+    """
+    root = Path(root)
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "-z", "--cached", "--others"],
+            capture_output=True, timeout=30)
+    except OSError:
+        return [Path(root)]
+    if r.returncode != 0:
+        return [Path(root)]
+    out = []
+    for entry in r.stdout.decode("utf-8", "surrogateescape").split("\0"):
+        if not entry:
+            continue
+        if entry.split("/", 1)[0] == ".git":
+            continue
+        if not os.path.lexists(os.path.join(str(root), entry)):
+            continue    # tracked upstream but deleted in this worktree
+        p = Path(root) / entry
+        out.append(p if not entry.endswith("/") else Path(os.path.join(str(root), entry)))
+    return out
+
+
+def _expand_paths(root, paths):
+    """Yield every file under `paths`, following links into what the worker can read.
+
+    Only .git is pruned -- everything else (build/, env/, node_modules/, dotfiles)
+    is readable from the worktree. Directories already visited by real path are
+    skipped so a symlink cycle terminates.
+    """
+    seen = set()
+    for p in paths or []:
+        p = Path(p)
+        if os.path.isdir(p):
+            for dirpath, dirnames, filenames in os.walk(p, followlinks=True):
+                rp = os.path.realpath(dirpath)
+                if rp in seen:
+                    dirnames[:] = []
+                    continue
+                seen.add(rp)
+                dirnames[:] = [d for d in dirnames
+                               if d != ".git"
+                               and os.path.realpath(os.path.join(dirpath, d)) not in seen]
+                for name in filenames:
+                    yield Path(dirpath) / name
+        else:
+            yield p
+
+
+def scan_secrets(root: Path, max_files: int = SCAN_MAX_FILES, paths=None):
     """Look for credentials in the tree a worker is about to be able to read.
 
     This exists because contributor-tier models state that content "may be used for
@@ -634,33 +692,72 @@ def scan_secrets(root: Path, max_files: int = SCAN_MAX_FILES):
     """
     certain, possible, scanned, truncated = [], [], 0, False
     root = Path(root)
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in SCAN_SKIP_DIRS]
-        for name in filenames:
-            if scanned >= max_files:
-                truncated = True
-                return {"certain": certain, "possible": possible,
-                        "files_scanned": scanned, "truncated": truncated}
-            f = Path(dirpath) / name
-            try:
-                if f.is_symlink() or not f.is_file() or f.stat().st_size > SCAN_MAX_BYTES:
-                    continue
-                text = f.read_text(encoding="utf-8", errors="strict")
-            except (OSError, ValueError, UnicodeDecodeError):
-                continue    # binary or unreadable: not hand-written config
-            scanned += 1
-            rel = str(f.relative_to(root))
-            for i, line in enumerate(text.splitlines(), 1):
-                if len(line) > 4000:
-                    continue    # minified bundle; not where a human puts a key
-                for kind, rx in CERTAIN_PATTERNS:
-                    if rx.search(line):
-                        certain.append({"file": rel, "line": i, "kind": kind})
-                for kind, rx in POSSIBLE_PATTERNS:
-                    if rx.search(line):
-                        possible.append({"file": rel, "line": i, "kind": kind})
+    if paths is None:
+        paths = worker_files(root)
+    for f in _expand_paths(root, paths):
+        if scanned >= max_files:
+            truncated = True
+            return {"certain": certain, "possible": possible,
+                    "files_scanned": scanned, "truncated": truncated}
+        try:
+            if not os.path.isfile(f) or os.path.getsize(f) > SCAN_MAX_BYTES:
+                continue
+            with open(f, encoding="utf-8", errors="strict") as fh:
+                text = fh.read()
+        except (OSError, ValueError, UnicodeDecodeError):
+            continue    # binary or unreadable: not hand-written config
+        scanned += 1
+        try:
+            rel = os.path.relpath(str(f), str(root))
+        except ValueError:
+            rel = str(f)
+        for i, line in enumerate(text.splitlines(), 1):
+            if len(line) > 4000:
+                continue    # minified bundle; not where a human puts a key
+            for kind, rx in CERTAIN_PATTERNS:
+                if rx.search(line):
+                    certain.append({"file": rel, "line": i, "kind": kind})
+            for kind, rx in POSSIBLE_PATTERNS:
+                if rx.search(line):
+                    possible.append({"file": rel, "line": i, "kind": kind})
     return {"certain": certain, "possible": possible,
             "files_scanned": scanned, "truncated": truncated}
+
+
+def preflight_secrets(paths, opts):
+    """One credential gate every driver calls before spawning a worker.
+
+    `paths` lists the directories a worker process could read; `opts` carries
+    allow_secrets/no_secret_scan. Merges the per-root scans into one verdict.
+    """
+    opts = opts or {}
+    if opts.get("no_secret_scan"):
+        return {"refuse": False, "skipped": True, "certain": [], "possible": [],
+                "files_scanned": 0, "truncated": False, "reason": None}
+    certain, possible, scanned, truncated = [], [], 0, False
+    for root in paths or []:
+        r = scan_secrets(root)
+        certain += r["certain"]
+        possible += r["possible"]
+        scanned += r["files_scanned"]
+        truncated = truncated or r["truncated"]
+    scan = {"certain": certain, "possible": possible,
+            "files_scanned": scanned, "truncated": truncated}
+    refuse = bool(scan["certain"]) and not opts.get("allow_secrets")
+    reason = None
+    if refuse:
+        partial = (" The scan stopped at {} files and did NOT cover the whole tree, so "
+                   "this count is a floor, not a total.".format(scan["files_scanned"])
+                   if scan["truncated"] else "")
+        reason = ("{} credential(s) found in the tree this worker would be able "
+                  "to read. Sending them to a contributor-tier model is not "
+                  "undoable. Remove them from what the worker can read (tracked, "
+                  "seeded, linked, or ignored files in its working directory), "
+                  "or pass --allow-secrets if they are fake.{}"
+                  .format(len(scan["certain"]), partial))
+    return {"refuse": refuse, "skipped": False, "certain": certain,
+            "possible": possible, "files_scanned": scanned,
+            "truncated": truncated, "reason": reason}
 
 
 # os.killpg, os.getpgid and signal.SIGKILL are POSIX-only -- on Windows they do not
@@ -802,12 +899,12 @@ def kill_process_tree(p) -> None:
 PROMPT_ARG_MAX_BYTES = 16 * 1024
 
 
-def run_muse(cmd, prompt: str, repo: Path, events: Path, stderr: Path, timeout: int,
+def run_muse(cmd, prompt: str, cwd: Path, events: Path, stderr: Path, timeout: int,
              on_spawn=None):
     """Run one muse round to completion. Returns a dict of what the event stream said.
 
-    Run from the repo root, not the worktree: muse treats cwd as the source repository
-    and rejects a --worktree-existing path equal to it."""
+    Started IN the worktree: a --yolo process can read everything under its cwd,
+    and only the worktree is scanned, so the main repo must never be the cwd."""
     import time as _time
     started = _time.time()
     out = {"status": "completed", "reason": None, "model_actual": None,
@@ -838,7 +935,7 @@ def run_muse(cmd, prompt: str, repo: Path, events: Path, stderr: Path, timeout: 
             # it ("unknown option - fix it", measured), so `--` must precede the prompt.
             argv = [exe, *cmd[1:], "--", prompt]
         try:
-            p = subprocess.Popen(argv, cwd=str(repo), stdout=fo, stderr=fe,
+            p = subprocess.Popen(argv, cwd=str(cwd), stdout=fo, stderr=fe,
                                  start_new_session=True)
         except OSError as e:
             out["status"] = "spawn_failed"

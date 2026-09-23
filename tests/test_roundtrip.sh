@@ -32,23 +32,24 @@ RT_DIR="$LAB/v_roundtrip"
 rm -rf "$RT_DIR"; mkdir -p "$RT_DIR/bin" "$RT_DIR/musedata"
 # A muse that edits the worktree it is handed (one new line per round, so a later round's
 # patch must carry the earlier one), logs each call, and emits the terminal record. With
-# RT_MOVE_BASE set it also commits to the source repo's checked-out branch (its cwd), which
-# moves the base WHILE the worker is running.
+# RT_MOVE_BASE set it also commits to the source repo named there -- its own cwd is now
+# the worktree, so it cannot commit by accident of directory -- which moves the base
+# WHILE the worker is running.
 cat > "$RT_DIR/bin/muse" <<'STUB'
 #!/usr/bin/env bash
 wt=""; prev=""
 for a in "$@"; do
-  [ "$prev" = "--worktree-existing" ] && wt="$a"
+  [ "$prev" = "--workspace" ] && wt="$a"
   prev="$a"
 done
-[ -n "$wt" ] && [ -d "$wt" ] || { echo "stub: no --worktree-existing" >&2; exit 2; }
+[ -n "$wt" ] && [ -d "$wt" ] || { echo "stub: no --workspace" >&2; exit 2; }
 n=1
 [ -f "$wt/feature.txt" ] && n=$(( $(wc -l < "$wt/feature.txt") + 1 ))
 echo "line-$n" >> "$wt/feature.txt"
 echo "$wt" >> "$RT_STUB_LOG"
 if [ -n "${RT_MOVE_BASE:-}" ]; then
-  echo theirs > other.txt
-  git add other.txt && git -c user.email=t@l -c user.name=t commit -qm theirs >/dev/null
+  echo theirs > "$RT_MOVE_BASE/other.txt"
+  git -C "$RT_MOVE_BASE" add other.txt && git -C "$RT_MOVE_BASE" -c user.email=t@l -c user.name=t commit -qm theirs >/dev/null
 fi
 printf '{"payload":{"kind":"run_terminal","terminal":"completed","text":"ok"}}\n'
 STUB
@@ -165,7 +166,7 @@ RT_REPO2="$RT_DIR/repo2"; rt_mkrepo "$RT_REPO2"
 # ---- fleet: the base moves while the worker runs
 RT_REPO3="$RT_DIR/repo3"; rt_mkrepo "$RT_REPO3"; RT_BASE3=$(git -C "$RT_REPO3" rev-parse main)
 echo '[{"id":"f1","prompt":"add feature"}]' > "$RT_DIR/tasks.json"
-(cd "$RT_REPO3" && env RT_MOVE_BASE=1 PATH="$(shell_path "$RT_DIR/bin"):$PATH" MUSE_DATA_DIR="$RT_DIR/musedata" RT_STUB_LOG="$RT_DIR/stub3.log" \
+(cd "$RT_REPO3" && env RT_MOVE_BASE="$RT_REPO3" PATH="$(shell_path "$RT_DIR/bin"):$PATH" MUSE_DATA_DIR="$RT_DIR/musedata" RT_STUB_LOG="$RT_DIR/stub3.log" \
    python3 "$FLEET" --tasks "$RT_DIR/tasks.json" --repo "$RT_REPO3" --out "$RT_DIR/fout" \
    --worktree-root "$RT_DIR/fwt" --model stub-model --base main >/dev/null 2>"$RT_DIR/fleet.err")
 RT_FPATCH="$RT_DIR/fout/f1/patch.diff"

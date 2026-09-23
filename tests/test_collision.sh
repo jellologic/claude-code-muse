@@ -35,8 +35,8 @@ rm -rf "$CO"; mkdir -p "$CO/bin" "$CO/data" "$CO/wt" "$CO/out"
 cat > "$CO/bin/muse" <<'STUB'
 #!/usr/bin/env bash
 wt=""; prev=""
-for a in "$@"; do [ "$prev" = "--worktree-existing" ] && wt="$a"; prev="$a"; done
-[ -n "$wt" ] && [ -d "$wt" ] || { echo "stub: no --worktree-existing" >&2; exit 2; }
+for a in "$@"; do [ "$prev" = "--workspace" ] && wt="$a"; prev="$a"; done
+[ -n "$wt" ] && [ -d "$wt" ] || { echo "stub: no --workspace" >&2; exit 2; }
 echo call >> "$CO_STUB_LOG"
 echo "call-$(wc -l < "$CO_STUB_LOG" | tr -d ' ')" > "$wt/feature.txt"
 printf '{"payload":{"kind":"run_terminal","terminal":"completed","text":"ok"}}\n'

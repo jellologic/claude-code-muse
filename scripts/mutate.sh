@@ -15,7 +15,7 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # Later PRs append their fixed mutant ids here as their checks land, and never remove
 # one, so a regression that re-opens a once-killed hole fails the run again.
-MUST_KILL="M01 M02 M03 M04 M08 M09 M11 M12 M13 M15 M17"
+MUST_KILL="M01 M02 M03 M04 M05 M08 M09 M11 M12 M13 M15 M17"
 if [ -n "${MUTATE_MUST_KILL:-}" ]; then
   # Self-tests stage a failing run through the environment without touching this file.
   echo "mutate: MUST_KILL overridden by environment: $MUTATE_MUST_KILL" >&2
@@ -33,8 +33,8 @@ M = [
  ("M01", "scripts/muse_task.py", '    h = core.harvest(wt, harvest_base(st), st["excludes"], tdir / "patch.diff")', '    h = core.harvest(wt, st["base"], st["excludes"], tdir / "patch.diff")', "round harvest diffs against the ref name, not base_sha"),
  ("M02", "scripts/muse_fleet.py", '        base = git(repo, "rev-parse", "--verify", base).strip() or base', '        base = base', "fleet never pins the base to a sha"),
  ("M03", "scripts/muse_task.py", '    verified = passed and certified', '    verified = passed', "accept gate ignores certification"),
- ("M04", "scripts/muse_task.py", '        if scan["certain"] and not args.allow_secrets:', '        if scan["certain"] and args.allow_secrets:', "secret refusal inverted"),
- ("M05", "scripts/muse_core.py", '        for name in filenames:', '        for name in [n for n in filenames if not n.startswith(".")]:', "secret scan skips dotfiles, so .env is never scanned"),
+ ("M04", "scripts/muse_core.py", '    refuse = bool(scan["certain"]) and not opts.get("allow_secrets")', '    refuse = bool(scan["certain"]) and bool(opts.get("allow_secrets"))', "secret refusal inverted"),
+ ("M05", "scripts/muse_core.py", '    for f in _expand_paths(root, paths):', '    for f in [p for p in _expand_paths(root, paths) if not p.name.startswith(".")]:', "secret scan skips dotfiles, so .env is never scanned"),
  ("M06", "hooks/supervisor_stop.py", '        print("  - " + n)', '        print("  - " + n, file=sys.stderr)', "SubagentStop hook writes to stderr instead of stdout"),
  ("M07", "hooks/supervisor_stop.py", '        if task.get("verdict") == "accept" and not task.get("verified_by_supervisor"):', '        if False:', 'SubagentStop drops the "accepted without a passing check" note'),
  ("M08", "scripts/muse_task.py", '        "max_rounds": args.max_rounds,', '        "max_rounds": DEFAULT_MAX_ROUNDS,', "--max-rounds parsed but a constant stored"),

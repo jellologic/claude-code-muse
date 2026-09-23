@@ -28,7 +28,7 @@ cat > "$SG_BIN/muse" <<'STUB'
 if [ "${1:-}" = "--version" ]; then echo "muse 0.0.0"; exit 0; fi
 wt=""; prev=""
 for a in "$@"; do
-  [ "$prev" = "--worktree-existing" ] && wt="$a"
+  [ "$prev" = "--workspace" ] && wt="$a"
   prev="$a"
 done
 echo "$$" >> "$SG_STUB_LOG"

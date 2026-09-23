@@ -20,7 +20,7 @@ HV="$LAB/v_harvest35"; rm -rf "$HV"; mkdir -p "$HV/bin"
 cat > "$HV/bin/muse" <<'STUB'
 #!/usr/bin/env bash
 wt=""; prev=""
-for a in "$@"; do [ "$prev" = "--worktree-existing" ] && wt="$a"; prev="$a"; done
+for a in "$@"; do [ "$prev" = "--workspace" ] && wt="$a"; prev="$a"; done
 [ -n "$wt" ] && [ -n "${HV_ACTION:-}" ] && python3 "$HV_ACTION" "$wt"
 printf '{"payload":{"kind":"run_terminal","terminal":"completed","text":"ok"}}\n'
 STUB
